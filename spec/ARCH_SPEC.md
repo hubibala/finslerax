@@ -1,7 +1,7 @@
 # ARCH_SPEC.md: Software Architecture of HAMTools
 
-**Version:** 1.0.0
-**Date:** December 2, 2025
+**Version:** 1.1.0
+**Date:** December 6, 2025
 **Dependencies:** JAX, Equinox (optional, for clean class state), Optax
 
 ## 1. Design Philosophy
@@ -164,32 +164,20 @@ src/
     ├── fields.py         # Neural Networks for g(x) and beta(x)
     └── layers.py         # Convexity enforcement layers (Tanh, PSD)
 
-## 6. Implementation roadmap
+## 6. Implementation Status (Revised)
 
-1. Refactor base.py: Clean up Manifold definition.
+### ✅ Completed & Validated
+1.  **Geometry Core:** `src/ham/geometry/metric.py` and `zoo.py` are stable.
+    * `FinslerMetric` correctly auto-differentiates the energy to get the Spray.
+    * `Randers` metric includes `tanh` stabilization for strong winds.
+2.  **Boundary Value Solver:** `src/ham/solvers/avbd.py` (AVBD) is fully functional and tested on $S^2$ and Mesh.
 
-2. Create geometry/metric.py: Implement the generic spray using JAX VJP/JVP.
+### 🚧 In Progress
+3.  **Initial Value Solver:** `src/ham/solvers/geodesic.py`.
+    * **Goal:** Implement `exponential_map(x, v)` via RK4 integration of the Spray.
+    * **Use Case:** Generative modeling (rolling out latent trajectories).
 
-3. Create geometry/zoo.py: Port Randers from the old finsler.py to this new structure.
-
-4. Update avbd.py: Ensure it accepts a generic FinslerMetric object instead of hardcoded logic.
-
-5. Tests: Validate Euclidean spray is zero, Randers spray matches analytical Zermelo.
-
-## 7. Migration Strategy: "Cannibalize and Replatform"
-We will treat the legacy src/ham/ codebase as a reference library to populate the new HAMTools structure.
-- src/ham/geometry/finsler.py $\to$ src/geometry/zoo.py
-    - Action: Harvest Logic.
-    - Detail: Extract the RandersFactory convexity checks (specifically the tanh stabilization) and the Cholesky decomposition logic. Re-implement them within the new RandersMetric class. Discard the old class wrappers.
-- src/ham/solvers/avbd.py $\to$ src/solvers/avbd.py
-    - Action: Keep & Adapt.
-    - Detail: Copy the Primal-Dual update loop and Augmented Lagrangian logic. Refactor the function signatures to accept the new generic FinslerMetric object instead of raw energy functions.
-- src/ham/manifolds/base.py $\to$ src/geometry/manifold.py
-    - Action: Rewrite.
-    - Detail: Implement the cleaner Manifold interface defined in Section 2.1 from scratch.
-- src/ham/experiments/
-    - Action: Discard.
-    - Detail: These are task-specific and not part of the general library.
-- src/ham/models/encoder.py
-    - Action: Archive.
-    - Detail: Do not import into HAMTools.
+### 📅 Planned (ham-bio)
+4.  **Bio-Wrappers:** `src/ham/bio/`
+    * Connection to `AnnData` (single-cell data).
+    * Geometric VAE implementation.

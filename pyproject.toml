@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
 authors = [
-  { name = "HAM Research Team", email = "research@ham.dev" },
+  { name = "HAM Research Team" },
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -49,4 +49,3 @@ testpaths = [
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["ham*"]
-exclude = ["legacy*"]

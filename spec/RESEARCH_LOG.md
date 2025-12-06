@@ -43,40 +43,14 @@ This project has evolved through four distinct theoretical phases. This narrativ
 
 ## 3. Current Technical Status (v0.1)
 
-### 3.1. Validated Components
-* [cite_start]**Randers Factory:** The parameterization $\beta = \tanh(W) \cdot \text{convexity\_factor}$ successfully prevents metric collapse [cite: 33-34].
-* [cite_start]**AVBD Solver:** The Augmented Lagrangian approach converges reliably on hard constraints (Manifold + Physics) without needing projection operators [cite: 40-43].
-* [cite_start]**Zermelo Convexity:** We have mathematically proven that ensuring $\|W\|_h < 1$ is sufficient for the Legendre transform to exist [cite: 21-22].
+**3.1. Validated Components (New Additions)**
+* **Automatic Spray Generation:** We verified that `jax.grad` and `jax.hessian` can solve the Euler-Lagrange linear system: $g_{ij} \ddot{x}^j + \dots = 0$ in real-time. This eliminates the need for manual Christoffel symbol derivation.
+* **Convexity Protection:** The `tanh` gating on the Randers wind vector $W$ prevents the metric from becoming indefinite ($F^2 < 0$), ensuring simulation stability even with untrained neural networks.
 
-### 3.2. Known Deficiencies (To Be Fixed in v1.0)
-* **Implicit Geometry:** Spray coefficients and curvatures are computed implicitly or ad-hoc. They are not exposed as API calls.
-* **Mesh Incompatibility:** The current implementation assumes continuous manifolds (Spheres/Planes). It cannot handle discrete meshes (Stanford Bunny).
-* **Homogeneity Violations:** The neural networks currently do not strictly enforce $F(x, \lambda v) = \lambda F(x, v)$, leading to potential drift in the Berwald connection.
-
----
-
-## 4. The Research Plan (1 Year)
-
-### Phase 1: The "Finsler-JAX" Library (Months 1-3)
-**Goal:** A pip-installable library that rivals `geomstats`.
-* **Objective:** Implement `FinslerMetric`, `Spray`, and `BerwaldTransport` as generic JAX operators.
-* **Validation:** Reproduce the **Zermelo Navigation** analytical solution on a flat plane.
-* **Deliverable:** `HAMTools` v0.1 (Continuous only).
-
-### Phase 2: Discrete Geometry (Months 4-6)
-**Goal:** Run Finsler physics on triangular meshes.
-* **Objective:** Adapt `AVBDSolver` to work on graph edges.
-* **Validation:** Compare "Neural Geodesics" against Dijkstra/Heat Method on dense graphs.
-* **Deliverable:** Mesh support in `HAMTools`.
-
-### Phase 3: Deep Finsler Learning (Months 7-9)
-**Goal:** Learn the geometry from data.
-* **Objective:** Train a `LearnedFinsler` metric (Neural Field) to reconstruct the metric of a known surface from observed trajectories.
-* **Deliverable:** "Inverse Reinforcement Learning" demo using Finsler geometry.
-
-### Phase 4: Publication (Months 10-12)
-**Goal:** "HAMTools: A Differentiable Library for Asymmetric Manifold Learning."
-* **Focus:** The library as the contribution, with the "World Model" as the flagship application.
+**3.2. Known Deficiencies (Updated)**
+* **SOLVED:** Implicit Geometry (Fixed by `metric.spray`).
+* **SOLVED:** Mesh Incompatibility (Fixed by `PiecewiseConstantFinsler` and `DiscreteRanders` in `zoo.py`).
+* **REMAINING:** `ham-bio` integration (Connecting RNA velocity vectors to the Finsler tangent bundle).
 
 ---
 
