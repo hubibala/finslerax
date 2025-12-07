@@ -25,6 +25,9 @@ dependencies = [
     "equinox>=0.10.0",
     "optax>=0.1.0",
     "numpy",
+    "anndata",
+    "scanpy",
+    "scvelo",
 ]
 
 [project.optional-dependencies]

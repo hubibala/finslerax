@@ -21,11 +21,9 @@ class AVBDSolver:
     """
     Augmented Vertex Block Descent (AVBD) Solver.
     
-    Port of the C++ implementation from LegitParticles.
     Minimizes Action S[x] while adaptively hardening constraints.
     
     Ref: 'Augmented Vertex Block Descent' (SIGGRAPH 2025)
-    Ref: src/ECS/Systems/VBDPhysics.cpp
     """
     def __init__(self, step_size: float = 0.01, beta: float = 10.0, 
                  iterations: int = 100, tol: float = 1e-6):
@@ -95,7 +93,6 @@ class AVBDSolver:
                     for i, c_fn in enumerate(constraints):
                         val = c_fn(x)
                         # ALM: lambda*C + 0.5*k*C^2
-                        # Matches C++ GetLinkEnergyDerivatives2 logic
                         cost += lam[i] * val + 0.5 * k[i] * (val**2)
                     return cost
                 
@@ -109,13 +106,13 @@ class AVBDSolver:
         @jax.jit
         def update_step(i, s: SolverState):
             # --- A. Primal Update (Physics) ---
-            # Approximating the C++ 'ProjectVBD' Newton step with Gradient Descent
+            # Approximating the Newton step with Gradient Descent
             # (Newton is expensive for general neural metrics, GD is robust)
             loss, grads = grad_fn(s.path, s.lambdas, s.stiffness)
             p_new = s.path - self.step_size * grads
             
             # --- B. Dual Update (Constraint Hardening) ---
-            # Matches C++ 'UpdateVBDConstraints' logic
+
             if num_constraints > 0:
                 def get_c(pt):
                     return jnp.stack([c(pt) for c in constraints])

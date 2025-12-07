@@ -70,66 +70,6 @@ class Randers(FinslerMetric):
         cost = (jnp.sqrt(jnp.maximum(discriminant, 1e-12)) - W_dot_v) / lam
         return cost
 
-class PiecewiseConstantFinsler(FinslerMetric):
-    """
-    Metric on a mesh.
-    If smooth=False: Cost is constant per face. Gradient is 0 (Optimizer won't work!).
-    If smooth=True:  Cost is interpolated from vertices. Gradient exists.
-    """
-    def __init__(self, mesh: TriangularMesh, face_costs: jnp.ndarray, smooth: bool = True):
-        super().__init__(mesh)
-        if not isinstance(mesh, TriangularMesh):
-            raise ValueError("Requires TriangularMesh.")
-        self.face_costs = face_costs
-        self.smooth = smooth
-        
-        if self.smooth:
-            # Precompute vertex costs by averaging adjacent faces
-            N_v = mesh.vertices.shape[0]
-            v_costs = jnp.zeros(N_v)
-            counts = jnp.zeros(N_v)
-            
-            # Expand face_costs for each vertex of the face
-            flat_indices = mesh.faces.flatten()
-            repeated_costs = jnp.repeat(face_costs, 3)
-            
-            v_costs = v_costs.at[flat_indices].add(repeated_costs)
-            counts = counts.at[flat_indices].add(1.0)
-            
-            self.vertex_costs = v_costs / jnp.maximum(counts, 1.0)
-        else:
-            self.vertex_costs = None
-
-    def metric_fn(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
-        face_idx = self.manifold.get_face_index(x)
-        
-        if self.smooth:
-            # Interpolate cost using barycentric coordinates
-            tri = self.manifold.triangles[face_idx]
-            a, b, c = tri[0], tri[1], tri[2]
-            
-            ab, ac, ap = b - a, c - a, x - a
-            d1, d2 = jnp.dot(ab, ap), jnp.dot(ac, ap)
-            d3, d4, d5 = jnp.dot(ab, ab), jnp.dot(ab, ac), jnp.dot(ac, ac)
-            
-            det = jnp.maximum(d3 * d5 - d4 * d4, 1e-12)
-            s = (d5 * d1 - d4 * d2) / det
-            t = (d3 * d2 - d4 * d1) / det
-            w = 1.0 - s - t
-            
-            face_verts = self.manifold.faces[face_idx]
-            c_a = self.vertex_costs[face_verts[0]]
-            c_b = self.vertex_costs[face_verts[1]]
-            c_c = self.vertex_costs[face_verts[2]]
-            
-            cost = w * c_a + s * c_b + t * c_c
-            cost = jnp.maximum(cost, 1e-2)
-            
-        else:
-            cost = self.face_costs[face_idx]
-            
-        return cost * safe_norm(v)
-
 class DiscreteRanders(FinslerMetric):
     """
     Anisotropic Mesh Metric (Wind per face).
