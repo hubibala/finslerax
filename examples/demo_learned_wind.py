@@ -8,7 +8,6 @@ from jax import config
 config.update("jax_enable_x64", True)
 
 from ham.geometry import Sphere
-from ham.geometry.zoo import Randers
 from ham.models.learned import NeuralRanders
 from ham.sim.fields import rossby_haurwitz
 from ham.vis import setup_3d_plot, plot_sphere, plot_vector_field, generate_icosphere
@@ -23,9 +22,7 @@ def main():
     sphere = Sphere(radius=1.0)
     true_wind_fn = rossby_haurwitz(R=3, omega=1.0)
     
-    h_true = lambda x: jnp.eye(3)
     w_true = lambda x: 0.8 * true_wind_fn(x) # True magnitude is 0.8
-    metric_true = Randers(sphere, h_true, w_true)
 
     # 2. Data Generation
     print("Generating trajectories...")
