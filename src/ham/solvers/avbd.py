@@ -88,12 +88,9 @@ class AVBDSolver:
             x      = full_path[idx + 1]       # the point we're updating
             
             # Indices
-            idx_prev = idx
-            idx_curr = idx + 1
             idx_next = idx + 2
             
             # Masks (static-friendly)
-            has_prev = idx_prev >= 0                     # always true here
             has_next = idx_next < n_full
             
             # Incoming velocity always exists
