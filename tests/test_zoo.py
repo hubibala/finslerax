@@ -17,6 +17,7 @@ class FlatPlane(Manifold):
     def intrinsic_dim(self): return 2
     def project(self, x): return x
     def to_tangent(self, x, v): return v
+    def retract(self, x, delta): return x + delta
     def random_sample(self, key, shape): 
         return jax.random.normal(key, shape + (2,))
 

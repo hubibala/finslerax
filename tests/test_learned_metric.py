@@ -13,6 +13,7 @@ class MockManifold(Manifold):
     def intrinsic_dim(self): return 3
     def project(self, x): return x
     def to_tangent(self, x, v): return v
+    def retract(self, x, v): return x + v
     def random_sample(self, key, shape): 
         return jax.random.normal(key, shape + (3,))
 

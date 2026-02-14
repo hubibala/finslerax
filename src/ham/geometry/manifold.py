@@ -58,6 +58,22 @@ class Manifold(ABC):
             v_proj: Vector in T_x M.
         """
         pass
+
+    @abstractmethod
+    def retract(self, x: jnp.ndarray, delta: jnp.ndarray) -> jnp.ndarray:
+        """
+        Retraction: maps a tangent vector delta ∈ T_x M back to a point on the manifold.
+        
+        Should satisfy:
+        retract(x, 0) = x
+        D(retract)(x,0) [·] = Id  (first-order approximation of exponential map)
+        
+        Common simple choices:
+        - Project(x + delta)   (projected retraction — cheap but not always great)
+        - Exponential map approx (Euler, Cayley, etc.)
+        - Closed-form for symmetric spaces (sphere, Stiefel, etc.)
+        """
+        pass
     
     @abstractmethod
     def random_sample(self, key: jax.Array, shape: Tuple[int, ...]) -> jnp.ndarray:

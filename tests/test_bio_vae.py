@@ -18,6 +18,7 @@ class MockManifold(Manifold):
     def intrinsic_dim(self): return 3
     def project(self, x): return x / (jnp.linalg.norm(x) + 1e-12)
     def to_tangent(self, x, v): return v - jnp.dot(v, x) * x
+    def retract(self, x, v): return x + v
     def random_sample(self, key, shape): return jax.random.normal(key, shape + (3,))
 
 class EuclideanMetric(FinslerMetric):

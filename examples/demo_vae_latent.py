@@ -30,6 +30,10 @@ class LatentPlane(Manifold):
     def to_tangent(self, x, v): 
         # Tangent space of R^2 is R^2
         return v
+    
+    def retract(self, x, delta): 
+        # Retraction for R^2 is just addition
+        return x + delta
         
     def random_sample(self, key, shape):
         return jax.random.normal(key, shape + (2,))

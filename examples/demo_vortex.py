@@ -42,7 +42,7 @@ def main():
 
     print("Solving 'Relaxed' (Low Beta)...")
     # beta=0.5: Very slow hardening. Allows massive lateral movement.
-    solver_relaxed = AVBDSolver(step_size=0.05, beta=20, iterations=10000) 
+    solver_relaxed = AVBDSolver(step_size=0.05, beta=0.5, iterations=10000) 
     traj_relaxed = solver_relaxed.solve(metric, start, end, n_steps=40)
 
     # 4. Visualization

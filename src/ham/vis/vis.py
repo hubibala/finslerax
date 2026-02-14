@@ -3,7 +3,7 @@ from mpl_toolkits.mplot3d import Axes3D
 import numpy as np
 import jax.numpy as jnp
 
-def setup_3d_plot():
+def setup_3d_plot(elev=None, azim=None):
     fig = plt.figure(figsize=(12, 10))
     ax = fig.add_subplot(111, projection='3d')
     # Make panes transparent
@@ -11,6 +11,10 @@ def setup_3d_plot():
     ax.yaxis.pane.fill = False
     ax.zaxis.pane.fill = False
     ax.set_xlabel('X'); ax.set_ylabel('Y'); ax.set_zlabel('Z')
+    
+    if elev is not None or azim is not None:
+        ax.view_init(elev=elev, azim=azim)
+        
     return fig, ax
 
 def plot_sphere(ax, radius=1.0, alpha=0.1, color='gray'):
@@ -50,7 +54,7 @@ def plot_trajectory(ax, traj, color='red', label=None, **kwargs):
     ax.scatter(xs[0,0], xs[0,1], xs[0,2], color=color, s=20, alpha=1.0)
 # ----------------------
 
-def plot_indicatrices(ax, metric, points, scale=0.15, n_theta=40, color='purple'):
+def plot_indicatrices(ax, metric, points, scale=0.15, n_theta=40, color='purple', alpha=0.8, **kwargs):
     if len(points) == 0: return
     for p in points:
         n = p / (np.linalg.norm(p) + 1e-8)
@@ -68,7 +72,7 @@ def plot_indicatrices(ax, metric, points, scale=0.15, n_theta=40, color='purple'
         vs = us / (costs[:, None] + 1e-8)
         loop = p + scale * vs
         loop = np.vstack([loop, loop[0]])
-        ax.plot(loop[:,0], loop[:,1], loop[:,2], color=color, alpha=0.8, linewidth=1.5)
+        ax.plot(loop[:,0], loop[:,1], loop[:,2], color=color, alpha=alpha, **kwargs)
 
 def generate_icosphere(radius=1.0, subdivisions=3):
     # (Implementation remains the same as before)

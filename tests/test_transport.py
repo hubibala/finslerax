@@ -19,6 +19,7 @@ class FlatPlane(Manifold):
     def intrinsic_dim(self): return 2
     def project(self, x): return x
     def to_tangent(self, x, v): return v
+    def retract(self, x, delta): return x + delta
     def random_sample(self, key, shape): 
         return jax.random.normal(key, shape + (2,))
 
@@ -31,6 +32,7 @@ class Sphere(Manifold):
     def to_tangent(self, x, v):
         x_unit = x / jnp.linalg.norm(x)
         return v - jnp.dot(v, x_unit) * x_unit
+    def retract(self, x, delta): return x + delta
     def random_sample(self, key, shape):
         x = jax.random.normal(key, shape + (3,))
         return x / jnp.linalg.norm(x, axis=-1, keepdims=True)

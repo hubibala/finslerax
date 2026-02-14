@@ -85,6 +85,11 @@ class TriangularMesh(Manifold):
         
         return jnp.dot(v, e1) * e1 + jnp.dot(v, e2) * e2
 
+    @partial(jax.jit, static_argnums=(0,))
+    def retract(self, x: jnp.ndarray, delta: jnp.ndarray) -> jnp.ndarray:
+        candidate = x + delta
+        return self.project(candidate)
+
     def random_sample(self, key: jax.Array, shape: Tuple[int, ...]) -> jnp.ndarray:
         # (Same area-weighted logic as verified in tests)
         A, B, C = self.triangles[:, 0], self.triangles[:, 1], self.triangles[:, 2]

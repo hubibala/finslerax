@@ -26,7 +26,7 @@ metric_riem = Randers(sphere_cont, h_net, lambda x: jnp.zeros(3))
 start = jnp.array([0.0, 1.0, 0.0])
 end   = jnp.array([0.0,  0.0, 1.0])
 
-solver = AVBDSolver(step_size=0.05, beta=10.0, iterations=200, tol=1e-6)
+solver = AVBDSolver(step_size=0.05, beta=10.0, iterations=500, tol=1e-6)
 
 print("Solving Riemannian (Great Circle)...")
 traj_riem = solver.solve(metric_riem, start, end, n_steps=40)
@@ -43,7 +43,7 @@ print(f"Energy Randers path:    {e_rand:.4f}")
 
 # --- 3. Discrete Physics ---
 print("Generating Icosphere...")
-verts, faces = generate_icosphere(radius=1.0, subdivisions=3)
+verts, faces = generate_icosphere(radius=1.0, subdivisions=2)
 mesh_discrete = TriangularMesh(verts, faces)
 
 print("Sampling Wind field onto Mesh Faces...")

@@ -58,7 +58,7 @@ def main():
             I = jnp.eye(3)
             loss_h_reg = jnp.mean((H_vals - I)**2)
             
-            # C. Jacobian Regularization (The Smoother) !! NEW !!
+            # C. Jacobian Regularization (The Smoother)
             # We calculate dW/dx to penalize rapid changes in magnitude/direction
             def get_w(pt):
                 _, W, _ = m._get_zermelo_data(pt)
@@ -103,6 +103,26 @@ def main():
     
     plot_vector_field(ax, grid_pts, vecs_true, color='cyan', scale=0.15, alpha=0.3, label='Truth')
     plot_vector_field(ax, grid_pts, vecs_pred, color='magenta', scale=0.15, alpha=0.9, label='Learned (Smoothed)')
+    # Training set
+    cos_sim_train = jnp.mean(
+        jnp.sum(vecs_true * vecs_pred, axis=-1) /
+        (jnp.linalg.norm(vecs_true, axis=-1) * jnp.linalg.norm(vecs_pred, axis=-1) + 1e-8)
+    )
+    mse_train = jnp.mean((vecs_true - vecs_pred)**2)
+
+    # Held-out set
+    X_test = jax.vmap(sphere.random_sample, in_axes=(0, None))(jax.random.split(key, 256), ())
+    V_test_true = jax.vmap(w_true)(X_test)
+    V_test_pred = jax.vmap(get_learned_wind)(X_test)
+    
+    cos_sim_test = jnp.mean(
+        jnp.sum(V_test_true * V_test_pred, axis=-1) /
+        (jnp.linalg.norm(V_test_true, axis=-1) * jnp.linalg.norm(V_test_pred, axis=-1) + 1e-8)
+    )
+    mse_test = jnp.mean((V_test_true - V_test_pred)**2)
+
+    print(f"Training set   → Cosine sim: {cos_sim_train:.4f}   MSE: {mse_train:.6f}")
+    print(f"Held-out set   → Cosine sim: {cos_sim_test:.4f}   MSE: {mse_test:.6f}")
     
     ax.legend()
     ax.set_title("Inverse Problem: Smoothed\nMagenta should match Cyan lengths")
