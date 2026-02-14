@@ -4,72 +4,63 @@ import equinox as eqx
 from typing import Tuple, Any
 
 from ham.geometry.metric import FinslerMetric
+from ham.geometry.surfaces import Hyperboloid
 
-def safe_norm(x, axis=-1, keepdims=False, eps=1e-12):
-    n = jnp.linalg.norm(x, axis=axis, keepdims=keepdims)
-    return jnp.maximum(n, eps)
-
-def normalize(x, axis=-1, eps=1e-12):
-    return x / safe_norm(x, axis=axis, keepdims=True, eps=eps)
-
-class PowerSpherical(eqx.Module):
+class WrappedHyperbolicNormal(eqx.Module):
     """
-    Power Spherical distribution with corrected broadcasting for JAX.
+    Wrapped Normal distribution on the Hyperboloid.
+    Defined by a mean mu (on H^n) and a diagonal scale sigma (in tangent space).
     """
-    mean: jnp.ndarray  
-    conc: jnp.ndarray  
+    mean: jnp.ndarray  # Shape: (..., D+1)
+    scale: jnp.ndarray # Shape: (..., D) - Diagonal covariance in tangent space
+    manifold: Hyperboloid
 
-    def __init__(self, mean: jnp.ndarray, conc: jnp.ndarray):
-        self.mean = normalize(mean, axis=-1)
-        self.conc = conc
+    def __init__(self, mean: jnp.ndarray, scale: jnp.ndarray, manifold: Hyperboloid):
+        self.mean = manifold.project(mean)
+        self.scale = scale
+        self.manifold = manifold
 
     def sample(self, key: jax.random.PRNGKey, shape: Tuple[int] = ()) -> jnp.ndarray:
-        d = self.mean.shape[-1]
-        k1, k2 = jax.random.split(key)
+        # 1. Sample v ~ N(0, scale) in the tangent space of the ORIGIN
+        # Origin O = (1, 0, ..., 0)
+        # Tangent at O is just (0, v1, v2, ...) ~ R^D
+        d = self.manifold.intrinsic_dim
+        v_flat = jax.random.normal(key, shape + (d,)) * self.scale
         
-        # 1. Sample 't' (marginal)
-        alpha = (d - 1) / 2.0 + self.conc
-        beta = (d - 1) / 2.0
-        z = jax.random.beta(k1, alpha, beta, shape=shape)
-        t = 2.0 * z - 1.0  
+        # Embed v into ambient space at Origin: (0, v_flat)
+        v_origin = jnp.concatenate([jnp.zeros(shape + (1,)), v_flat], axis=-1)
         
-        # 2. Sample 'v' (conditional)
-        v_raw = jax.random.normal(k2, shape + (d - 1,))
-        v = normalize(v_raw, axis=-1)
+        # 2. Transport v from Origin to Mean
+        # We use parallel transport along the geodesic from Origin to self.mean
+        origin = jnp.zeros_like(self.mean)
+        origin = origin.at[..., 0].set(1.0)
         
-        # 3. Construct 'y' in canonical frame
-        factor = jnp.sqrt(jnp.maximum(1.0 - t**2, 1e-12))
-        y = jnp.concatenate([t[..., None], factor[..., None] * v], axis=-1)
+        v_at_mean = self.manifold.parallel_transport(origin, self.mean, v_origin)
         
-        # 4. Rotate 'y' to align with 'self.mean'
-        e0 = jnp.zeros_like(self.mean)
-        e0 = e0.at[0].set(1.0)
-        u = e0 - self.mean
-        u_norm_sq = jnp.sum(u**2)
-        
-        def reflect(y_in):
-            dot = jnp.sum(u * y_in, axis=-1, keepdims=True)
-            scale = 2.0 * (dot / (u_norm_sq + 1e-12))
-            return y_in - scale * u
-            
-        sample = jax.lax.cond(
-            u_norm_sq < 1e-12,
-            lambda _: y,
-            lambda _: reflect(y),
-            operand=None
-        )
-        return sample
+        # 3. Apply Exponential Map at Mean
+        z = self.manifold.exp_map(self.mean, v_at_mean)
+        return z
 
-    def kl_divergence_uniform(self) -> jnp.ndarray:
-        return self.conc
+    def kl_divergence_std_normal(self) -> jnp.ndarray:
+        """
+        Computes KL(q(z)||p(z)) where p(z) is standard Wrapped Normal at Origin.
+        Approximation: KL is computed between the tangent space Gaussians.
+        """
+        # KL between N(0, scale) and N(0, 1)
+        # sum(log(1/sigma) + (sigma^2 + 0^2)/(2*1) - 0.5)
+        # = sum(-log(sigma) + sigma^2/2 - 0.5)
+        
+        kl = -jnp.log(self.scale + 1e-6) + (self.scale**2) / 2.0 - 0.5
+        return jnp.sum(kl, axis=-1)
 
 class GeometricVAE(eqx.Module):
     """
-    Relativistic VAE with Zermelo Control Dynamics.
+    Hyperbolic VAE with Zermelo Control Dynamics.
     """
     encoder_net: eqx.Module
     decoder_net: eqx.Module
     metric: FinslerMetric 
+    manifold: Hyperboloid
     
     data_dim: int = eqx.field(static=True)
     latent_dim: int = eqx.field(static=True) 
@@ -78,18 +69,31 @@ class GeometricVAE(eqx.Module):
         self.data_dim = data_dim
         self.latent_dim = latent_dim
         self.metric = metric
+        self.manifold = Hyperboloid(intrinsic_dim=latent_dim)
         
         k1, k2 = jax.random.split(key)
-        self.encoder_net = eqx.nn.MLP(data_dim, latent_dim + 1, 128, 3, activation=jax.nn.gelu, key=k1)
-        self.decoder_net = eqx.nn.MLP(latent_dim, data_dim, 128, 3, activation=jax.nn.gelu, key=k2)
+        
+        # Encoder: Outputs (D+1) for mean + (D) for scale
+        # We need ambient dim for the mean because we project it.
+        self.encoder_net = eqx.nn.MLP(data_dim, (latent_dim + 1) + latent_dim, 128, 3, activation=jax.nn.gelu, key=k1)
+        
+        # Decoder: Takes (D+1) [hyperboloid point] -> Data
+        self.decoder_net = eqx.nn.MLP(latent_dim + 1, data_dim, 128, 3, activation=jax.nn.gelu, key=k2)
 
     def _get_dist(self, x):
         out = self.encoder_net(x)
-        mu_raw = out[:self.latent_dim]
-        kappa_raw = out[self.latent_dim:]
-        mu = normalize(mu_raw) 
-        kappa = jax.nn.softplus(kappa_raw)[0] + 1.0
-        return PowerSpherical(mu, kappa)
+        
+        # Split output
+        mu_raw = out[:self.latent_dim + 1]
+        log_scale = out[self.latent_dim + 1:]
+        
+        # 1. Project mean to Hyperboloid
+        mu = self.manifold.project(mu_raw)
+        
+        # 2. Scale is strictly positive
+        scale = jax.nn.softplus(log_scale) + 1e-4
+        
+        return WrappedHyperbolicNormal(mu, scale, self.manifold)
 
     def encode(self, x, key):
         dist = self._get_dist(x)
@@ -101,14 +105,16 @@ class GeometricVAE(eqx.Module):
     def project_control(self, x, v_rna):
         """
         Projects RNA velocity (Control Action) into latent space.
-        Returns u_lat (Control Vector).
+        Uses JVP to map dx -> dz.
         """
         def mean_fn(x_in):
-            out = self.encoder_net(x_in)
-            mu_raw = out[:self.latent_dim]
-            return normalize(mu_raw)
+            dist = self._get_dist(x_in)
+            return dist.mean
 
         z_mean, u_lat = jax.jvp(mean_fn, (x,), (v_rna,))
+        
+        # u_lat is in the ambient space. Ensure it's tangent to z_mean.
+        u_lat = self.manifold.to_tangent(z_mean, u_lat)
         return z_mean, u_lat
 
     def loss_fn(self, x, v_rna, key):
@@ -118,7 +124,7 @@ class GeometricVAE(eqx.Module):
         x_rec = self.decode(z_sample)
         
         recon_loss = jnp.mean((x - x_rec)**2)
-        kl_loss = dist.kl_divergence_uniform()
+        kl_loss = jnp.mean(dist.kl_divergence_std_normal())
         
         # 2. Control Dynamics (Zermelo Navigation)
         z_mean, u_lat = self.project_control(x, v_rna)
@@ -132,15 +138,25 @@ class GeometricVAE(eqx.Module):
         dot_z = u_lat + W
         
         # 3. Zermelo Alignment (Symmetry Breaker)
-        # We maximize the alignment between Wind W and Control u
-        w_dir = normalize(W)
-        v_dir = normalize(u_lat)
-        # Loss is negative dot product (minimize to align)
-        align_loss = -jnp.dot(w_dir, v_dir)
+        # Minimize angle between Wind and Velocity
+        # Note: We must use Minkowski inner product for alignment? 
+        # Actually, for "direction", cosine similarity in the ambient embedding 
+        # is usually sufficient and more stable for optimization.
+        # But let's use the proper Minkowski norm for normalization.
+        
+        norm_w = self.manifold._minkowski_norm(W)
+        norm_v = self.manifold._minkowski_norm(u_lat)
+        
+        # Avoid div by zero
+        w_dir = W / jnp.maximum(norm_w, 1e-6)[..., None]
+        v_dir = u_lat / jnp.maximum(norm_v, 1e-6)[..., None]
+        
+        # Alignment = -<W_dir, V_dir>_L
+        align_loss = -self.manifold._minkowski_dot(w_dir, v_dir)
 
         # 4. Geodesic Spray Loss
-        # Minimize the fictitious force on the resultant path
         spray_vec = self.metric.spray(z_mean, dot_z)
+        # Norm of the spray vector (acceleration)
         spray_norm = self.metric.inner_product(z_mean, dot_z, spray_vec, spray_vec)
         
         # Weights
@@ -149,5 +165,4 @@ class GeometricVAE(eqx.Module):
                       0.1 * align_loss + 
                       1e-3 * spray_norm)
         
-        # EXPOSE ALL STATS
         return total_loss, (recon_loss, kl_loss, spray_norm, align_loss)
