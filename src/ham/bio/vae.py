@@ -4,105 +4,150 @@ import equinox as eqx
 from typing import Tuple, Any
 
 from ham.geometry.metric import FinslerMetric
-from ham.solvers.geodesic import ExponentialMap
+
+def safe_norm(x, axis=-1, keepdims=False, eps=1e-12):
+    n = jnp.linalg.norm(x, axis=axis, keepdims=keepdims)
+    return jnp.maximum(n, eps)
+
+def normalize(x, axis=-1, eps=1e-12):
+    return x / safe_norm(x, axis=axis, keepdims=True, eps=eps)
+
+class PowerSpherical(eqx.Module):
+    """
+    Power Spherical distribution with corrected broadcasting for JAX.
+    """
+    mean: jnp.ndarray  
+    conc: jnp.ndarray  
+
+    def __init__(self, mean: jnp.ndarray, conc: jnp.ndarray):
+        self.mean = normalize(mean, axis=-1)
+        self.conc = conc
+
+    def sample(self, key: jax.random.PRNGKey, shape: Tuple[int] = ()) -> jnp.ndarray:
+        d = self.mean.shape[-1]
+        k1, k2 = jax.random.split(key)
+        
+        # 1. Sample 't' (marginal)
+        alpha = (d - 1) / 2.0 + self.conc
+        beta = (d - 1) / 2.0
+        z = jax.random.beta(k1, alpha, beta, shape=shape)
+        t = 2.0 * z - 1.0  
+        
+        # 2. Sample 'v' (conditional)
+        v_raw = jax.random.normal(k2, shape + (d - 1,))
+        v = normalize(v_raw, axis=-1)
+        
+        # 3. Construct 'y' in canonical frame
+        factor = jnp.sqrt(jnp.maximum(1.0 - t**2, 1e-12))
+        y = jnp.concatenate([t[..., None], factor[..., None] * v], axis=-1)
+        
+        # 4. Rotate 'y' to align with 'self.mean'
+        e0 = jnp.zeros_like(self.mean)
+        e0 = e0.at[0].set(1.0)
+        u = e0 - self.mean
+        u_norm_sq = jnp.sum(u**2)
+        
+        def reflect(y_in):
+            dot = jnp.sum(u * y_in, axis=-1, keepdims=True)
+            scale = 2.0 * (dot / (u_norm_sq + 1e-12))
+            return y_in - scale * u
+            
+        sample = jax.lax.cond(
+            u_norm_sq < 1e-12,
+            lambda _: y,
+            lambda _: reflect(y),
+            operand=None
+        )
+        return sample
+
+    def kl_divergence_uniform(self) -> jnp.ndarray:
+        return self.conc
 
 class GeometricVAE(eqx.Module):
     """
-    A VAE that JOINTLY learns the Encoder, Decoder, and the Finsler Metric.
+    Relativistic VAE with Zermelo Control Dynamics.
     """
     encoder_net: eqx.Module
     decoder_net: eqx.Module
-    
-    # Learnable Metric
     metric: FinslerMetric 
     
-    # Static Configuration
-    solver: ExponentialMap = eqx.field(static=True)
-    data_dim: int = eqx.field(static=True)    # <--- ADDED
-    latent_dim: int = eqx.field(static=True)  # <--- ADDED
+    data_dim: int = eqx.field(static=True)
+    latent_dim: int = eqx.field(static=True) 
 
-    def __init__(self, 
-                 data_dim: int, 
-                 latent_dim: int, 
-                 metric: FinslerMetric, 
-                 key: jax.random.PRNGKey):
-        
-        self.data_dim = data_dim      # <--- ASSIGNED
-        self.latent_dim = latent_dim  # <--- ASSIGNED
+    def __init__(self, data_dim, latent_dim, metric, key):
+        self.data_dim = data_dim
+        self.latent_dim = latent_dim
+        self.metric = metric
         
         k1, k2 = jax.random.split(key)
-        
-        # Encoder: Data -> (z, v, logvar)
-        self.encoder_net = eqx.nn.MLP(in_size=data_dim, out_size=latent_dim * 3, width_size=64, depth=3, key=k1)
-        
-        # Decoder: z -> Data
-        self.decoder_net = eqx.nn.MLP(in_size=latent_dim, out_size=data_dim, width_size=64, depth=3, key=k2)
-        
-        self.metric = metric
-        # Fast solver for training loop (few steps)
-        self.solver = ExponentialMap(step_size=0.1, max_steps=10)
+        self.encoder_net = eqx.nn.MLP(data_dim, latent_dim + 1, 128, 3, activation=jax.nn.gelu, key=k1)
+        self.decoder_net = eqx.nn.MLP(latent_dim, data_dim, 128, 3, activation=jax.nn.gelu, key=k2)
 
-    def encode(self, x: jnp.ndarray, key: jax.random.PRNGKey) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    def _get_dist(self, x):
         out = self.encoder_net(x)
-        size = out.shape[0] // 3
-        
-        mu = out[:size]
-        v_pred = out[size:2*size]
-        logvar = out[2*size:]
-        
-        # Reparameterization
-        std = jnp.exp(0.5 * logvar)
-        eps = jax.random.normal(key, mu.shape)
-        z_sample = mu + eps * std
-        
-        # Manifold Projection
-        z_proj = self.metric.manifold.project(z_sample)
-        v_proj = self.metric.manifold.to_tangent(z_proj, v_pred)
-        
-        return z_proj, v_proj, logvar
+        mu_raw = out[:self.latent_dim]
+        kappa_raw = out[self.latent_dim:]
+        mu = normalize(mu_raw) 
+        kappa = jax.nn.softplus(kappa_raw)[0] + 1.0
+        return PowerSpherical(mu, kappa)
 
-    def decode(self, z: jnp.ndarray) -> jnp.ndarray:
+    def encode(self, x, key):
+        dist = self._get_dist(x)
+        return dist.sample(key)
+
+    def decode(self, z):
         return self.decoder_net(z)
 
-    def predict_trajectory(self, x: jnp.ndarray, key: jax.random.PRNGKey, steps: int = 5):
+    def project_control(self, x, v_rna):
         """
-        Forecasting: What will this cell look like in the future?
+        Projects RNA velocity (Control Action) into latent space.
+        Returns u_lat (Control Vector).
         """
-        z, v, _ = self.encode(x, key)
-        
-        # Create a temporary solver for the rollout duration
-        dt = 1.0 / steps
-        rollout_solver = ExponentialMap(step_size=dt, max_steps=steps)
-        
-        # Integrate Geodesic: z(t) using the LEARNED metric
-        traj_z, _ = rollout_solver.trace(self.metric, z, v)
-        
-        # Decode trajectory: x(t)
-        traj_x = jax.vmap(self.decode)(traj_z)
-        
-        return traj_x
+        def mean_fn(x_in):
+            out = self.encoder_net(x_in)
+            mu_raw = out[:self.latent_dim]
+            return normalize(mu_raw)
 
-    def loss_fn(self, x: jnp.ndarray, key: jax.random.PRNGKey):
-        z, v, logvar = self.encode(x, key)
-        x_rec = self.decode(z)
+        z_mean, u_lat = jax.jvp(mean_fn, (x,), (v_rna,))
+        return z_mean, u_lat
+
+    def loss_fn(self, x, v_rna, key):
+        # 1. VAE Pass
+        dist = self._get_dist(x)
+        z_sample = dist.sample(key)
+        x_rec = self.decode(z_sample)
         
-        # 1. Reconstruction Loss
         recon_loss = jnp.mean((x - x_rec)**2)
+        kl_loss = dist.kl_divergence_uniform()
         
-        # 2. KL Divergence
-        kl_loss = -0.5 * jnp.sum(1 + logvar - jnp.square(z) - jnp.exp(logvar))
+        # 2. Control Dynamics (Zermelo Navigation)
+        z_mean, u_lat = self.project_control(x, v_rna)
         
-        # 3. Action Loss
-        action_loss = self.metric.energy(z, v)
-        
-        # 4. Metric Regularization
-        if hasattr(self.metric, 'h_net'):
-            H_x = self.metric.h_net(z)
-            I = jnp.eye(H_x.shape[0])
-            metric_reg = jnp.mean((H_x - I)**2)
+        if hasattr(self.metric, '_get_zermelo_data'):
+            _, W, _ = self.metric._get_zermelo_data(z_mean)
         else:
-            metric_reg = 0.0
+            W = jnp.zeros_like(u_lat)
 
-        total_loss = recon_loss + 1e-4 * kl_loss + 1e-3 * action_loss + 1.0 * metric_reg
+        # Resultant Trajectory: dot_z = u + W
+        dot_z = u_lat + W
         
-        return total_loss, (recon_loss, action_loss, metric_reg)
+        # 3. Zermelo Alignment (Symmetry Breaker)
+        # We maximize the alignment between Wind W and Control u
+        w_dir = normalize(W)
+        v_dir = normalize(u_lat)
+        # Loss is negative dot product (minimize to align)
+        align_loss = -jnp.dot(w_dir, v_dir)
+
+        # 4. Geodesic Spray Loss
+        # Minimize the fictitious force on the resultant path
+        spray_vec = self.metric.spray(z_mean, dot_z)
+        spray_norm = self.metric.inner_product(z_mean, dot_z, spray_vec, spray_vec)
+        
+        # Weights
+        total_loss = (1.0 * recon_loss + 
+                      1e-4 * kl_loss + 
+                      0.1 * align_loss + 
+                      1e-3 * spray_norm)
+        
+        # EXPOSE ALL STATS
+        return total_loss, (recon_loss, kl_loss, spray_norm, align_loss)
