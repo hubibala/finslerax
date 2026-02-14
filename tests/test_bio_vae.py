@@ -1,107 +1,114 @@
 import jax
 import jax.numpy as jnp
-import unittest
-import optax
 import equinox as eqx
+import unittest
+import numpy as np
 
-from ham.geometry import Sphere
-from ham.geometry.zoo import Euclidean
-from ham.bio.vae import GeometricVAE
-from ham.sim.fields import rossby_haurwitz, get_stream_function_flow
+from jax import config
+config.update("jax_enable_x64", True)
 
-class TestBioVAE(unittest.TestCase):
+from ham.bio.vae import GeometricVAE, PowerSpherical
+from ham.geometry.metric import FinslerMetric
+from ham.geometry.manifold import Manifold
+
+class MockManifold(Manifold):
+    @property
+    def ambient_dim(self): return 3
+    @property
+    def intrinsic_dim(self): return 3
+    def project(self, x): return x / (jnp.linalg.norm(x) + 1e-12)
+    def to_tangent(self, x, v): return v - jnp.dot(v, x) * x
+    def random_sample(self, key, shape): return jax.random.normal(key, shape + (3,))
+
+class EuclideanMetric(FinslerMetric):
+    def metric_fn(self, x, v): return jnp.linalg.norm(v)
+
+class MockLearnedMetric(FinslerMetric):
+    """
+    A spatially varying metric to ensure non-zero spray.
+    F(x, v) = alpha * (1 + x_0^2) * |v|
+    """
+    alpha: jnp.ndarray
     
+    def __init__(self, manifold):
+        self.manifold = manifold
+        self.alpha = jnp.array(2.0)
+
+    def metric_fn(self, x, v):
+        conformal_factor = 1.0 + x[0]**2
+        return self.alpha * conformal_factor * jnp.linalg.norm(v)
+
+class TestPowerSpherical(unittest.TestCase):
     def setUp(self):
-        self.key = jax.random.PRNGKey(2025)
-        
-        # 1. Define the "Virtual Organism" (Ground Truth Physics)
-        # We use a Sphere to represent the differentiation manifold (Waddington's Landscape)
-        self.manifold = Sphere(radius=1.0)
-        
-        # We use the Rossby-Haurwitz wave from ham.sim.fields as the "True Flow"
-        # This creates complex, wavy trajectories on the sphere
-        self.true_flow = rossby_haurwitz(R=3, omega=1.0)
-        
-        # 2. Generate Synthetic Data
-        # Sample 100 random cells on the manifold
-        self.N_cells = 100
-        raw_points = jax.random.normal(self.key, (self.N_cells, 3))
-        self.cells_z = jax.vmap(self.manifold.project)(raw_points)
-        
-        # Calculate their "true" biological velocities (RNA velocity)
-        self.cells_v = jax.vmap(self.true_flow)(self.cells_z)
-        
-        # Map to "Gene Space" (Ambient R^10)
-        # We simulate a linear projection from Latent(3) -> Genes(10)
-        self.gene_matrix = jax.random.normal(self.key, (3, 10))
-        self.cells_x = self.cells_z @ self.gene_matrix  # X = Z * W
-        
-        # 3. Initialize VAE
-        # We use a Euclidean metric on the Sphere as the prior
-        self.metric = Euclidean(self.manifold)
-        self.vae = GeometricVAE(
-            data_dim=10, 
-            latent_dim=3, 
-            metric=self.metric, 
-            key=self.key
-        )
+        self.key = jax.random.PRNGKey(42)
 
-    def test_forward_shapes(self):
-        """
-        Smoke test: Does the model process a single cell correctly?
-        """
-        x = self.cells_x[0]
-        z, v, logvar = self.vae.encode(x, self.key)
+    def test_sampling_shape_and_norm(self):
+        latent_dim = 5
+        mean = jax.random.normal(self.key, (latent_dim,))
+        mean = mean / jnp.linalg.norm(mean)
+        conc = jnp.array(10.0)
+        dist = PowerSpherical(mean, conc)
         
-        self.assertEqual(z.shape, (3,))
-        self.assertEqual(v.shape, (3,))
+        z_batch = dist.sample(self.key, shape=(100,))
+        self.assertEqual(z_batch.shape, (100, latent_dim))
         
-        # Check Manifold Adherence
-        norm_z = jnp.linalg.norm(z)
-        self.assertAlmostEqual(norm_z, 1.0, places=5, msg="Latent point not on Sphere")
-        
-        # Check Tangency
-        ortho = jnp.dot(z, v)
-        self.assertAlmostEqual(ortho, 0.0, places=5, msg="Velocity not tangent to Sphere")
+        norms = jnp.linalg.norm(z_batch, axis=1)
+        np.testing.assert_allclose(norms, 1.0, rtol=1e-5, atol=1e-5)
 
-    def test_overfitting_trajectory(self):
-        """
-        Optimization Test: Can we train the VAE to reconstruct the synthetic organism?
-        """
-        optimizer = optax.adam(learning_rate=1e-3)
-        opt_state = optimizer.init(eqx.filter(self.vae, eqx.is_array))
-        
-        @eqx.filter_jit
-        def train_step(model, x, opt_state, key):
-            def batch_loss(m):
-                losses, _ = jax.vmap(m.loss_fn, in_axes=(0, None))(x, key)
-                return jnp.mean(losses)
-            
-            grads = eqx.filter_grad(batch_loss)(model)
-            updates, opt_state = optimizer.update(grads, opt_state, model)
-            model = eqx.apply_updates(model, updates)
-            return model, opt_state, batch_loss(model)
+    def test_reparameterization(self):
+        mean = jnp.array([0.6, 0.8, 0.0]) 
+        conc = jnp.array(5.0)
 
-        # Train for 50 steps
-        model = self.vae
-        initial_loss = 0.0
-        final_loss = 0.0
+        def sample_projection(m, c):
+            dist = PowerSpherical(m, c)
+            z = dist.sample(self.key)
+            return jnp.dot(z, jnp.array([0.0, 1.0, 0.0]))
+
+        grad_fn = jax.grad(sample_projection, argnums=(0, 1))
+        g_mean, g_conc = grad_fn(mean, conc)
         
-        print("\nTraining BioVAE on Rossby-Haurwitz Data:")
-        for i in range(201):
-            k_step = jax.random.fold_in(self.key, i)
-            model, opt_state, loss = train_step(model, self.cells_x, opt_state, k_step)
-            if i == 0: initial_loss = loss
-            if i == 50: final_loss = loss
-            if i % 10 == 0:
-                print(f"  Step {i}: Loss = {loss:.4f}")
-                
-        self.assertLess(final_loss, initial_loss * 0.8, "VAE failed to learn (Loss did not decrease significantly)")
+        self.assertTrue(jnp.any(g_mean != 0), "Gradient w.r.t mean should be non-zero")
+
+class TestGeometricVAE(unittest.TestCase):
+    def setUp(self):
+        self.key = jax.random.PRNGKey(101)
+        self.data_dim = 10
+        self.latent_dim = 3
+        self.manifold = MockManifold()
+        self.metric = EuclideanMetric(self.manifold)
+        self.x = jax.random.normal(self.key, (self.data_dim,))
+        self.v_rna = jax.random.normal(self.key, (self.data_dim,))
+
+    def test_velocity_projection_properties(self):
+        vae = GeometricVAE(self.data_dim, self.latent_dim, self.metric, self.key)
         
-        # Test Forecasting
-        # Can we predict the future state of cell 0?
-        traj = model.predict_trajectory(self.cells_x[0], self.key, steps=10)
-        self.assertEqual(traj.shape, (11, 10), "Trajectory shape mismatch (Steps+1, GeneDim)")
+        # CORRECTED METHOD NAME: project_control
+        z_mean, u_lat = vae.project_control(self.x, self.v_rna)
+        
+        self.assertAlmostEqual(jnp.linalg.norm(z_mean), 1.0, places=5)
+        
+        # Orthogonality check (u_lat should be tangent to sphere at z_mean)
+        dot_prod = jnp.dot(z_mean, u_lat)
+        self.assertAlmostEqual(dot_prod, 0.0, places=4)
+
+    def test_joint_gradient_flow(self):
+        learnable_metric = MockLearnedMetric(self.manifold)
+        vae = GeometricVAE(self.data_dim, self.latent_dim, learnable_metric, self.key)
+        
+        def loss_wrapper(model):
+            loss, _ = model.loss_fn(self.x, self.v_rna, self.key)
+            return loss
+        
+        grads = eqx.filter_grad(loss_wrapper)(vae)
+        
+        # 1. Check Encoder Gradients
+        enc_leaves = jax.tree_util.tree_leaves(grads.encoder_net)
+        has_grad_enc = any(jnp.any(g != 0) for g in enc_leaves if isinstance(g, jnp.ndarray))
+        self.assertTrue(has_grad_enc, "Encoder should receive gradients from the loss.")
+        
+        # 2. Check Metric Gradients
+        self.assertNotEqual(float(grads.metric.alpha), 0.0, 
+            "The Metric parameter 'alpha' must receive gradients (Physics Engine is disconnected).")
 
 if __name__ == '__main__':
     unittest.main()

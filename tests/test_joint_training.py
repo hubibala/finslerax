@@ -27,6 +27,7 @@ class TestJointTraining(unittest.TestCase):
         
         # Dummy Data
         self.data = jax.random.normal(self.key, (10, 5))
+        self.v_rna = jax.random.normal(self.key, (10, 5))
 
     def test_metric_is_updated(self):
         """
@@ -41,7 +42,20 @@ class TestJointTraining(unittest.TestCase):
         
         @eqx.filter_jit
         def step(model, state):
-            grads = eqx.filter_grad(lambda m: jnp.mean(jax.vmap(m.loss_fn, in_axes=(0,None))(self.data, self.key)[0]))(model)
+            # Define loss wrapper that takes 'm' (the traced model)
+            def loss_wrapper(m):
+                # Batch loss closes over 'm' correctly
+                def batch_loss(x, v, k):
+                    # We access the method from 'm', preserving the gradient trace
+                    return m.loss_fn(x, v, k)[0]
+                
+                keys = jax.random.split(self.key, self.data.shape[0])
+                # vmap maps over data/keys, but uses the same 'm'
+                return jnp.mean(jax.vmap(batch_loss)(self.data, self.v_rna, keys))
+
+            # Filter grad differentiates 'loss_wrapper' w.r.t 'model'
+            grads = eqx.filter_grad(loss_wrapper)(model)
+            
             updates, new_state = optimizer.update(grads, state, model)
             new_model = eqx.apply_updates(model, updates)
             return new_model, new_state
