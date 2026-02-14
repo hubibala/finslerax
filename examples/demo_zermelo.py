@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from ham.geometry import Sphere, Randers, TriangularMesh
-from ham.geometry.zoo import PiecewiseConstantFinsler, Euclidean
+from ham.geometry.zoo import Euclidean
 from ham.solvers import AVBDSolver
 from ham.vis import setup_3d_plot, plot_sphere, plot_trajectory, generate_icosphere, plot_indicatrices
 

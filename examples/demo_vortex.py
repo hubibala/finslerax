@@ -26,7 +26,7 @@ def main():
     # 1. Setup Strong Vortex
     sphere = Sphere(radius=1.0)
     vortex_center = jnp.array([0.0, 1.0, 0.0])
-    w_net = vortex_field(vortex_center, strength=1.5, decay=5.0) # Very strong wind to force curvature
+    w_net = vortex_field(vortex_center, strength=10.0, decay=5.0) # Very strong wind to force curvature
     h_net = lambda x: jnp.eye(3)
     metric = Randers(sphere, h_net, w_net)
 
@@ -42,7 +42,7 @@ def main():
 
     print("Solving 'Relaxed' (Low Beta)...")
     # beta=0.5: Very slow hardening. Allows massive lateral movement.
-    solver_relaxed = AVBDSolver(step_size=0.05, beta=0.5, iterations=10000) 
+    solver_relaxed = AVBDSolver(step_size=0.05, beta=0.5, iterations=100) 
     traj_relaxed = solver_relaxed.solve(metric, start, end, n_steps=40)
 
     # 4. Visualization
@@ -56,7 +56,7 @@ def main():
     
     # Paths
     plot_trajectory(ax, traj_stiff, color='gray', linestyle='--', linewidth=2, label='Stiff Solver (beta=20)')
-    plot_trajectory(ax, traj_relaxed, color='red', linewidth=4, label='Relaxed Solver (beta=0.5)')
+    plot_trajectory(ax, traj_relaxed, color='red', linewidth=2, label='Relaxed Solver (beta=0.5)')
     
     ax.legend()
     plt.title("Solver Stiffness Comparison\nNotice the Red line finding the 'D' shape!")
