@@ -21,7 +21,7 @@ class NeuralRanders(FinslerMetric, eqx.Module):
     """
     h_net: PSDMatrixField
     w_net: VectorField
-    manifold: Manifold = eqx.field(static=True)
+    manifold: Manifold
     epsilon: float = eqx.field(static=True)
 
     def __init__(self, manifold: Manifold, key: jax.Array, 

@@ -17,7 +17,7 @@ class Euclidean(FinslerMetric):
 
 class Riemannian(FinslerMetric):
     """General Riemannian metric: F(x, v) = sqrt( v^T G(x) v )."""
-    g_net: Callable[[jnp.ndarray], jnp.ndarray] = eqx.field(static=True)
+    g_net: Callable[[jnp.ndarray], jnp.ndarray]
 
     def __init__(self, manifold: Manifold, g_net: Callable[[jnp.ndarray], jnp.ndarray]):
         super().__init__(manifold)
@@ -33,8 +33,8 @@ class Randers(FinslerMetric):
     """
     Rigorous Randers Metric (Zermelo Navigation).
     """
-    h_net: Callable[[jnp.ndarray], jnp.ndarray] = eqx.field(static=True)
-    w_net: Callable[[jnp.ndarray], jnp.ndarray] = eqx.field(static=True)
+    h_net: Callable[[jnp.ndarray], jnp.ndarray]
+    w_net: Callable[[jnp.ndarray], jnp.ndarray]
     epsilon: float = eqx.field(static=True)
 
     def __init__(self, 
@@ -79,8 +79,9 @@ class DiscreteRanders(FinslerMetric):
         self.epsilon = epsilon
 
     def metric_fn(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
-        face_idx = self.manifold.get_face_index(x)
-        W_raw = self.face_winds[face_idx]
+        # Use differentiable weights to allow gradients to flow between faces
+        weights = self.manifold.get_face_weights(x)
+        W_raw = jnp.dot(weights, self.face_winds)
         w_norm = jnp.linalg.norm(W_raw)
         scale = (1.0 - self.epsilon) * jnp.tanh(w_norm) / (w_norm + 1e-8)
         W = W_raw * scale

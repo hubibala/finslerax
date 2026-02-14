@@ -1,9 +1,10 @@
 import jax
 import jax.numpy as jnp
+import equinox as eqx
 from abc import ABC, abstractmethod
 from typing import Tuple
 
-class Manifold(ABC):
+class Manifold(eqx.Module, ABC):
     """
     Abstract base class for the topological domain.
     

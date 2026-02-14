@@ -36,6 +36,9 @@ class FinslerMetric(eqx.Module):
         Solves: Hess_v(E) * (-2G) = Grad_x(E) - Jac_x(Grad_v(E)) * v
         """
         grad_v_fn = jax.grad(self.energy, argnums=1)
+        
+        # We need grad_x(E) and Jac_x(grad_v E) * v
+        # Using JVP for the mixed term is efficient
         grad_x = jax.grad(self.energy, argnums=0)(x, v)
         
         def d_dv_fixed_v(pos):
@@ -43,10 +46,11 @@ class FinslerMetric(eqx.Module):
             
         _, mixed_term = jax.jvp(d_dv_fixed_v, (x,), (v,))
         rhs = grad_x - mixed_term
+        
         hess_v = jax.hessian(self.energy, argnums=1)(x, v)
         
         # Solve for acceleration
-        # Regularize hessian slightly to avoid singular matrices in flat regions/degenerate metrics
+        # Regularize hessian slightly to avoid singular matrices
         acc = jnp.linalg.solve(hess_v + 1e-12 * jnp.eye(x.shape[0]), rhs)
         return -0.5 * acc
 

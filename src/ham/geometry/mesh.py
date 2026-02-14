@@ -1,13 +1,17 @@
 import jax
 import jax.numpy as jnp
+import equinox as eqx
 from typing import Tuple
-from functools import partial
 from .manifold import Manifold
 
 class TriangularMesh(Manifold):
     """
     A discrete manifold defined by a triangular mesh in R^N.
     """
+    vertices: jnp.ndarray
+    faces: jnp.ndarray
+    triangles: jnp.ndarray
+
     def __init__(self, vertices: jnp.ndarray, faces: jnp.ndarray):
         self.vertices = vertices
         self.faces = faces
@@ -56,21 +60,28 @@ class TriangularMesh(Manifold):
         closest = jnp.where(is_inside, p_in, p_edge)
         return dist_sq(closest), closest
 
-    @partial(jax.jit, static_argnums=(0,))
+    @eqx.filter_jit
     def project(self, x: jnp.ndarray) -> jnp.ndarray:
         dist_fn = lambda tri: self._point_triangle_distance(x, tri)
         dists, points = jax.vmap(dist_fn)(self.triangles)
         min_idx = jnp.argmin(dists)
         return points[min_idx]
 
-    @partial(jax.jit, static_argnums=(0,))
+    @eqx.filter_jit
     def get_face_index(self, x: jnp.ndarray) -> jnp.ndarray:
         """Returns the index of the triangle closest to x."""
         dist_fn = lambda tri: self._point_triangle_distance(x, tri)[0]
         dists = jax.vmap(dist_fn)(self.triangles)
         return jnp.argmin(dists)
 
-    @partial(jax.jit, static_argnums=(0,))
+    @eqx.filter_jit
+    def get_face_weights(self, x: jnp.ndarray, temperature: float = 100.0) -> jnp.ndarray:
+        """Returns differentiable weights for each face based on proximity."""
+        dist_fn = lambda tri: self._point_triangle_distance(x, tri)[0]
+        dists_sq = jax.vmap(dist_fn)(self.triangles)
+        return jax.nn.softmax(-dists_sq * temperature)
+
+    @eqx.filter_jit
     def to_tangent(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
         idx = self.get_face_index(x)
         tri = self.triangles[idx]
@@ -85,7 +96,7 @@ class TriangularMesh(Manifold):
         
         return jnp.dot(v, e1) * e1 + jnp.dot(v, e2) * e2
 
-    @partial(jax.jit, static_argnums=(0,))
+    @eqx.filter_jit
     def retract(self, x: jnp.ndarray, delta: jnp.ndarray) -> jnp.ndarray:
         candidate = x + delta
         return self.project(candidate)

@@ -1,10 +1,13 @@
 import jax._src.cudnn.scaled_matmul_stablehlo
 import jax
 import jax.numpy as jnp
+import equinox as eqx
 from .manifold import Manifold
 from ..utils.math import safe_norm
 
 class Sphere(Manifold):
+    radius: float = eqx.field(static=True)
+
     def __init__(self, radius: float = 1.0):
         self.radius = radius
 
@@ -39,6 +42,9 @@ class Sphere(Manifold):
         return self.project(gauss)
 
 class Torus(Manifold):
+    R: float = eqx.field(static=True)
+    r: float = eqx.field(static=True)
+
     def __init__(self, major_R: float = 2.0, minor_r: float = 1.0):
         self.R = major_R
         self.r = minor_r
@@ -139,3 +145,105 @@ class Paraboloid(Manifold):
         xy = jax.random.normal(key, shape + (2,)) * 2.0  # adjust scale
         z = jnp.sum(xy**2, axis=-1)
         return jnp.concatenate([xy, z[..., None]], axis=-1)
+class Hyperboloid(Manifold):
+    """
+    The upper sheet of the hyperboloid in Minkowski space.
+    -x0^2 + x1^2 + ... + xn^2 = -1, x0 > 0
+    """
+    # Store dimension as static metadata for JAX/Equinox
+    _intrinsic_dim: int = eqx.field(static=True)
+
+    def __init__(self, intrinsic_dim: int = 2):
+        self._intrinsic_dim = intrinsic_dim
+
+    # Satisfy Manifold ABC property requirement
+    @property
+    def intrinsic_dim(self) -> int:
+        return self._intrinsic_dim
+
+    @property
+    def ambient_dim(self) -> int:
+        return self._intrinsic_dim + 1
+
+    def _minkowski_dot(self, u: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+        """Computes the Minkowski inner product: -u0v0 + u1v1 + ..."""
+        return -u[..., 0] * v[..., 0] + jnp.sum(u[..., 1:] * v[..., 1:], axis=-1)
+
+    def _minkowski_norm(self, u: jnp.ndarray) -> jnp.ndarray:
+        """Computes sqrt(<u,u>_L) for space-like vectors."""
+        sq_norm = self._minkowski_dot(u, u)
+        return jnp.sqrt(jnp.maximum(sq_norm, 1e-12))
+
+    def project(self, x: jnp.ndarray) -> jnp.ndarray:
+        """
+        Project ambient points onto the Hyperboloid.
+        """
+        sq_norm = self._minkowski_dot(x, x)
+        
+        # Valid candidates for scaling: Time-like AND Upper Sheet
+        is_valid_candidate = (sq_norm < -1e-6) & (x[..., 0] > 0)
+        
+        # Branch 1: Scaling (for valid candidates)
+        safe_sq_norm = jnp.minimum(sq_norm, -1e-6)
+        denom = jnp.sqrt(-safe_sq_norm)
+        x_scaled = x / denom[..., None]
+        
+        # Branch 2: Lifting (for space-like or inverted points)
+        x_spatial = x[..., 1:]
+        x_spatial_sq = jnp.sum(x_spatial**2, axis=-1)
+        x0_new = jnp.sqrt(1.0 + x_spatial_sq)
+        x_lifted = jnp.concatenate([x0_new[..., None], x_spatial], axis=-1)
+        
+        mask = is_valid_candidate[..., None]
+        return jnp.where(mask, x_scaled, x_lifted)
+
+    def to_tangent(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+        # Tangent space T_x H = { v | <x, v>_L = 0 }
+        inner = self._minkowski_dot(x, v)
+        return v + inner[..., None] * x
+
+    def exp_map(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+        norm_v = self._minkowski_norm(v)
+        norm_v_safe = jnp.maximum(norm_v, 1e-6)
+        
+        res = (jnp.cosh(norm_v)[..., None] * x + 
+               jnp.sinh(norm_v)[..., None] * (v / norm_v_safe[..., None]))
+               
+        return jnp.where(norm_v[..., None] < 1e-6, x, res)
+
+    def log_map(self, x: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
+        xy = self._minkowski_dot(x, y)
+        xy = jnp.minimum(xy, -1.0 - 1e-6)
+        dist = jnp.arccosh(-xy)
+        
+        u = y + xy[..., None] * x
+        norm_u = self._minkowski_norm(u)
+        
+        res = dist[..., None] * u / jnp.maximum(norm_u, 1e-6)[..., None]
+        return jnp.where(dist[..., None] < 1e-6, jnp.zeros_like(x), res)
+
+    def parallel_transport(self, x: jnp.ndarray, y: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+        xy = self._minkowski_dot(x, y)
+        yv = self._minkowski_dot(y, v)
+        denom = 1.0 - xy
+        scale = yv / denom
+        return v + scale[..., None] * (x + y)
+
+    def retract(self, x: jnp.ndarray, delta: jnp.ndarray) -> jnp.ndarray:
+        return self.exp_map(x, delta)
+
+    def random_sample(self, key: jax.Array, shape: tuple[int, ...]) -> jnp.ndarray:
+        spat_dim = self.intrinsic_dim
+        v_spatial = jax.random.normal(key, shape + (spat_dim,))
+        norm_v = jnp.linalg.norm(v_spatial, axis=-1, keepdims=True)
+        safe_norm = jnp.maximum(norm_v, 1e-6)
+        
+        x0 = jnp.cosh(norm_v)
+        x_rest = jnp.sinh(norm_v) * (v_spatial / safe_norm)
+        return jnp.concatenate([x0, x_rest], axis=-1)
+    
+    def metric_tensor(self, x: jnp.ndarray) -> jnp.ndarray:
+        m = jnp.eye(self.ambient_dim)
+        m = m.at[0, 0].set(-1.0)
+        return m
+        
