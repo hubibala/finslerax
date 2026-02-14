@@ -10,7 +10,7 @@ from ham.geometry import Sphere
 from ham.geometry.zoo import Randers
 from ham.sim.fields import rossby_haurwitz
 from ham.solvers import AVBDSolver
-from ham.solvers.geodesic import ExponentialMap, GeodesicState
+from ham.solvers.geodesic import ExponentialMap
 from ham.vis import setup_3d_plot, plot_sphere, plot_vector_field, plot_trajectory, plot_indicatrices, generate_icosphere
 
 
