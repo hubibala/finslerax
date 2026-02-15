@@ -3,7 +3,7 @@ from .metric import FinslerMetric
 from .zoo import Euclidean, Riemannian, Randers, DiscreteRanders
 from .transport import berwald_transport
 from .mesh import TriangularMesh  
-from .surfaces import Sphere
+from .surfaces import Sphere, Hyperboloid
 
 __all__ = [
     "Manifold",
@@ -14,5 +14,6 @@ __all__ = [
     "berwald_transport",
     "TriangularMesh",
     "DiscreteRanders",
+    "Hyperboloid",
     "Sphere",
 ]

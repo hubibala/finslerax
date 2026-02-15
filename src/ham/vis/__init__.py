@@ -7,4 +7,5 @@ __all__ = [
     "plot_trajectory",
     "plot_indicatrices",
     "generate_icosphere",
+    "plot_poincare_disk",
 ]
