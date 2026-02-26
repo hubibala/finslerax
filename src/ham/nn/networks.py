@@ -45,7 +45,7 @@ class VectorField(eqx.Module):
             out_size=dim,
             width_size=hidden_dim,
             depth=depth,
-            activation=jax.nn.gelu, # smoother than relu for gradients
+            activation=jax.nn.tanh, # smoother than relu for gradients
             key=k_mlp
         )
 
@@ -85,7 +85,7 @@ class PSDMatrixField(eqx.Module):
             out_size=dim * dim,
             width_size=hidden_dim,
             depth=depth,
-            activation=jax.nn.gelu,
+            activation=jax.nn.tanh,
             key=k_mlp
         )
 

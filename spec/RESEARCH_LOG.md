@@ -41,16 +41,16 @@ This project has evolved through four distinct theoretical phases. This narrativ
 
 ---
 
-## 3. Current Technical Status (v0.1)
+## 3. Current Technical Status (v1.1)
 
-**3.1. Validated Components (New Additions)**
-* **Automatic Spray Generation:** We verified that `jax.grad` and `jax.hessian` can solve the Euler-Lagrange linear system: $g_{ij} \ddot{x}^j + \dots = 0$ in real-time. This eliminates the need for manual Christoffel symbol derivation.
-* **Convexity Protection:** The `tanh` gating on the Randers wind vector $W$ prevents the metric from becoming indefinite ($F^2 < 0$), ensuring simulation stability even with untrained neural networks.
+**3.1. Validated Components**
+* **Automatic Spray Generation:** Verified `jax.grad` and `jax.hessian` Euler-Lagrange implicit solver logic.
+* **Convexity Protection:** The `tanh` gating on the Randers wind vector $W$ prevents metric collapse.
+* **Manifold Implementations:** Spheres, Tori, and meshes undergo AVBD boundary value solving reliably.
 
-**3.2. Known Deficiencies (Updated)**
-* **SOLVED:** Implicit Geometry (Fixed by `metric.spray`).
-* **SOLVED:** Mesh Incompatibility (Fixed by `PiecewiseConstantFinsler` and `DiscreteRanders` in `zoo.py`).
-* **REMAINING:** `ham-bio` integration (Connecting RNA velocity vectors to the Finsler tangent bundle).
+**3.2. Current Blockers & Instabilities (Critical Update)**
+* **Geometric VAE Failure:** The initial attempt at coupling a Geometric VAE using complex geometries like the `Hyperboloid` in `src/ham/bio/` is fundamentally unstable. The joint training mechanism frequently collapses early in training, generating `nil` values.
+* **Geodesic Learning Collapse:** Complex analytical geometries (e.g., Sphere, Hyperboloid) yield very poor cosine similarities during geodesic joint learning tests. The ODE solver collapses or fails to converge properly. The issue is heavily localized around the Hyperboloid formulation and its application/backpropagation interaction in deeper neural tasks.
 
 ---
 

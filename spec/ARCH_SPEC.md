@@ -98,8 +98,8 @@ This implementation uses inheritance to specialize behavior while keeping the Sp
 | Euclidean | Flat space | `norm(v)` |
 | Riemannian | Curved, symmetric | `sqrt(v @ G(x) @ v)` |
 | Randers | Asymmetric, wind | `sqrt(v @ M(x) @ v) + dot(beta(x), v)` |
-| LearnedFinsler | Generic NN | |
-
+| DiscreteRanders | Anisotropic Mesh Metric | Computed via differentiable target face weights |
+| LearnedFinsler | Generic Neural Network | Defines $h_{net}$ and $w_{net}$ in `models/learned.py` |
 ### 3.1. The Randers Specialization
 This class specifically manages the Zermelo data ($h$, $W$) to ensure convexity.
 
@@ -132,13 +132,14 @@ class GeodesicSolver(ABC):
 ### 4.2. Implementation: AVBDSolver
 The Augmented Vertex Block Descent solver.
 - Input: FinslerMetric, Boundary Conditions.
-- Method: Optimizes discrete path points $x_0, ..., x_N$ directly.Loss: $L = \sum E(x_i, v_i) + \text{ConstraintPenalties}$.
+- Method: Optimizes discrete path points $x_0, ..., x_N$ directly. Loss: $L = \sum E(x_i, v_i) + \text{ConstraintPenalties}$.
 - Differentiability: Fully differentiable w.r.t metric parameters.
 
-### 4.3. Parallel Transport (Berwald)Implemented as an integrator on top of the metric.
+### 4.3. Parallel Transport (Berwald)
+Implemented as an integrator on top of the metric.
 
 ```python
-def parallel_transport(metric: FinslerMetric, path: jnp.ndarray, v0: jnp.ndarray) -> jnp.ndarray:
+def berwald_transport(metric: FinslerMetric, path: jnp.ndarray, v0: jnp.ndarray) -> jnp.ndarray:
     """
     Transports vector v0 along 'path' using the Berwald connection.
     Differentiation: 
@@ -149,35 +150,47 @@ def parallel_transport(metric: FinslerMetric, path: jnp.ndarray, v0: jnp.ndarray
     pass
 ```
 
+### 4.4. Initial Value Solver (Exponential Map)
+Implemented in `src/ham/solvers/geodesic.py` via standard Runge-Kutta 4 integration. Computes `Exp_x(v)` over `t` integrating the Spray dynamically and enforcing manifold projection to counteract ODE drift.
+
 ## 5. Module Structure
 
+```text
 src/
+├── bio/
+│   ├── vae.py            # Geometric VAE wrappers
+│   └── data.py           # AnnData integrations for single-cell
 ├── geometry/
 │   ├── manifold.py       # Abstract Base Class
 │   ├── metric.py         # FinslerMetric ABC & AutoDiff Physics
-│   ├── zoo.py            # Euclidean, Riemannian, Randers implementations
+│   ├── surfaces.py       # Sphere, Torus, Hyperboloid, Paraboloid
+│   ├── zoo.py            # Euclidean, Riemannian, Randers, DiscreteRanders
 │   └── transport.py      # Berwald transport integrator
+├── models/
+│   └── learned.py        # Neural implementations of metrics
+├── nn/
+│   └── networks.py       # Neural network architecture blocks
+├── sim/
+│   └── fields.py         # Field abstractions for sim
 ├── solvers/
-│   ├── avbd.py           # The robust boundary value solver
-│   └── shooting.py       # Simple IVP solver (exp map)
-└── nn/
-    ├── fields.py         # Neural Networks for g(x) and beta(x)
-    └── layers.py         # Convexity enforcement layers (Tanh, PSD)
+│   ├── avbd.py           # BVP Robust Solver
+│   └── geodesic.py       # IVP Solver (Exponential Map via RK4)
+├── utils/
+│   └── math.py           # Math stabilizers and norms
+└── vis/
+    └── hyperbolic.py     # Hyperbolic disk plotting utilities
+```
 
 ## 6. Implementation Status (Revised)
 
 ### ✅ Completed & Validated
-1.  **Geometry Core:** `src/ham/geometry/metric.py` and `zoo.py` are stable.
-    * `FinslerMetric` correctly auto-differentiates the energy to get the Spray.
-    * `Randers` metric includes `tanh` stabilization for strong winds.
-2.  **Boundary Value Solver:** `src/ham/solvers/avbd.py` (AVBD) is fully functional and tested on $S^2$ and Mesh.
+1.  **Geometry Core:** `src/ham/geometry/metric.py`, `zoo.py`, and `surfaces.py` are structurally complete.
+    * `FinslerMetric` auto-differentiates the energy to correctly deduce generalized Geodesic Spray.
+    * `Randers` and `DiscreteRanders` models are implemented.
+2.  **Solvers:** AVBD Boundary Value solver and Geodesic Shooting Initial Value solver exist and are analytically functional for simpler surfaces.
 
-### 🚧 In Progress
-3.  **Initial Value Solver:** `src/ham/solvers/geodesic.py`.
-    * **Goal:** Implement `exponential_map(x, v)` via RK4 integration of the Spray.
-    * **Use Case:** Generative modeling (rolling out latent trajectories).
-
-### 📅 Planned (ham-bio)
-4.  **Bio-Wrappers:** `src/ham/bio/`
-    * Connection to `AnnData` (single-cell data).
-    * Geometric VAE implementation.
+### 🚧 Experimental & Unstable
+3.  **Bio-Wrappers & Geometric VAE:** 
+    * **Current Status:** A first attempt at `pancreas_vae` and joint geodesic training has been completed in `src/ham/bio/`, but the results are entirely unsatisfactory. 
+    * **Known Issues:** The learning process is not stable; the solver collapses with `nil` or `NaN` values. The complex geometries (e.g., Sphere, Hyperboloid) yield very bad cosine similarities during geodesic learning tests.
+    * **Diagnosis:** The problem is likely tied to the `Hyperboloid` numerical implementation, its exponential map, or its interaction with backpropagation in deep neural environments. Significant architectural fixes are necessary here.

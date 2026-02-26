@@ -42,7 +42,7 @@ print(f"Energy Randers path:    {e_rand:.4f}")
 
 # --- 3. Discrete Physics ---
 print("Generating Icosphere...")
-verts, faces = generate_icosphere(radius=1.0, subdivisions=2)
+verts, faces = generate_icosphere(radius=1.0, subdivisions=1)
 mesh_discrete = TriangularMesh(verts, faces)
 
 print("Sampling Wind field onto Mesh Faces...")

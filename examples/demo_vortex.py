@@ -8,7 +8,7 @@ config.update("jax_enable_x64", True)
 from ham.geometry import Sphere
 from ham.geometry.zoo import Randers, Euclidean
 from ham.solvers import AVBDSolver
-from ham.vis import setup_3d_plot, plot_sphere, plot_vector_field, plot_trajectory, plot_indicatrices, generate_icosphere
+from ham.vis import setup_3d_plot, plot_sphere, plot_vector_field, plot_trajectory, generate_icosphere
 
 def vortex_field(center, strength=1.0, decay=2.0):
     center = center / jnp.linalg.norm(center)
@@ -50,7 +50,7 @@ def main():
     plot_sphere(ax, alpha=0.1)
     
     # Wind
-    pts, _ = generate_icosphere(radius=1.0, subdivisions=2)
+    pts, _ = generate_icosphere(radius=1.0, subdivisions=3)
     wind_vecs = np.array(jax.vmap(w_net)(pts))
     plot_vector_field(ax, pts, wind_vecs, scale=0.2, color='cyan', alpha=0.3)
     

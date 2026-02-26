@@ -20,8 +20,11 @@ class Sphere(Manifold):
         return 2
 
     def project(self, x: jnp.ndarray) -> jnp.ndarray:
-        norm = jnp.maximum(jnp.linalg.norm(x, axis=-1, keepdims=True), 1e-8)
-        return self.radius * x / norm
+        norm = jnp.linalg.norm(x, axis=-1, keepdims=True)
+        mask = norm > 1e-8
+        safe_x = x / jnp.where(mask, norm, 1.0)
+        direction = jnp.where(mask, safe_x, jnp.array([0.0, 0.0, 1.0]))
+        return self.radius * direction
 
     def to_tangent(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
         # Normal is x / ||x||, but since x is already on sphere, normal = x / radius
@@ -71,17 +74,19 @@ class Torus(Manifold):
         n_xy = jnp.concatenate([dir_xy * dist, jnp.array([x[2]])])
         n_norm = jnp.linalg.norm(n_xy)
         
-        # Avoid div-by-zero in normal
+        # If n_norm is 0, we are on the skeleton (center of the tube).
+        # We must choose a direction to push it to the surface.
+        # We pick the "up" direction in the tube's local cross-section.
         n = jnp.where(
             n_norm > 1e-8,
             n_xy / n_norm,
-            jnp.zeros(3)
+            jnp.array([0.0, 0.0, 1.0])
         )
         
         # Single projection step
         projected = x - n * (n_norm - self.r)
         
-        # Fallback only when rho is extremely small (use where)
+        # Fallback only when rho is extremely small (near Z-axis)
         fallback = jnp.array([self.R + self.r, 0.0, 0.0])
         use_fallback = rho < 1e-6
         return jnp.where(use_fallback, fallback, projected)
@@ -98,10 +103,12 @@ class Torus(Manifold):
         dist = rho - self.R
         n_xy = jnp.concatenate([dir_xy * dist, jnp.array([x[2]])])
         n_norm = jnp.linalg.norm(n_xy)
+        
+        # Consistent normal with project()
         n = jnp.where(
             n_norm > 1e-8,
             n_xy / n_norm,
-            jnp.zeros(3)
+            jnp.array([0.0, 0.0, 1.0])
         )
         return v - jnp.dot(n, v) * n
 
@@ -246,4 +253,31 @@ class Hyperboloid(Manifold):
         m = jnp.eye(self.ambient_dim)
         m = m.at[0, 0].set(-1.0)
         return m
+
+class EuclideanSpace(Manifold):
+    """Flat Euclidean space R^N."""
+    _dim: int = eqx.field(static=True)
+
+    def __init__(self, dim: int):
+        self._dim = dim
+
+    @property
+    def ambient_dim(self) -> int:
+        return self._dim
+
+    @property
+    def intrinsic_dim(self) -> int:
+        return self._dim
+
+    def project(self, x: jnp.ndarray) -> jnp.ndarray:
+        return x
+
+    def to_tangent(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+        return v
+
+    def retract(self, x: jnp.ndarray, delta: jnp.ndarray) -> jnp.ndarray:
+        return x + delta
+
+    def random_sample(self, key: jax.Array, shape: tuple[int, ...]) -> jnp.ndarray:
+        return jax.random.normal(key, shape + (self._dim,))
         

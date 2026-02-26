@@ -23,6 +23,7 @@ class NeuralRanders(FinslerMetric, eqx.Module):
     w_net: VectorField
     manifold: Manifold
     epsilon: float = eqx.field(static=True)
+    dim: int = eqx.field(static=True)
 
     def __init__(self, manifold: Manifold, key: jax.Array, 
                  hidden_dim: int = 32, depth: int = 2,
@@ -30,16 +31,16 @@ class NeuralRanders(FinslerMetric, eqx.Module):
         self.manifold = manifold
         self.epsilon = 1e-5
         k1, k2 = jax.random.split(key)
-        dim = manifold.ambient_dim
+        self.dim = manifold.ambient_dim
         
         # Metric Tensor H(x)
         # Low-frequency bias (terrain usually changes slowly)
-        self.h_net = PSDMatrixField(dim, hidden_dim, depth, k1)
+        self.h_net = PSDMatrixField(self.dim, hidden_dim, depth, k1)
         
         # Wind Field W(x)
         # High-frequency bias (turbulence/vortices) via Fourier Features
         # Scale=3.0 allows capturing wave numbers up to ~18, covering complex flows.
-        self.w_net = VectorField(dim, hidden_dim, depth, k2, 
+        self.w_net = VectorField(self.dim, hidden_dim, depth, k2, 
                                  use_fourier=use_fourier, fourier_scale=3.0)
 
     def _get_zermelo_data(self, x: jnp.ndarray):
@@ -47,7 +48,13 @@ class NeuralRanders(FinslerMetric, eqx.Module):
         Retrieves H and W at point x, ensuring mathematical validity.
         """
         # 1. Base Metric H(x)
-        H = self.h_net(x)
+        H_raw = self.h_net(x)                     # network output
+        # Make symmetric + positive definite
+        H = 0.5 * (H_raw + H_raw.T)
+        diag = jnp.diag(H)
+        diag_safe = jnp.maximum(diag, 0.01)
+        H = H.at[jnp.diag_indices_from(H)].set(diag_safe)
+        H = H + 0.005 * jnp.eye(H.shape[-1])      # isotropic safety
         
         # 2. Raw Wind W_raw(x)
         W_raw = self.w_net(x)
@@ -85,7 +92,8 @@ class NeuralRanders(FinslerMetric, eqx.Module):
         
         discriminant = lam * v_sq_h + W_dot_v**2
         
-        # Safe Sqrt
-        sqrt_D = jnp.sqrt(jnp.maximum(discriminant, 1e-12))
+        # Safe Sqrt: Using additive epsilon inside the sqrt ensures the Hessian 
+        # is well-defined and stable even at v=0.
+        sqrt_D = jnp.sqrt(jnp.maximum(discriminant, 0.0) + 1e-9)
         
         return (sqrt_D - W_dot_v) / lam

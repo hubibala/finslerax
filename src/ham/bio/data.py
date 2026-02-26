@@ -42,6 +42,7 @@ class DataLoader:
                 self.adata = self.adata[:, self.adata.var.highly_variable]
             
             # PCA
+            self.adata.obs_names_make_unique()
             if 'X_pca' not in self.adata.obsm or self.adata.obsm['X_pca'].shape[1] != pca_components:
                 sc.tl.pca(self.adata, n_comps=pca_components)
                 

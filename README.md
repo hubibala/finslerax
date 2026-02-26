@@ -58,14 +58,18 @@ end   = jnp.array([1., 1.])
 # Find the energy-minimizing path
 traj = solver.solve(metric, start, end, n_steps=20)
 print(f"Path Cost: {traj.energy}")
-📂 Repository Structure
-src/ham/geometry: Core manifold and metric definitions.
+## 📂 Repository Structure
 
-src/ham/solvers: Variational geodesic solvers (AVBD).
-
-tests/: Rigorous unit tests verifying mathematical correctness (Zermelo navigation, Isometries).
-
-legacy/: Archived research code from the initial "World Model" experiments.
+- `src/ham/bio/`: Domain-specific wrappers for single-cell biology (AnnData, Geometric VAE).
+- `src/ham/geometry/`: Core manifold and metric definitions (`manifolds`, `meshes`, `zoo` of metric types).
+- `src/ham/models/`: Neural implementations (e.g., `LearnedFinsler`).
+- `src/ham/nn/`: Neural network building blocks.
+- `src/ham/sim/`: Fields and simulation utilities.
+- `src/ham/solvers/`: Geodesic solvers (Boundary-Value via `AVBD`, Initial-Value via `ExponentialMap`).
+- `src/ham/utils/`: Core math utilities for numerical stability.
+- `src/ham/vis/`: Visualization routines for manifolds.
+- `tests/`: Comprehensive unit and integration test suite.
+- `legacy/`: Archived research code from the initial "World Model" experiments.
 
 📝 Citation
 If you use HAMTools in your research:

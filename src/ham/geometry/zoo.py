@@ -47,7 +47,7 @@ class Randers(FinslerMetric):
         self.w_net = w_net
         self.epsilon = epsilon
 
-    def _get_zermelo_data(self, x: jnp.ndarray):
+    def _get_fields(self, x: jnp.ndarray):
         H = self.h_net(x)
         H = 0.5 * (H + H.T) 
         W_raw = self.w_net(x)
@@ -61,7 +61,7 @@ class Randers(FinslerMetric):
         return H, W, lam
 
     def metric_fn(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
-        H, W, lam = self._get_zermelo_data(x)
+        H, W, lam = self._get_fields(x)
         v_sq_h = jnp.dot(v, jnp.dot(H, v))
         W_dot_v = jnp.dot(v, jnp.dot(H, W))
         discriminant = lam * v_sq_h + W_dot_v**2

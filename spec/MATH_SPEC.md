@@ -96,6 +96,11 @@ We verify that our implementation generalizes standard geometries.
 | **Riemannian** | $\sqrt{v^T g(x) v}$ | Quadratic in $v$ | $\Gamma^i_{jk}(x)$ (Levi-Civita) |
 | **Berwald** | General Finsler | Quadratic in $v$ | $\Gamma^i_{jk}(x)$ (Indep. of $v$) |
 | **Randers** | $\sqrt{v^T M v} + \beta \cdot v$ | Non-quadratic | $\Gamma^i_{jk}(x, v)$ (Dep. on $v$) |
+| **Hyperboloid** | Minkowskian $\sqrt{\langle v, v\rangle_L}$ | Quadratic in $v$ | Levi-Civita equivalent |
+
+### 4.1. Surface Formulations and Instabilities
+`HAMTools` provides strict analytical sub-manifolds (e.g., `Sphere`, `Hyperboloid`, `Torus`, `Paraboloid`). The Hyperboloid models the upper sheet in Minkowski space and features exact $\cosh$/$\sinh$ exponential and logarithmic maps.
+*Critical Note:* Integrating these exact geometric maps (especially for the Sphere and Hyperboloid) with deep neural learning loops inside the VAE currently causes severe numerical instability resulting in solver collapse.
 
 ---
 
