@@ -16,32 +16,35 @@ from ..utils.math import safe_norm, GRAD_EPS, NORM_EPS, TAYLOR_EPS
 
 
 # =======================================================================
-# Sphere (S^2 embedded in R^3)
+# Sphere (S^n embedded in R^{n+1})
 # =======================================================================
 
 class Sphere(Manifold):
     radius: float = eqx.field(static=True)
+    _intrinsic_dim: int = eqx.field(static=True)
 
-    def __init__(self, radius: float = 1.0):
+    def __init__(self, intrinsic_dim: int = 2, radius: float = 1.0):
+        self._intrinsic_dim = intrinsic_dim
         self.radius = radius
 
     def __repr__(self) -> str:
-        return f"Sphere(radius={self.radius})"
+        return f"Sphere(radius={self.radius}, intrinsic_dim={self._intrinsic_dim})"
 
     @property
     def ambient_dim(self) -> int:
-        return 3
+        return self._intrinsic_dim + 1
 
     @property
     def intrinsic_dim(self) -> int:
-        return 2
+        return self._intrinsic_dim
 
     def project(self, x: jnp.ndarray) -> jnp.ndarray:
         norm = safe_norm(x, axis=-1, keepdims=True)
         safe_x = x / jnp.maximum(norm, NORM_EPS)
-        # For zero-length vectors, default to the north pole
+        # For zero-length vectors, default to the "north pole" in ambient space
         is_zero = norm < NORM_EPS
-        direction = jnp.where(is_zero, jnp.array([0.0, 0.0, 1.0]), safe_x)
+        pole = jnp.zeros_like(x).at[..., -1].set(1.0)
+        direction = jnp.where(is_zero, pole, safe_x)
         return self.radius * direction
 
     def to_tangent(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
@@ -100,9 +103,11 @@ class Sphere(Manifold):
         return v * scale
 
     def parallel_transport(self, x: jnp.ndarray, y: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+        # Reflection through the bisector of x and y
         xy = jnp.sum(x * y, axis=-1)
         yv = jnp.sum(y * v, axis=-1)
-        denom = jnp.maximum(1.0 + xy, 1e-5)
+        # Denominator should be (r^2 + <x, y>)
+        denom = jnp.maximum(self.radius**2 + xy, 1e-5)
         scale = yv / denom
         return v - scale[..., None] * (x + y)
 

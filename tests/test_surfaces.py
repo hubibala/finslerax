@@ -13,7 +13,9 @@ class TestSurfaces(unittest.TestCase):
         self.key = jax.random.PRNGKey(42)
 
     def test_sphere_operations(self):
-        sphere = Sphere(radius=2.0)
+        sphere = Sphere(intrinsic_dim=2, radius=2.0)
+        self.assertEqual(sphere.ambient_dim, 3)
+        self.assertEqual(sphere.intrinsic_dim, 2)
         
         # Sample
         pts = sphere.random_sample(self.key, (10,))
@@ -36,6 +38,24 @@ class TestSurfaces(unittest.TestCase):
         # Log Map
         v_log = sphere.log_map(x_proj, y)
         np.testing.assert_allclose(v_log, v_tan, atol=1e-5)
+
+    def test_sphere_high_dim(self):
+        dim = 6
+        sphere = Sphere(intrinsic_dim=dim, radius=1.0)
+        self.assertEqual(sphere.ambient_dim, 7)
+        self.assertEqual(sphere.intrinsic_dim, 6)
+        
+        pts = sphere.random_sample(self.key, (5,))
+        self.assertEqual(pts.shape[-1], 7)
+        np.testing.assert_allclose(jnp.linalg.norm(pts, axis=-1), 1.0, atol=1e-5)
+        
+        x = pts[0]
+        v = jax.random.normal(self.key, (7,))
+        v_tan = sphere.to_tangent(x, v)
+        self.assertAlmostEqual(float(jnp.dot(v_tan, x)), 0.0, delta=1e-5)
+        
+        y = sphere.exp_map(x, v_tan * 0.1)
+        self.assertAlmostEqual(float(jnp.linalg.norm(y)), 1.0, delta=1e-5)
 
     def test_torus_operations(self):
         torus = Torus(major_R=2.0, minor_r=1.0)
