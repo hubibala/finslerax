@@ -75,86 +75,85 @@ class JointTrainer:
         """
         Jointly trains Geography (VAE) and Physics (Geodesics + Smoothness).
         """
-        
-        # 1. Split keys for VAE sampling
-        # Stack parents and children to compute VAE loss efficiently on both
         x_all = jnp.concatenate([x_p, x_c], axis=0)
         keys = jax.random.split(key, x_all.shape[0])
 
+        # ONLY TAKES 'm' (The model parameters being updated)
         def loss_fn(m):
             # --- A. Geography (VAE Loss) ---
-            # Reconstruct both parents and children
-            # This ensures the latent space captures all cell states
             vae_losses, vae_stats = jax.vmap(m.loss_fn)(x_all, x_all, keys)
             loss_vae = jnp.mean(vae_losses)
             
             # --- B. Physics (Geodesic Action) ---
-            # 1. Get Latent Codes (Gradient flows through Encoder!)
             dist_p = jax.vmap(m._get_dist)(x_p)
             dist_c = jax.vmap(m._get_dist)(x_c)
             z_p = dist_p.mean
             z_c = dist_c.mean
             
-            # 2. Solve Inverse Dynamics (AVBD Solver)
-            # Find the path of least action connecting z_p -> z_c
-            solve_fn = jax.vmap(lambda s, e: self.solver.solve(m.metric, s, e, n_steps=6, train_mode=True))
-            trajectories = solve_fn(z_p, z_c)
+            # 1. Stop Gradients into the Latent Space for Solver Stability
+            z_p_sg = jax.lax.stop_gradient(z_p)
+            z_c_sg = jax.lax.stop_gradient(z_c)
             
-            # 3. Action Minimization (The "Wind" Loss)
-            # Minimizing Randers Action aligns W with the trajectory v
-            loss_action = jnp.mean(trajectories.energy)
-            
-            # --- C. Regularization (Stability & Smoothness) ---
-            
-            # Sample points along the trajectory for regularization
-            # Shape: (Batch * Steps, Dim)
-            sample_pts = trajectories.xs.reshape(-1, trajectories.xs.shape[-1])
+            # Pack the physics computation into a function for the true branch
+            # Notice: No more `m_mod`, we just use `m` directly from the outer scope!
+            def compute_physics(operands):
+                zp, zc = operands
+                
+                # 2. Solve Inverse Dynamics using `m` directly
+                solve_fn = jax.vmap(lambda s, e: self.solver.solve(m.metric, s, e, n_steps=6, train_mode=True))
+                optimal_traj = jax.lax.stop_gradient(solve_fn(zp, zc))
+                
+                # 3. Action Minimization
+                def compute_step_energy(x, v):
+                    return m.metric.metric_fn(x, v)**2 
+                    
+                xs_segments = optimal_traj.xs[:, :-1, :]
+                batch_energies = jax.vmap(jax.vmap(compute_step_energy))(xs_segments, optimal_traj.vs)
+                loss_act = jnp.mean(jnp.sum(batch_energies, axis=-1))
+                
+                # C. Regularization
+                sample_pts = optimal_traj.xs.reshape(-1, optimal_traj.xs.shape[-1])
+                
+                def reg_magnitudes(x):
+                    M, W, _ = m.metric._get_zermelo_data(x)
+                    dim = M.shape[-1]
+                    return jnp.sum((M - jnp.eye(dim))**2), jnp.sum(W**2)
+                
+                loss_M_val, loss_W_val = jax.vmap(reg_magnitudes)(sample_pts)
+                loss_anchor = jnp.mean(loss_M_val) + 0.001 * jnp.mean(loss_W_val)
 
-            # Helper to extract fields pure-functionally
-            def get_fields(x):
-                M, W, _ = m.metric._get_zermelo_data(x)
-                return M, W
+                def get_wind_only(x):
+                    _, W, _ = m.metric._get_zermelo_data(x)
+                    return W
+                
+                jacobians = jax.vmap(jax.jacfwd(get_wind_only))(sample_pts) 
+                loss_smooth = jnp.mean(jacobians**2)
+                
+                total_geo = loss_act + 10.0 * loss_anchor + 0.1 * loss_smooth
+                return total_geo, loss_act
 
-            # 1. Anchor Regularization (Keep M approx Identity, W small)
-            def reg_magnitudes(x):
-                M, W = get_fields(x)
-                dim = M.shape[-1]
-                # Force M approx Identity
-                loss_M = jnp.sum((M - jnp.eye(dim))**2)
-                # Soft penalty on W magnitude
-                loss_W = jnp.sum(W**2)
-                return loss_M, loss_W
-            
-            loss_M_val, loss_W_val = jax.vmap(reg_magnitudes)(sample_pts)
-            loss_anchor = jnp.mean(loss_M_val) + 0.001 * jnp.mean(loss_W_val)
+            # Pack the false branch (Skip physics entirely)
+            def skip_physics(operands):
+                return 0.0, 0.0
 
-            # 2. Jacobian Regularization (The Smoother)
-            # Penalize dW/dx to ensure laminar flow
-            def get_wind_only(x):
-                _, W, _ = m.metric._get_zermelo_data(x)
-                return W
-            
-            # Calculate Jacobian matrix dW/dx
-            # jacfwd is efficient for small output dimensions (here: Dim=3)
-            jac_fn = jax.jacfwd(get_wind_only)
-            jacobians = jax.vmap(jac_fn)(sample_pts) 
-            loss_smooth = jnp.mean(jacobians**2)
+            # ONLY execute the solver if the weight is strictly greater than 0
+            # We only pass the standard JAX arrays as operands!
+            total_geo_loss, loss_action = jax.lax.cond(
+                geo_weight > 0.0,
+                compute_physics,
+                skip_physics,
+                (z_p_sg, z_c_sg)
+            )
             
             # --- D. Total Weighted Loss ---
-            # Combine terms:
-            # - Action: 1.0 (Physics goal)
-            # - Anchor: 10.0 (Geometric stability)
-            # - Smooth: 0.1 (Laminar flow constraint)
-            total_geo_loss = loss_action + 10.0 * loss_anchor + 0.1 * loss_smooth
-            
             return loss_vae + geo_weight * total_geo_loss, (loss_vae, loss_action)
 
+        # eqx.filter_value_and_grad perfectly wraps loss_fn(m) now
         (loss, (l_vae, l_geo)), grads = eqx.filter_value_and_grad(loss_fn, has_aux=True)(model)
         updates, new_opt_state = self.optimizer.update(grads, opt_state, model)
         new_model = eqx.apply_updates(model, updates)
         
         return new_model, new_opt_state, loss, l_vae, l_geo
-
 def generate_wind_grid(model, resolution=20):
     """
     Evaluates the learned Wind field on a uniform grid over the Poincaré disk.
@@ -235,55 +234,55 @@ def main():
     
     trainer = JointTrainer(vae, learning_rate=1e-3)
     
-    # 3. Joint Training Loop
+   # --- The Fix: Mini-batching and Hard Warmup ---
+    x_p = X[pairs[:, 0]]
+    x_c = X[pairs[:, 1]]
+    step_key = key
     epochs = 100
-    batch_size = 128
-    
-    print(f"\nStarting Joint Training ({epochs} epochs)...")
-    print("Strategy: Ramp up Physics weight from 0.0 -> 0.5 over first 20 epochs")
+    batch_size = 1024 # Fits perfectly in T4 GPU VRAM
+    num_batches = len(x_p) // batch_size
 
-    loss_history = []
+    print(f"Starting Joint Training ({epochs} epochs)...")
+    print(f"Batches per epoch: {num_batches}")
     
     for epoch in range(epochs):
-        # Dynamic Weight Schedule (Warm-up)
-        # Epoch 0-20: Ramp from 0 to 0.5
-        # Epoch 20+: Constant 0.5
-        geo_weight = min(0.5, (epoch / 20.0) * 0.5)
-        
-        # Shuffle Data
-        key, subkey = jax.random.split(key)
-        perm = jax.random.permutation(subkey, n_pairs)
-        
-        epoch_vae = 0
-        epoch_geo = 0
-        
-        # Iterate over batches of pairs
-        for i in range(0, n_pairs, batch_size):
-            idx = perm[i:i+batch_size]
-            batch_pairs = pairs[idx]
+        # 1. HARD Warmup Schedule: Strictly 0.0 for the first 20 epochs!
+        if epoch < 20:
+            geo_weight = 0.0
+        else:
+            # Ramps from 0.0 -> 0.5 between epochs 20 and 40
+            geo_weight = min(0.5, ((epoch - 20) / 20.0) * 0.5)
             
-            # Get gene expression for parents and children
-            x_p = X[batch_pairs[:, 0]]
-            x_c = X[batch_pairs[:, 1]]
+        epoch_l_vae = 0.0
+        epoch_l_geo = 0.0
+        
+        # Shuffle the data at the start of each epoch
+        step_key, subkey = jax.random.split(step_key)
+        perms = jax.random.permutation(subkey, len(x_p))
+        x_p_shuffled = x_p[perms]
+        x_c_shuffled = x_c[perms]
+
+        # 2. Mini-batch Loop
+        for b in range(num_batches):
+            start_idx = b * batch_size
+            end_idx = start_idx + batch_size
             
-            step_key = jax.random.fold_in(subkey, i)
+            x_p_batch = x_p_shuffled[start_idx:end_idx]
+            x_c_batch = x_c_shuffled[start_idx:end_idx]
             
-            # Train Step
-            trainer.model, trainer.opt_state, _, l_vae, l_geo = trainer.train_step_joint(
-                trainer.model, trainer.opt_state, x_p, x_c, step_key, geo_weight
+            trainer.model, trainer.opt_state, loss, l_vae, l_geo = trainer.train_step_joint(
+                trainer.model, trainer.opt_state, x_p_batch, x_c_batch, step_key, geo_weight
             )
             
-            epoch_vae += l_vae
-            epoch_geo += l_geo
+            epoch_l_vae += l_vae
+            epoch_l_geo += l_geo
             
-        # Logging
-        n_batches = n_pairs / batch_size
-        avg_vae = epoch_vae / n_batches
-        avg_geo = epoch_geo / n_batches
-        loss_history.append((avg_vae, avg_geo))
-        
-        if epoch % 5 == 0:
-            print(f"Epoch {epoch:03d} | VAE Loss: {avg_vae:.4f} | Physics Action: {avg_geo:.4f} | Weight: {geo_weight:.2f}")
+        # Average the loss over the batches
+        avg_vae = epoch_l_vae / num_batches
+        avg_geo = epoch_l_geo / num_batches
+
+        if epoch % 5 == 0 or epoch == 20:
+            print(f"Epoch {epoch:03d} | VAE: {avg_vae:.4f} | Physics: {avg_geo:.4f} | Weight: {geo_weight:.2f}")
 
     # 4. Visualization & Save
     print("\nGenerating Wind Field Visualization...")

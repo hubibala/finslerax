@@ -10,6 +10,7 @@ config.update("jax_enable_x64", True)
 from ham.geometry.surfaces import Hyperboloid
 from ham.bio.vae import GeometricVAE, WrappedHyperbolicNormal
 from ham.geometry.zoo import Riemannian
+from ham.training.losses import ReconstructionLoss, KLDivergenceLoss, ZermeloAlignmentLoss
 
 class MockMetric(Riemannian):
     """Simple Euclidean-like metric for testing VAE integration."""
@@ -100,26 +101,7 @@ class TestHyperbolicVAE(unittest.TestCase):
 
     def test_vae_forward_pass(self):
         """
-        Test the full GeometricVAE forward pass.
-        """
-        data_dim = 5
-        latent_dim = 2
-        vae = GeometricVAE(data_dim, latent_dim, self.metric, self.key)
-        
-        x = jax.random.normal(self.key, (data_dim,))
-        v_rna = jax.random.normal(self.key, (data_dim,)) # Dummy velocity
-        
-        loss, aux = vae.loss_fn(x, v_rna, self.key)
-        
-        self.assertTrue(jnp.isfinite(loss))
-        # Check aux outputs (recon, kl, spray, align)
-        self.assertEqual(len(aux), 4)
-        for val in aux:
-            self.assertTrue(jnp.isfinite(val))
-
-    def test_vae_gradients(self):
-        """
-        Test that we can compute gradients for the VAE parameters.
+        Test the full GeometricVAE forward pass using modular losses.
         """
         data_dim = 5
         latent_dim = 2
@@ -128,9 +110,37 @@ class TestHyperbolicVAE(unittest.TestCase):
         x = jax.random.normal(self.key, (data_dim,))
         v_rna = jax.random.normal(self.key, (data_dim,))
         
+        # Test individual loss components (replaces monolithic loss_fn)
+        recon_loss = ReconstructionLoss(weight=1.0)
+        kl_loss = KLDivergenceLoss(weight=1e-4)
+        align_loss = ZermeloAlignmentLoss(weight=0.1)
+        
+        batch = (x, v_rna)
+        
+        r = recon_loss(vae, batch, self.key)
+        k = kl_loss(vae, batch, self.key)
+        a = align_loss(vae, batch, self.key)
+        
+        self.assertTrue(jnp.isfinite(r))
+        self.assertTrue(jnp.isfinite(k))
+        self.assertTrue(jnp.isfinite(a))
+
+    def test_vae_gradients(self):
+        """
+        Test that we can compute gradients for the VAE parameters via modular losses.
+        """
+        data_dim = 5
+        latent_dim = 2
+        vae = GeometricVAE(data_dim, latent_dim, self.metric, self.key)
+        
+        x = jax.random.normal(self.key, (data_dim,))
+        v_rna = jax.random.normal(self.key, (data_dim,))
+        batch = (x, v_rna)
+        
+        recon_loss = ReconstructionLoss(weight=1.0)
+        
         def loss_wrapper(model):
-            l, _ = model.loss_fn(x, v_rna, self.key)
-            return l
+            return recon_loss(model, batch, self.key)
             
         grads = eqx.filter_grad(loss_wrapper)(vae)
         

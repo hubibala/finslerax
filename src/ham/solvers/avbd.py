@@ -78,8 +78,8 @@ class AVBDSolver(eqx.Module):
         # 2. Define the discrete Action (Energy) locally
         def local_action(x_prev, x, x_next):
             # Discrete Finsler Energy: F(x, v)^2
-            v_in = x - x_prev
-            v_out = x_next - x
+            v_in = metric.manifold.log_map(x_prev, x)
+            v_out = metric.manifold.log_map(x, x_next)
             # We minimize the sum of energies of the two segments connected to x
             return metric.energy(x_prev, v_in) + metric.energy(x, v_out)
 
@@ -142,7 +142,7 @@ class AVBDSolver(eqx.Module):
             
             # Compute Energy for monitoring
             full_new = jnp.concatenate([p_start[None, :], new_inner, p_end[None, :]], axis=0)
-            vels = full_new[1:] - full_new[:-1]
+            vels = jax.vmap(metric.manifold.log_map)(full_new[:-1], full_new[1:])
             total_E = jnp.sum(jax.vmap(metric.energy)(full_new[:-1], vels))
             
             return SolverState(
@@ -167,7 +167,7 @@ class AVBDSolver(eqx.Module):
 
         # 6. Output
         full_path = jnp.concatenate([p_start[None, :], final_state.path, p_end[None, :]], axis=0)
-        velocities = full_path[1:] - full_path[:-1]
+        velocities = jax.vmap(metric.manifold.log_map)(full_path[:-1], full_path[1:])
         
         return Trajectory(
             xs=full_path,

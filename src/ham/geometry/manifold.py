@@ -3,6 +3,43 @@ import jax.numpy as jnp
 import equinox as eqx
 from abc import ABC, abstractmethod
 from typing import Tuple
+from ..utils.math import safe_norm
+
+@jax.custom_jvp
+def _safe_norm_ratio_jvp(x, y):
+    """
+    Computes ||x|| / ||y|| safely.
+    If ||y|| is 0, outputs 1.0 (since x conceptually approaches y).
+    """
+    nx = jnp.linalg.norm(x, axis=-1, keepdims=True)
+    ny = jnp.linalg.norm(y, axis=-1, keepdims=True)
+    return jnp.where(ny < 1e-12, 1.0, nx / jnp.maximum(ny, 1e-12))
+
+@_safe_norm_ratio_jvp.defjvp
+def _safe_norm_ratio_jvp_def(primals, tangents):
+    x, y = primals
+    x_dot, y_dot = tangents
+    
+    nx = jnp.linalg.norm(x, axis=-1, keepdims=True)
+    ny = jnp.linalg.norm(y, axis=-1, keepdims=True)
+    
+    is_zero = ny < 1e-12
+    nx_safe = jnp.where(is_zero, 1.0, nx)
+    ny_safe = jnp.where(is_zero, 1.0, ny)
+    
+    # Primal out
+    primal_out = jnp.where(is_zero, 1.0, nx / ny_safe)
+    
+    # JVP
+    # d( ||x|| / ||y|| ) = ( ||y|| * d(||x||) - ||x|| * d(||y||) ) / ||y||^2
+    # d(||x||) = x . x_dot / ||x||
+    dnx = jnp.where(nx < 1e-12, 0.0, jnp.sum(x * x_dot, axis=-1, keepdims=True) / nx_safe)
+    dny = jnp.where(is_zero, 0.0, jnp.sum(y * y_dot, axis=-1, keepdims=True) / ny_safe)
+    
+    # Quot rule
+    tangent_out = jnp.where(is_zero, 0.0, (ny_safe * dnx - nx * dny) / (ny_safe**2))
+    
+    return primal_out, tangent_out
 
 class Manifold(eqx.Module, ABC):
     """
@@ -75,6 +112,28 @@ class Manifold(eqx.Module, ABC):
         - Closed-form for symmetric spaces (sphere, Stiefel, etc.)
         """
         pass
+
+    def log_map(self, x: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
+        """
+        Computes the tangent vector (velocity) v in T_x M pointing from x to y,
+        such that retract(x, v) = y (or exp_map(x, v) = y).
+        
+        The default implementation provides a mathematically rigorous first-order 
+        approximation by extracting the tangent component of the secant vector.
+        """
+        v = self.to_tangent(x, y - x)
+        
+        # Scaling correction: The straight-line ambient distance is a much better
+        # approximation of intrinsic distance than the length of the projected secant.
+        # This strictly prevents the solver from taking topological "shortcuts" through 
+        # the interior of curved objects (like the hole of a Torus), where purely normal 
+        # secants artificially project to zero length and trick the optimizer.
+        
+        # We use a custom JVP to compute ||y - x|| / ||v|| safely.
+        # If y approaches x, v approaches y - x, and the ratio goes cleanly to 1.
+        scale = _safe_norm_ratio_jvp(y - x, v)
+        
+        return v * scale
     
     @abstractmethod
     def random_sample(self, key: jax.Array, shape: Tuple[int, ...]) -> jnp.ndarray:

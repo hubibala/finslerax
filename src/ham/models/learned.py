@@ -4,6 +4,7 @@ import equinox as eqx
 from ..geometry.metric import FinslerMetric
 from ..geometry.manifold import Manifold
 from ..nn.networks import VectorField, PSDMatrixField
+from ..utils.math import safe_norm
 
 class NeuralRanders(FinslerMetric, eqx.Module):
     """
@@ -80,20 +81,43 @@ class NeuralRanders(FinslerMetric, eqx.Module):
         
         return H, W, lam
 
-    def metric_fn(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+    def norm(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
         """
-        The Learned Cost Function.
+        The Learned Cost Function (Zermelo-Randers), completely safeguarded against v=0.
         """
+        # 1. STRICT SAFEGUARD: Ensure v is never mathematically zero
+        # We use keepdims=False for is_zero to easily mask the scalar output later
+        v_mag = safe_norm(v, axis=-1)
+        is_zero = v_mag < 1e-7
+        
+        # Expand is_zero for the vector addition
+        v_safe = jnp.where(is_zero[..., None], v + 1e-7, v)
+        
         H, W, lam = self._get_zermelo_data(x)
         
-        # Standard Zermelo-Randers Formula
-        v_sq_h = jnp.dot(v, jnp.dot(H, v))
-        W_dot_v = jnp.dot(v, jnp.dot(H, W))
+        # 2. Standard Zermelo-Randers Formula using v_safe
+        # (Using jnp.sum and matmul is safer for batched inputs than jnp.dot)
+        Hv = jnp.matmul(H, v_safe)
+        HW = jnp.matmul(H, W)
+        
+        v_sq_h = jnp.sum(v_safe * Hv, axis=-1)
+        W_dot_v = jnp.sum(v_safe * HW, axis=-1)
         
         discriminant = lam * v_sq_h + W_dot_v**2
         
-        # Safe Sqrt: Using additive epsilon inside the sqrt ensures the Hessian 
-        # is well-defined and stable even at v=0.
+        # The +1e-9 is still a great safety net for floating point jitter
         sqrt_D = jnp.sqrt(jnp.maximum(discriminant, 0.0) + 1e-9)
         
-        return (sqrt_D - W_dot_v) / lam
+        F_safe = (sqrt_D - W_dot_v) / lam
+        
+        # 3. THE MAGIC SHIELD: 
+        # If the cell was a clone (v=0), force the output to exactly 0.0.
+        # JAX tracks this branch and will cleanly backpropagate a gradient of 0.0!
+        return jnp.where(is_zero, 0.0, F_safe)
+
+    # If your solver specifically calls `metric_fn`, alias it so nothing breaks:
+    def metric_fn(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+        return self.norm(x, v)
+        
+    def energy(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+        return 0.5 * self.norm(x, v)**2
