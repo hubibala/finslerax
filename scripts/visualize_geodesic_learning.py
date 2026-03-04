@@ -319,7 +319,7 @@ def main():
     print("Training Hyperboloid Vortex scenario...")
     m_h = Hyperboloid(intrinsic_dim=2)
     ds_h, tw_h = generate_hyperboloid_vortex(500, noise=0.0)
-    model_h = train(m_h, ds_h, epochs=100, lr=3e-3)
+    model_h = train(m_h, ds_h, epochs=3000, lr=1e-3)
     grid_h = jax.vmap(m_h.random_sample, in_axes=(0, None))(
         jax.random.split(jax.random.PRNGKey(777), 300), ()
     )

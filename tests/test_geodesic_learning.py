@@ -313,7 +313,7 @@ class TestGeodesicLearning(unittest.TestCase):
         """Rotational flow on H^2: learned W should match tangent wind."""
         manifold = Hyperboloid(intrinsic_dim=2)
         dataset, true_wind_fn = generate_hyperboloid_vortex(500, noise=0.0)
-        trained = train_wind_field(manifold, dataset, epochs=100, lr=3e-3)
+        trained = train_wind_field(manifold, dataset, epochs=3000, lr=1e-3)
 
         eval_pts = jax.vmap(manifold.random_sample, in_axes=(0, None))(
             jax.random.split(jax.random.PRNGKey(999), 200), ()
@@ -333,7 +333,7 @@ class TestGeodesicLearning(unittest.TestCase):
         """Rotational flow on S^2: learned W should match true tangent wind."""
         manifold = Sphere(radius=1.0)
         dataset, true_wind_fn = generate_sphere_vortex(500, noise=0.0)
-        trained = train_wind_field(manifold, dataset, epochs=100, lr=3e-3)
+        trained = train_wind_field(manifold, dataset, epochs=1000, lr=1e-3)
 
         # Evaluate on held-out points
         eval_pts = jax.vmap(manifold.random_sample, in_axes=(0, None))(
