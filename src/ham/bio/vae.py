@@ -6,61 +6,50 @@ from typing import Tuple, Any
 from ham.geometry.metric import FinslerMetric
 from ham.geometry.surfaces import Hyperboloid
 
-class WrappedHyperbolicNormal(eqx.Module):
+class WrappedNormal(eqx.Module):
     """
-    Wrapped Normal distribution on the Hyperboloid.
-    Defined by a mean mu (on H^n) and a diagonal scale sigma (in tangent space).
+    Wrapped Normal distribution on a Manifold.
+    Defined by a mean mu and a diagonal scale sigma in the tangent space at the origin/pole.
     """
-    mean: jnp.ndarray  # Shape: (..., D+1)
-    scale: jnp.ndarray # Shape: (..., D) - Diagonal covariance in tangent space
-    manifold: Hyperboloid
+    mean: jnp.ndarray
+    scale: jnp.ndarray
+    manifold: Any
 
-    def __init__(self, mean: jnp.ndarray, scale: jnp.ndarray, manifold: Hyperboloid):
+    def __init__(self, mean: jnp.ndarray, scale: jnp.ndarray, manifold: Any):
         self.mean = manifold.project(mean)
         self.scale = scale
         self.manifold = manifold
 
     def sample(self, key: jax.random.PRNGKey, shape: Tuple[int] = ()) -> jnp.ndarray:
-        # 1. Sample v ~ N(0, scale) in the tangent space of the ORIGIN
-        # Origin O = (1, 0, ..., 0)
-        # Tangent at O is just (0, v1, v2, ...) ~ R^D
         d = self.manifold.intrinsic_dim
         v_flat = jax.random.normal(key, shape + (d,)) * self.scale
         
-        # Embed v into ambient space at Origin: (0, v_flat)
-        v_origin = jnp.concatenate([jnp.zeros(shape + (1,)), v_flat], axis=-1)
-        
-        # 2. Transport v from Origin to Mean
-        # We use parallel transport along the geodesic from Origin to self.mean
         origin = jnp.zeros_like(self.mean)
-        origin = origin.at[..., 0].set(1.0)
-        
+        if isinstance(self.manifold, Hyperboloid):
+            origin = origin.at[..., 0].set(1.0)
+            v_origin = jnp.concatenate([jnp.zeros(shape + (1,)), v_flat], axis=-1)
+        else:
+            # Sphere or Euclidean flat space fallback
+            radius = getattr(self.manifold, "radius", 1.0)
+            origin = origin.at[..., -1].set(radius)
+            v_origin = jnp.concatenate([v_flat, jnp.zeros(shape + (1,))], axis=-1)
+            
         v_at_mean = self.manifold.parallel_transport(origin, self.mean, v_origin)
-        
-        # 3. Apply Exponential Map at Mean
         z = self.manifold.exp_map(self.mean, v_at_mean)
         return z
 
     def kl_divergence_std_normal(self) -> jnp.ndarray:
-        """
-        Computes KL(q(z)||p(z)) where p(z) is standard Wrapped Normal at Origin.
-        Approximation: KL is computed between the tangent space Gaussians.
-        """
-        # KL between N(0, scale) and N(0, 1)
-        # sum(log(1/sigma) + (sigma^2 + 0^2)/(2*1) - 0.5)
-        # = sum(-log(sigma) + sigma^2/2 - 0.5)
-        
         kl = -jnp.log(self.scale + 1e-6) + (self.scale**2) / 2.0 - 0.5
         return jnp.sum(kl, axis=-1)
 
 class GeometricVAE(eqx.Module):
     """
-    Hyperbolic VAE with Zermelo Control Dynamics.
+    Geometric VAE with Zermelo Control Dynamics.
     """
     encoder_net: eqx.Module
     decoder_net: eqx.Module
     metric: FinslerMetric 
-    manifold: Hyperboloid
+    manifold: Any
     
     data_dim: int = eqx.field(static=True)
     latent_dim: int = eqx.field(static=True) 
@@ -69,31 +58,27 @@ class GeometricVAE(eqx.Module):
         self.data_dim = data_dim
         self.latent_dim = latent_dim
         self.metric = metric
-        self.manifold = Hyperboloid(intrinsic_dim=latent_dim)
+        self.manifold = metric.manifold
         
         k1, k2 = jax.random.split(key)
         
-        # Encoder: Outputs (D+1) for mean + (D) for scale
-        # We need ambient dim for the mean because we project it.
-        self.encoder_net = eqx.nn.MLP(data_dim, (latent_dim + 1) + latent_dim, 128, 3, activation=jax.nn.gelu, key=k1)
+        d_amb = self.manifold.ambient_dim
+        d_int = self.manifold.intrinsic_dim
         
-        # Decoder: Takes (D+1) [hyperboloid point] -> Data
-        self.decoder_net = eqx.nn.MLP(latent_dim + 1, data_dim, 128, 3, activation=jax.nn.gelu, key=k2)
+        self.encoder_net = eqx.nn.MLP(data_dim, d_amb + d_int, 128, 3, activation=jax.nn.gelu, key=k1)
+        self.decoder_net = eqx.nn.MLP(d_amb, data_dim, 128, 3, activation=jax.nn.gelu, key=k2)
 
     def _get_dist(self, x):
         out = self.encoder_net(x)
+        d_amb = self.manifold.ambient_dim
         
-        # Split output
-        mu_raw = out[:self.latent_dim + 1]
-        log_scale = out[self.latent_dim + 1:]
+        mu_raw = out[:d_amb]
+        log_scale = out[d_amb:]
         
-        # 1. Project mean to Hyperboloid
         mu = self.manifold.project(mu_raw)
-        
-        # 2. Scale is strictly positive
         scale = jax.nn.softplus(log_scale) + 1e-4
         
-        return WrappedHyperbolicNormal(mu, scale, self.manifold)
+        return WrappedNormal(mu, scale, self.manifold)
 
     def encode(self, x, key):
         dist = self._get_dist(x)
