@@ -183,5 +183,51 @@ class TestTransport(unittest.TestCase):
         self.assertGreater(diff, 1e-4, 
                            "Randers transport should depend on the speed of the base curve")
 
+    def test_sphere_holonomy(self):
+        """
+        Verify parallel transport around a latitude circle on S2 
+        reproduces known holonomy angle 2*pi*(1 - cos(theta)) or similar 
+        depending on frame transport. Here the angle shift in the tangent 
+        plane should be 2*pi*cos(theta).
+        """
+        def sphere_metric(x):
+            return jnp.eye(3)
+        metric = Riemannian(self.sphere, sphere_metric)
+        
+        theta = jnp.pi / 4.0
+        t = jnp.linspace(0, 2*jnp.pi, 200)
+        
+        path_x = jnp.stack([
+            jnp.sin(theta) * jnp.cos(t),
+            jnp.sin(theta) * jnp.sin(t),
+            jnp.full_like(t, jnp.cos(theta))
+        ], axis=1)
+        
+        path_v = jnp.stack([
+            -jnp.sin(theta) * jnp.sin(t),
+             jnp.sin(theta) * jnp.cos(t),
+             jnp.zeros_like(t)
+        ], axis=1)
+        
+        # Start vector: pointing "East"
+        vec_start = jnp.array([0.0, 1.0, 0.0])
+        
+        vecs = berwald_transport(metric, path_x, path_v, vec_start)
+        vec_end = vecs[-1]
+        
+        # Tangent plane basis at (sin(theta), 0, cos(theta)):
+        phi_hat = jnp.array([0.0, 1.0, 0.0])
+        theta_hat = jnp.array([jnp.cos(theta), 0.0, -jnp.sin(theta)])
+        
+        v_end_phi = jnp.dot(vec_end, phi_hat)
+        v_end_theta = jnp.dot(vec_end, theta_hat)
+        
+        angle = jnp.arctan2(v_end_theta, v_end_phi)
+        
+        expected_angle = 2 * jnp.pi * jnp.cos(theta)
+        
+        # We check that the cosines match to avoid +- convention issues
+        np.testing.assert_allclose(jnp.cos(angle), jnp.cos(expected_angle), atol=1e-1)
+
 if __name__ == '__main__':
     unittest.main()

@@ -94,6 +94,31 @@ class TestMetricPhysics(unittest.TestCase):
         
         np.testing.assert_allclose(val, expected, atol=1e-5)
 
+    def test_inner_product_curved(self):
+        """
+        Test that inner_product computes correctly for a curved metric where g_ij != I.
+        """
+        class CurvedMetric(FinslerMetric):
+            def metric_fn(self, x, v):
+                # g_ij = diag(1 + x^2)
+                g_diag = 1.0 + x**2
+                sq_norm = jnp.sum(g_diag * v**2)
+                return jnp.sqrt(sq_norm)
+        
+        curved = CurvedMetric(self.manifold)
+        x = jnp.array([1.0, 2.0, 3.0])
+        v = jnp.array([1.0, 1.0, 1.0])
+        w1 = jnp.array([1.0, 0.0, 0.5])
+        w2 = jnp.array([0.0, 1.0, 2.0])
+        
+        # Exact calculation: g_ij = diag([2.0, 5.0, 10.0])
+        val = curved.inner_product(x, v, w1, w2)
+        
+        expected_g = jnp.diag(1.0 + x**2)
+        expected_val = jnp.dot(w1, jnp.dot(expected_g, w2))
+        
+        np.testing.assert_allclose(val, expected_val, atol=1e-5)
+
     def test_acceleration_sign(self):
         """
         Verify geod_acceleration = -2 * spray

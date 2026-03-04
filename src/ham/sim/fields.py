@@ -99,3 +99,37 @@ def harmonic_vortices(l: int = 5, m: int = 3) -> Callable[[jnp.ndarray], jnp.nda
         return cos_lat_m * z_poly * cos_m_lon
     
     return get_stream_function_flow(psi)
+
+def lamb_oseen_vortex(center: jnp.ndarray, core_radius: float = 1.0, circulation: float = 1.0) -> Callable[[jnp.ndarray], jnp.ndarray]:
+    """2D Lamb-Oseen vortex (smoothed point vortex)."""
+    def flow(x: jnp.ndarray) -> jnp.ndarray:
+        r_vec = x[:2] - center[:2]
+        r_sq = jnp.sum(r_vec**2) + 1e-10
+        r = jnp.sqrt(r_sq)
+        velocity_mag = (circulation / (2 * jnp.pi * r)) * (1.0 - jnp.exp(-r_sq / (core_radius**2)))
+        v_x = -velocity_mag * r_vec[1] / r
+        v_y = velocity_mag * r_vec[0] / r
+        v = jnp.array([v_x, v_y])
+        if x.shape[0] > 2:
+            v_z = jnp.zeros(x.shape[0] - 2)
+            v = jnp.concatenate([v, v_z])
+        return v
+    return flow
+
+def rankine_vortex(center: jnp.ndarray, core_radius: float = 1.0, circulation: float = 1.0) -> Callable[[jnp.ndarray], jnp.ndarray]:
+    """2D Rankine vortex (solid body inside, irrotational outside)."""
+    def flow(x: jnp.ndarray) -> jnp.ndarray:
+        r_vec = x[:2] - center[:2]
+        r = jnp.linalg.norm(r_vec) + 1e-10
+        
+        v_theta = jnp.where(r <= core_radius, 
+                            (circulation * r) / (2 * jnp.pi * core_radius**2),
+                            circulation / (2 * jnp.pi * r))
+        v_x = -v_theta * r_vec[1] / r
+        v_y = v_theta * r_vec[0] / r
+        v = jnp.array([v_x, v_y])
+        if x.shape[0] > 2:
+            v_z = jnp.zeros(x.shape[0] - 2)
+            v = jnp.concatenate([v, v_z])
+        return v
+    return flow

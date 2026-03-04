@@ -49,18 +49,23 @@ class Sphere(Manifold):
         return v - proj * x
 
     def exp_map(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
-        """Riemannian exponential map on the sphere."""
+        """Riemannian exponential map on the sphere S^n(r).
+
+        For a sphere of radius r the geodesic angle is θ = ||v|| / r.
+        γ(1) = cos(θ) x  +  sin(θ)/θ  v
+        """
         norm_v = safe_norm(v, axis=-1, keepdims=True)
-        safe_nv = jnp.maximum(norm_v, TAYLOR_EPS)
+        theta = norm_v / self.radius
+        safe_theta = jnp.maximum(theta, TAYLOR_EPS)
         sin_theta_over_theta = jnp.where(
-            norm_v < TAYLOR_EPS,
-            1.0 - (norm_v ** 2) / 6.0,
-            jnp.sin(safe_nv) / safe_nv,
+            theta < TAYLOR_EPS,
+            1.0 - (theta ** 2) / 6.0,
+            jnp.sin(safe_theta) / safe_theta,
         )
         cos_theta = jnp.where(
-            norm_v < TAYLOR_EPS,
-            1.0 - (norm_v ** 2) / 2.0,
-            jnp.cos(safe_nv),
+            theta < TAYLOR_EPS,
+            1.0 - (theta ** 2) / 2.0,
+            jnp.cos(safe_theta),
         )
         return cos_theta * x + sin_theta_over_theta * v
 

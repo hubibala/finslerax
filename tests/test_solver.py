@@ -10,7 +10,7 @@ from ham.geometry.surfaces import Sphere, Torus, Paraboloid
 from ham.geometry.zoo import Euclidean, Randers
 from ham.utils.math import safe_norm
 
-class TesSolver(unittest.TestCase):
+class TestSolver(unittest.TestCase):
     
     def setUp(self):
         # AVBD Settings: beta=10 for stiffness, 200 iterations

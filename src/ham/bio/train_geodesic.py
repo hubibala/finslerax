@@ -32,7 +32,7 @@ class GeodesicFlowTrainer:
             # Prevent the metric from shrinking to zero to cheat the energy loss.
             # We sample points along the path and force H(x) approx Identity
             def regularize_metric(x):
-                M, W, _ = m.metric._get_fields(x) # Access internal fields
+                M, W, _ = m.metric._get_zermelo_data(x) # Access internal fields
                 dim = M.shape[-1]
                 return jnp.mean((M - jnp.eye(dim))**2) + 0.1 * jnp.mean(W**2)
             

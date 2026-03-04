@@ -113,6 +113,15 @@ class Manifold(eqx.Module, ABC):
         """
         pass
 
+    def exp_map(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+        """
+        Computes the exponential map Exp_x(v), mapping a tangent vector
+        v ∈ T_x M to a point on the manifold.
+        
+        The default implementation falls back to the exact retraction.
+        """
+        return self.retract(x, v)
+
     def log_map(self, x: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
         """
         Computes the tangent vector (velocity) v in T_x M pointing from x to y,

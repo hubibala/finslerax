@@ -38,7 +38,12 @@ class AVBDSolver(eqx.Module):
               p_start: jnp.ndarray, p_end: jnp.ndarray, 
               n_steps: int = 10,
               constraints: Optional[List[Callable]] = None,
-              train_mode: bool = True) -> Trajectory:
+              train_mode: bool = True,
+              key: Optional[jax.Array] = None) -> Trajectory:
+        
+        if key is None:
+            key = jax.random.PRNGKey(42)
+        k1, k2 = jax.random.split(key)
         
         if constraints is None: constraints = []
         num_constraints = len(constraints)
@@ -51,8 +56,7 @@ class AVBDSolver(eqx.Module):
         
         # CRITICAL FIX: Add noise to prevent zero-velocity segments
         # If start == end, velocity is 0, and gradients explode.
-        key = jax.random.PRNGKey(42)
-        noise = jax.random.normal(key, shape=linear_path.shape) * 1e-4
+        noise = jax.random.normal(k1, shape=linear_path.shape) * 1e-4
         linear_path = linear_path + noise
         
         # Project initialization to manifold
@@ -124,8 +128,8 @@ class AVBDSolver(eqx.Module):
             full_path = jnp.concatenate([p_start[None, :], s.path, p_end[None, :]], axis=0)
             
             # Randomize update order (Stochastic Block Descent)
-            key = jax.random.PRNGKey(s.step) # deterministic for reproducibility
-            order = jax.random.permutation(key, jnp.arange(n_inner))
+            step_key = jax.random.fold_in(k2, s.step) # Fold in step for reproducibility
+            order = jax.random.permutation(step_key, jnp.arange(n_inner))
             
             # Scan over vertices to update them
             def scan_body(curr_path_inner, idx):

@@ -12,6 +12,9 @@ class Euclidean(FinslerMetric):
     """Standard Euclidean metric: F(x, v) = |v|."""
     # No extra fields needed, inherits 'manifold' from FinslerMetric
     
+    def __repr__(self) -> str:
+        return f"Euclidean(manifold={self.manifold})"
+
     def metric_fn(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
         return safe_norm(v)
 
@@ -22,6 +25,9 @@ class Riemannian(FinslerMetric):
     def __init__(self, manifold: Manifold, g_net: Callable[[jnp.ndarray], jnp.ndarray]):
         super().__init__(manifold)
         self.g_net = g_net
+
+    def __repr__(self) -> str:
+        return f"Riemannian(manifold={self.manifold})"
 
     def metric_fn(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
         G_x = self.g_net(x)
@@ -47,10 +53,22 @@ class Randers(FinslerMetric):
         self.w_net = w_net
         self.epsilon = epsilon
 
-    def _get_fields(self, x: jnp.ndarray):
+    def __repr__(self) -> str:
+        return f"Randers(manifold={self.manifold}, epsilon={self.epsilon})"
+
+    def _get_zermelo_data(self, x: jnp.ndarray):
         H = self.h_net(x)
         H = 0.5 * (H + H.T) 
+        
+        # Ensure H is positive definite
+        diag = jnp.diag(H)
+        diag_safe = jnp.maximum(diag, 0.01)
+        H = H.at[jnp.diag_indices_from(H)].set(diag_safe)
+        H = H + 0.005 * jnp.eye(H.shape[-1])
+        
         W_raw = self.w_net(x)
+        # Project tangent to avoid exploding components
+        W_raw = self.manifold.to_tangent(x, W_raw)
         
         w_norm_sq = jnp.dot(W_raw, jnp.dot(H, W_raw))
         w_norm = jnp.sqrt(w_norm_sq + 1e-8)
@@ -61,12 +79,24 @@ class Randers(FinslerMetric):
         return H, W, lam
 
     def metric_fn(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
-        H, W, lam = self._get_fields(x)
-        v_sq_h = jnp.dot(v, jnp.dot(H, v))
-        W_dot_v = jnp.dot(v, jnp.dot(H, W))
+        v_mag = safe_norm(v, axis=-1)
+        is_zero = v_mag < 1e-7
+        v_safe = jnp.where(is_zero[..., None], v + 1e-7, v)
+        
+        H, W, lam = self._get_zermelo_data(x)
+        
+        Hv = jnp.matmul(H, v_safe)
+        HW = jnp.matmul(H, W)
+        
+        v_sq_h = jnp.sum(v_safe * Hv, axis=-1)
+        W_dot_v = jnp.sum(v_safe * HW, axis=-1)
+        
         discriminant = lam * v_sq_h + W_dot_v**2
-        cost = (jnp.sqrt(jnp.maximum(discriminant, 1e-12)) - W_dot_v) / lam
-        return cost
+        cost = (jnp.sqrt(jnp.maximum(discriminant, 0.0) + 1e-9) - W_dot_v) / lam
+        return jnp.where(is_zero, 0.0, cost)
+
+    def norm(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+        return self.metric_fn(x, v)
 
 class DiscreteRanders(FinslerMetric):
     """Anisotropic Mesh Metric (Wind per face)."""

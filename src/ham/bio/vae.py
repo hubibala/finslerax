@@ -102,3 +102,35 @@ class GeometricVAE(eqx.Module):
         u_lat = self.manifold.to_tangent(z_mean, u_lat)
         return z_mean, u_lat
 
+    def loss_fn(self, x, v_rna, key):
+        """Monolithic loss function for backwards compatibility with training scripts."""
+        dist = self._get_dist(x)
+        z = dist.sample(key)
+        x_rec = self.decode(z)
+        
+        recon_loss = jnp.mean((x - x_rec)**2)
+        kl_loss = jnp.mean(dist.kl_divergence_std_normal())
+        
+        z_mean, u_lat = self.project_control(x, v_rna)
+        
+        if hasattr(self.metric, '_get_zermelo_data'):
+            _, W, _ = self.metric._get_zermelo_data(z_mean)
+        else:
+            W = jnp.zeros_like(u_lat)
+            
+        norm_w = self.manifold._minkowski_norm(W)
+        norm_v = self.manifold._minkowski_norm(u_lat)
+        
+        w_dir = W / jnp.maximum(norm_w, 1e-6)[..., None]
+        v_dir = u_lat / jnp.maximum(norm_v, 1e-6)[..., None]
+        align_loss = -self.manifold._minkowski_dot(w_dir, v_dir)
+        
+        dot_z = u_lat + W
+        spray_vec = self.metric.spray(z_mean, dot_z)
+        spray_loss = self.metric.inner_product(z_mean, dot_z, spray_vec, spray_vec)
+        
+        total_loss = recon_loss + 1e-4 * kl_loss + 0.1 * align_loss + 1.0 * spray_loss
+        
+        return total_loss, (recon_loss, kl_loss, spray_loss, align_loss)
+
+

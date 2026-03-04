@@ -8,7 +8,7 @@ from jax import config
 config.update("jax_enable_x64", True)
 
 from ham.geometry.surfaces import Hyperboloid
-from ham.bio.vae import GeometricVAE, WrappedHyperbolicNormal
+from ham.bio.vae import GeometricVAE, WrappedNormal
 from ham.geometry.zoo import Riemannian
 from ham.training.losses import ReconstructionLoss, KLDivergenceLoss, ZermeloAlignmentLoss
 
@@ -84,11 +84,11 @@ class TestHyperbolicVAE(unittest.TestCase):
 
     def test_wrapped_normal_sampling(self):
         """
-        Verify that WrappedHyperbolicNormal samples lie on the manifold.
+        Verify that WrappedNormal samples lie on the manifold.
         """
         mean = jnp.array([1.0, 0.0, 0.0])
         scale = jnp.array([0.5, 0.5]) # intrinsic dim = 2
-        dist = WrappedHyperbolicNormal(mean, scale, self.manifold)
+        dist = WrappedNormal(mean, scale, self.manifold)
         
         # Sample
         z = dist.sample(self.key, (10,))
