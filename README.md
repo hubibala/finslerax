@@ -6,7 +6,7 @@
 
 **HAMTools** is a rigorous, differentiable library for **Finsler Geometry**, built on JAX. It treats geometric metrics as learnable neural networks ("Generative Geometry"), enabling applications in Model-Based RL, Physics Discovery, and Representation Learning.
 
-> **Note:** This is the v1.0 Core Infrastructure ("The Rocket Engine"). 
+> **Note:** This is the v1.1.0 Core Infrastructure ("The Rocket Engine"). 
 > For the experimental World Model research code (v0.x), see the [`legacy/`](legacy/) directory.
 
 ## 🚀 Key Features

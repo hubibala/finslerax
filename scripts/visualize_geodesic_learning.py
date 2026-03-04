@@ -52,22 +52,29 @@ from test_geodesic_learning import (
 # ── Hyperboloid data generator ─────────────────────────────
 
 def generate_hyperboloid_vortex(n: int = 400, noise: float = 0.0):
-    """Rotational flow on H^2 (upper sheet of the two-sheeted hyperboloid)."""
+    """Rotational flow on H^2 (upper sheet of the two-sheeted hyperboloid).
+
+    Samples points near the tip via exp_map so that the wind field has
+    non-negligible magnitude everywhere in the training set — matching
+    the approach used in test_geodesic_learning.py.
+    """
     key = jax.random.PRNGKey(123)
     manifold = Hyperboloid(intrinsic_dim=2)
 
-    starts = jax.vmap(manifold.random_sample, in_axes=(0, None))(
-        jax.random.split(key, n), ()
-    )
+    # Sample points concentrated near the tip by using small tangent vectors
+    origin = jnp.array([1.0, 0.0, 0.0])
+    k1, k2 = jax.random.split(key)
+    v_spatial = jax.random.normal(k1, (n, 2)) * 0.8  # scale controls spread
+    v_tangent = jnp.concatenate([jnp.zeros((n, 1)), v_spatial], axis=1)
+    starts = jax.vmap(manifold.exp_map, in_axes=(None, 0))(origin, v_tangent)
 
     def true_wind(x):
-        # Rotation in the spatial (x1, x2) plane, projected to tangent space
+        # Rotation in the spatial (x1, x2) plane, constant magnitude
         v_rot = jnp.array([0.0, -x[2], x[1]])
-        mag = 1.5 * jnp.exp(-2.0 * (x[0] - 1.0)**2)  # stronger near the tip
-        return manifold.to_tangent(x, mag * v_rot)
+        return manifold.to_tangent(x, 0.5 * v_rot)
 
-    dt = 0.15
-    noise_keys = jax.random.split(key, n)
+    dt = 0.3
+    noise_keys = jax.random.split(k2, n)
 
     def step(s, nk):
         tang = true_wind(s) * dt
