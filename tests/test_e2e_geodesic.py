@@ -1,128 +1,94 @@
 """
-End-to-End Geometric Learning Test
-====================================
+End-to-End Biological Inference Test (The Waddington Acid Test)
+================================================================
 
-Tests the FULL pipeline: high-dimensional noisy data with dynamics
-→ encode to latent manifold → learn Randers metric → geodesic tangents
-→ decode back → compare with true dynamics.
-
-This is the realistic scenario matching the biological application:
-  1. Ground-truth: low-dim dynamics (rotation on a circle)
-  2. Observation: nonlinear embedding into high-dim space + noise
-  3. Learn: GeometricVAE (encoder/decoder) + NeuralRanders (metric)
-  4. Verify: latent wind field tangents, decoded back to data space,
-     recover the original dynamics.
+Validates the HAM pipeline under the Initial Value Problem (IVP) paradigm:
+  1. Base topology is Euclidean; complex geometry is learned via Pullback.
+  2. The system is trained via Forward Shooting (leaving it alone to evolve).
+  3. Evaluates if the learned Zermelo Wind autonomously recovers the biological flow.
 """
 
 import unittest
 import jax
 import jax.numpy as jnp
-import equinox as eqx
 import optax
-from typing import NamedTuple
+import equinox as eqx
+from typing import NamedTuple, Tuple
 
-from ham.geometry.surfaces import Hyperboloid
-from ham.models.learned import NeuralRanders
-from ham.bio.vae import GeometricVAE
-from ham.training.losses import LossComponent, ReconstructionLoss, KLDivergenceLoss, GeodesicSprayLoss
+from ham.training.losses import LossComponent, ReconstructionLoss, KLDivergenceLoss, KinematicPriorLoss, TimeAgnosticWindShooterLoss, OverdampedIVPShooterLoss
 from ham.training.pipeline import TrainingPhase, HAMPipeline
-from ham.utils.math import safe_norm
-
+from ham.geometry.surfaces import EuclideanSpace
+from ham.models.learned import PullbackRanders
+from ham.bio.vae import GeometricVAE
+from ham.solvers.avbd import AVBDSolver # Kept for backward compatibility if needed
 
 # ──────────────────────────────────────────────────────────
-# Synthetic high-dimensional data with known dynamics
+# 1. Biologically Realistic Data Generation (The Y-Branch)
 # ──────────────────────────────────────────────────────────
 
-class SyntheticHighDimDataset(NamedTuple):
-    """High-dimensional observations of a low-dimensional dynamical system."""
-    X: jnp.ndarray          # (N, D_high) observed states
-    V: jnp.ndarray          # (N, D_high) observed velocities (dynamics)
-    X_next: jnp.ndarray     # (N, D_high) next states (for pairs)
-    z_true: jnp.ndarray     # (N, 2) ground-truth latent positions
-    v_true: jnp.ndarray     # (N, 2) ground-truth latent velocities
-
-
-def generate_rotating_circle_data(
-    n: int = 500,
+def generate_waddington_branching_data(
+    n: int = 600,
     data_dim: int = 50,
-    noise_level: float = 0.01,
+    latent_dim: int = 6,
+    noise_level: float = 0.05,
     seed: int = 42,
-) -> SyntheticHighDimDataset:
+):
     """
-    Ground truth: Points on the equator of a Sphere, rotating counter-clockwise.
-    Observation: Nonlinear MLP embedding into `data_dim` dimensions + noise.
+    Generates a high-dimensional dataset mirroring a biological 'Y' branch.
+    Stem cells flow forward and bifurcate into two distinct terminal states.
     """
     key = jax.random.PRNGKey(seed)
     k1, k2, k3, k4 = jax.random.split(key, 4)
-
-    angles = jax.random.uniform(k1, (n,), minval=0, maxval=2 * jnp.pi)
     
-    # We create a 2D circle and pad it to the ambient dimension d_amb
-    # In test_e2e_geodesic, we want d_amb = 2+1 = 3 normally, but if latent_dim=6, d_amb=7.
-    # To keep it compatible, we pad with zeros.
-    # We use a helper to detect the required dimension or just use 3 for the ground truth MLP.
-    # Actually, keep z_true at 3D for the embed_net, then we scale later.
-    zeros = jnp.zeros_like(angles)
-    z_true = jnp.stack([jnp.cos(angles), jnp.sin(angles), zeros], axis=-1)
+    n_per_branch = n // 3
+    
+    # Time parameter (developmental pseudotime)
+    t_trunk = jax.random.uniform(k1, (n_per_branch,), minval=0.0, maxval=1.0)
+    t_branch = jax.random.uniform(k2, (n_per_branch * 2,), minval=1.0, maxval=2.0)
+    
+    # Trunk: Moves along y-axis
+    z_trunk = jnp.stack([jax.random.normal(k3, (n_per_branch,)) * 0.05, t_trunk], axis=-1)
+    
+    # Branches: Move diagonally
+    z_branch_a = jnp.stack([t_branch[:n_per_branch] - 1.0, t_branch[:n_per_branch]], axis=-1)
+    z_branch_b = jnp.stack([-(t_branch[n_per_branch:] - 1.0), t_branch[n_per_branch:]], axis=-1)
+    z_2d = jnp.concatenate([z_trunk, z_branch_a, z_branch_b], axis=0)
+    
+    # Heuristic Next States (dt = 0.1)
+    dt = 0.1
+    z_next_trunk = jnp.stack([z_trunk[:, 0], t_trunk + dt], axis=-1)
+    z_next_a = jnp.stack([(t_branch[:n_per_branch] + dt) - 1.0, t_branch[:n_per_branch] + dt], axis=-1)
+    z_next_b = jnp.stack([-((t_branch[n_per_branch:] + dt) - 1.0), t_branch[n_per_branch:] + dt], axis=-1)
+    z_next_2d = jnp.concatenate([z_next_trunk, z_next_a, z_next_b], axis=0)
 
-    dt = 0.3
-    omega = 1.0
-    v_true = dt * omega * jnp.stack([-jnp.sin(angles), jnp.cos(angles), zeros], axis=-1)
+    # Lift to Ambient Latent Space
+    rot_latent = jax.random.normal(k4, (latent_dim, 2))
+    q_lat, _ = jnp.linalg.qr(rot_latent) 
+    z_true = z_2d @ q_lat.T 
+    z_next_true = z_next_2d @ q_lat.T
 
-    angles_next = angles + dt * omega
-    z_next = jnp.stack([jnp.cos(angles_next), jnp.sin(angles_next), zeros], axis=-1)
+    # Dense Projection to Data Space
+    rot_obs = jax.random.normal(jax.random.PRNGKey(99), (data_dim, latent_dim))
+    q_obs, _ = jnp.linalg.qr(rot_obs)
+    
+    def embed_op(z):
+        return jnp.tanh(z @ q_obs.T * 2.0)
 
-    # Note MLP takes in 3 dim (ambient dimension of Sphere)
-    embed_net = eqx.nn.MLP(3, data_dim, 64, 2, activation=jax.nn.gelu, key=k2)
+    X = jax.vmap(embed_op)(z_true)
+    X_next = jax.vmap(embed_op)(z_next_true)
+    
+    # Add noise
+    X = X + jax.random.normal(jax.random.PRNGKey(100), X.shape) * noise_level
+    X_next = X_next + jax.random.normal(jax.random.PRNGKey(101), X_next.shape) * noise_level
 
-    X = jax.vmap(embed_net)(z_true)
-    X_next = jax.vmap(embed_net)(z_next)
+    return X, X_next, z_true
 
-    def embed_jvp(z, dz):
-        return jax.jvp(embed_net, (z,), (dz,))
-    _, V = jax.vmap(embed_jvp)(z_true, v_true)
-
-    X = X + jax.random.normal(k3, X.shape) * noise_level
-    X_next = X_next + jax.random.normal(k4, X_next.shape) * noise_level
-
-    # Note: the model expects ambient_dim = 7 if latent_dim=6.
-    # We pad the 3D z_true to size 7 so the VAE can receive it. 
-    # (Though usually the VAE receives high-dim X only).
-    # But for the test statistics, z_true and v_true should match manifold ambient dim.
-    # We'll detect this dynamically in the test loop.
-    return SyntheticHighDimDataset(X, V, X_next, z_true, v_true)
-
-
-# ──────────────────────────────────────────────────────────
-# Custom loss: directional wind alignment
-# ──────────────────────────────────────────────────────────
-
-class LatentVelocityAlignmentLoss(LossComponent):
-    """
-    Aligns W(z) DIRECTIONALLY with the JVP-projected velocity.
-
-    Uses negative cosine similarity, because the Randers convexity
-    constraint (|W|_H < 1) prevents matching magnitude — but
-    the DIRECTION must be correct.
-    """
-    def __init__(self, weight: float = 1.0):
-        super().__init__(weight, "VelAlign")
-
-    def __call__(self, model, batch, key):
-        x, v_data = batch[0], batch[1]
-        z_mean, u_lat = model.project_control(x, v_data)
-        _, W, _ = model.metric._get_zermelo_data(z_mean)
-
-        u_norm = safe_norm(u_lat, axis=-1) + 1e-8
-        w_norm = safe_norm(W, axis=-1) + 1e-8
-        cos_sim = jnp.sum(u_lat * W, axis=-1) / (u_norm * w_norm)
-
-        return (1.0 - jnp.mean(cos_sim)) * self.weight
-
-
-# ──────────────────────────────────────────────────────────
-# Utilities
-# ──────────────────────────────────────────────────────────
+class RealisticPipelineDataset:
+    def __init__(self, X, X_next):
+        self.X = jnp.concatenate([X, X_next], axis=0)
+        self.V = jnp.zeros_like(self.X)
+        n = len(X)
+        self.lineage_pairs = jnp.stack([jnp.arange(n), jnp.arange(n) + n], axis=1)
 
 def get_filter_fn(selector):
     def filter_spec(model):
@@ -140,166 +106,137 @@ def get_filter_fn(selector):
     return filter_spec
 
 
-class PipelineDataset:
-    """Wraps synthetic data for HAMPipeline consumption."""
-    def __init__(self, synth: SyntheticHighDimDataset):
-        self.X = synth.X
-        self.V = synth.V
-        n = synth.X.shape[0]
-        self.lineage_pairs = jnp.stack([jnp.arange(n), jnp.arange(n)], axis=1)
-
-
-def cosine_sim_batch(a, b):
-    """Mean cosine similarity between two arrays of vectors."""
-    na = safe_norm(a, axis=-1) + 1e-8
-    nb = safe_norm(b, axis=-1) + 1e-8
-    return float(jnp.mean(jnp.sum(a * b, axis=-1) / (na * nb)))
-
-
 # ──────────────────────────────────────────────────────────
-# Tests — trains once, validates incrementally
+# 3. The Acid Tests
 # ──────────────────────────────────────────────────────────
 
-# Module-level cache: train once, test many
-_trained_models = {}
-
-
-def _get_trained_models():
-    """Train Phase1 and Phase2 once, cache for all tests."""
-    if _trained_models:
-        return _trained_models
-
-    synth = generate_rotating_circle_data(n=400, data_dim=50, noise_level=0.2, seed=42)
-
-    key = jax.random.PRNGKey(2025)
-    k1, k2 = jax.random.split(key)
-    from ham.geometry.surfaces import Sphere
-    latent_dim = 2
-    manifold = Sphere(intrinsic_dim=latent_dim, radius=1.0)
-    metric = NeuralRanders(manifold, k1, hidden_dim=32)
-    model = GeometricVAE(data_dim=50, latent_dim=latent_dim, metric=metric, key=k2)
-    ds = PipelineDataset(synth)
-
-    # Phase 1: Train VAE (encoder/decoder)
-    p1 = TrainingPhase(
-        name="Manifold", epochs=1000, optimizer=optax.adam(1e-3),
-        losses=[ReconstructionLoss(1.0), KLDivergenceLoss(1e-4)],
-        filter_spec=get_filter_fn(lambda m: (m.encoder_net, m.decoder_net)),
-        requires_pairs=False,
-    )
-    model_p1 = HAMPipeline(model).fit(ds, [p1], batch_size=64, seed=2025)
-
-    # Phase 2: Train metric (wind field)
-    p2 = TrainingPhase(
-        name="Metric", epochs=3000, optimizer=optax.adam(1e-3),
-        losses=[LatentVelocityAlignmentLoss(0.6), GeodesicSprayLoss(0.4)],
-        filter_spec=get_filter_fn(lambda m: m.metric),
-        requires_pairs=False,
-    )
-    model_p2 = HAMPipeline(model_p1).fit(ds, [p2], batch_size=64, seed=2025)
-
-    _trained_models["synth"] = synth
-    _trained_models["after_p1"] = model_p1
-    _trained_models["after_p2"] = model_p2
-    return _trained_models
-
-
-class TestEndToEndGeodesicLearning(unittest.TestCase):
-    """
-    End-to-end test: high-dim noisy data → latent manifold → learned
-    metric → dynamics recovery.
-    """
+class TestTrueBiologicalInference(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        """Train once for all tests."""
-        models = _get_trained_models()
-        cls.synth = models["synth"]
-        cls.model_p1 = models["after_p1"]
-        cls.model_p2 = models["after_p2"]
+        cls.X, cls.X_next, cls.z_true = generate_waddington_branching_data()
+        ds = RealisticPipelineDataset(cls.X, cls.X_next)
 
-    def test_phase1_reconstruction(self):
-        """VAE should learn to reconstruct high-dim data from latent space."""
-        test_x = self.synth.X[:50]
-        keys = jax.random.split(jax.random.PRNGKey(99), 50)
+        key = jax.random.PRNGKey(2026)
+        k1, k2, k3 = jax.random.split(key, 3)
+        latent_dim = 6
+        manifold = EuclideanSpace(dim=latent_dim)
+        
+        decoder_net = eqx.nn.MLP(manifold.ambient_dim, 50, 128, 3, activation=jax.nn.gelu, key=k2)
+        metric = PullbackRanders(manifold, decoder=decoder_net, key=k1, hidden_dim=32)
+        
+        # We pass a dummy solver to VAE to satisfy existing API
+        solver = AVBDSolver(step_size=0.05, iterations=2) 
+        model = GeometricVAE(data_dim=50, latent_dim=latent_dim, metric=metric, key=k3, solver=solver, decoder_net=decoder_net)
+        
+        # Phase 1: Pure VAE (Build the Euclidean Y-Branch)
+        p1 = TrainingPhase(
+            name="Manifold Learning",
+            epochs=1000, 
+            optimizer=optax.adam(1e-3),
+            losses=[
+                ReconstructionLoss(weight=1.0),
+                KLDivergenceLoss(weight=1e-4), 
+                KinematicPriorLoss(weight=1.0, margin=0.5)
+            ],
+            filter_spec=get_filter_fn(lambda m: (m.encoder_net, m.decoder_net)),
+            requires_pairs=True, # Needs pairs for KinematicPrior
+        )
+        model_p1 = HAMPipeline(model).fit(ds, [p1], batch_size=64, seed=2026)
 
-        def recon(x, k):
-            z = self.model_p1.encode(x, k)
-            return self.model_p1.decode(z)
+        # Sync the trained decoder into the Pullback Metric
+        model_p1 = eqx.tree_at(lambda m: m.metric.decoder, model_p1, model_p1.decoder_net)
 
-        x_rec = jax.vmap(recon)(test_x, keys)
-        mse = float(jnp.mean((test_x - x_rec) ** 2))
+        # Phase 2: Forward IVP Geodesic Regression
+        p2 = TrainingPhase(
+            name="Metric Regression", 
+            epochs=150, # Fast IVP epochs
+            optimizer=optax.adam(1e-3),
+            losses=[
+                OverdampedIVPShooterLoss(weight=1.0)
+            ],
+            filter_spec=get_filter_fn(lambda m: m.metric.w_net),
+            requires_pairs=True,
+        )
+        cls.model_p2 = HAMPipeline(model_p1).fit(ds, [p2], batch_size=64, seed=2026)
 
-        print(f"\n[Phase1] Reconstruction MSE: {mse:.6f}")
-        self.assertLess(mse, 0.05, f"Reconstruction MSE too high: {mse:.4f}")
-
-    def test_latent_structure_preserves_topology(self):
-        """Nearby data-space points should be nearby in latent space."""
-        keys = jax.random.split(jax.random.PRNGKey(0), self.synth.X.shape[0])
-        z_enc = jax.vmap(self.model_p1.encode)(self.synth.X, keys)
-
-        # Sort by ground-truth angle
-        z_true = self.synth.z_true
-        angles = jnp.arctan2(z_true[:, 1], z_true[:, 0])
-        idx = jnp.argsort(angles)
-        z_sorted = z_enc[idx]
-
-        dists = jnp.linalg.norm(z_sorted[1:] - z_sorted[:-1], axis=-1)
-        median_d = float(jnp.median(dists))
-        max_d = float(jnp.max(dists))
-
-        print(f"\n[Topology] max/median = {max_d/median_d:.1f}")
-        self.assertLess(max_d, median_d * 10,
-                        f"Latent has fold-overs: max/median = {max_d/median_d:.1f}")
-
-    def test_phase2_latent_velocity_alignment(self):
-        """After metric training, W(z) should directionally align with
-        the JVP-projected velocity in latent space."""
-        test_x = self.synth.X[:100]
-        test_v = self.synth.V[:100]
-
-        def eval_pair(x, v):
-            z, u_lat = self.model_p2.project_control(x, v)
-            _, W, _ = self.model_p2.metric._get_zermelo_data(z)
-            return u_lat, W
-
-        u_lat, W_pred = jax.vmap(eval_pair)(test_x, test_v)
-        cos = cosine_sim_batch(u_lat, W_pred)
-
-        print(f"\n[Phase2] Latent velocity alignment (cosine): {cos:.4f}")
-        self.assertGreater(cos, 0.65,
-                           f"Wind should align with latent velocity, got cos={cos:.3f}")
-
-    def test_full_pipeline_dynamics_recovery(self):
+    def test_pullback_curvature(self):
         """
-        THE integration test: encode → wind field → decode ≈ true velocity.
-
-        Validates the complete loop:
-        1. Encoder maps high-dim data to latent manifold
-        2. Metric's wind field captures dynamics direction in latent space
-        3. Decoder maps predicted latent displacement back to data space
-        4. Decoded velocity direction matches true data-space dynamics
+        Verifies that the Pullback Metric H(z) = J^T J is capturing the complex 
+        geometry of the Y-branch rather than collapsing to a flat identity matrix.
         """
-        test_x = self.synth.X[:100]
-        test_v = self.synth.V[:100]
-        eps = 0.01
+        keys = jax.random.split(jax.random.PRNGKey(0), 100)
+        z_enc = jax.vmap(self.model_p2.encode)(self.X[:100], keys)
+        
+        def get_g_eigenvalues(z):
+            h_matrix, _, _ = self.model_p2.metric._get_zermelo_data(z)
+            evals, _ = jnp.linalg.eigh(h_matrix)
+            return evals
+        
+        batch_evals = jax.vmap(get_g_eigenvalues)(z_enc)
+        eval_variance = float(jnp.var(batch_evals[:, -1]))
+        
+        print(f"\n[Topology] Pullback Tensor Eigenvalue Variance: {eval_variance:.4f}")
+        self.assertGreater(eval_variance, 0.1, 
+                           "The VAE failed to warp the space. Pullback metric is flat.")
 
-        def predict_velocity(x):
-            # Deterministic encoding via project_control (uses encoder mean)
-            z_mean, _ = self.model_p2.project_control(x, jnp.zeros_like(x))
-            _, W, _ = self.model_p2.metric._get_zermelo_data(z_mean)
+    def test_zermelo_causality_constraint(self):
+        """
+        Verifies the Zermelo condition h(W,W) < 1. 
+        The Wind must be bounded by the Pullback metric's friction.
+        """
+        keys = jax.random.split(jax.random.PRNGKey(1), 100)
+        z_enc = jax.vmap(self.model_p2.encode)(self.X[:100], keys)
+        
+        def check_zermelo(z):
+            h_matrix, W, _ = self.model_p2.metric._get_zermelo_data(z)
+            wind_norm_sq = jnp.dot(W, jnp.dot(h_matrix, W))
+            return wind_norm_sq
+            
+        wind_norms = jax.vmap(check_zermelo)(z_enc)
+        max_wind = float(jnp.max(jnp.sqrt(wind_norms)))
+        
+        print(f"\n[Causality] Maximum Latent Wind Speed (||W||_H): {max_wind:.4f}")
+        self.assertLess(max_wind, 0.99, "Causality violated! Wind broke the speed limit.")
 
-            # Use exact pushforward (JVP) instead of finite difference
-            _, v_pred = jax.jvp(self.model_p2.decode, (z_mean,), (W,))
-            return v_pred
-
-        v_pred = jax.vmap(predict_velocity)(test_x)
-        cos = cosine_sim_batch(test_v, v_pred)
-
-        print(f"\n[FullPipeline] Data-space dynamics recovery (cosine): {cos:.4f}")
-        self.assertGreater(cos, 0.45,
-                           f"Recovered dynamics should match observations, got cos={cos:.3f}")
-
+    def test_autonomous_wind_alignment(self):
+        """
+        The Ultimate Dynamical Test: 
+        Does the learned Wind vector W(z), when pushed forward to the 50D space 
+        via the Pullback Jacobian, align with the actual biological displacement?
+        """
+        N = 100
+        X_s = self.X[:N]
+        X_e = self.X_next[:N]
+        keys = jax.random.split(jax.random.PRNGKey(2), N)
+        
+        true_disps = X_e - X_s
+        true_mags = jnp.linalg.norm(true_disps, axis=-1)
+        valid_mask = true_mags > 1e-4
+        
+        def pushforward_wind(x_start, k):
+            z_s = self.model_p2.encode(x_start, k)
+            _, W_latent, _ = self.model_p2.metric._get_zermelo_data(z_s)
+            
+            # Push Wind through Decoder Jacobian
+            dec_fn = lambda z: self.model_p2.decode(z)
+            _, W_data = jax.jvp(dec_fn, (z_s,), (W_latent,))
+            return W_data
+            
+        W_data_preds = jax.vmap(pushforward_wind)(X_s, keys)
+        
+        eps = 1e-8
+        dots = jnp.sum(W_data_preds * true_disps, axis=-1)
+        norms_p = jnp.linalg.norm(W_data_preds, axis=-1) + eps
+        norms_t = true_mags + eps
+        cos_sims = dots / (norms_p * norms_t)
+        
+        valid_cosines = cos_sims[valid_mask]
+        mean_cos = float(jnp.mean(valid_cosines))
+        
+        print(f"\n[Dynamics] Mean Cosine Similarity of Autonomous Flow: {mean_cos:.4f}")
+        self.assertGreater(mean_cos, 0.40, 
+                           "The autonomous Wind failed to capture the biological flow direction.")
 
 if __name__ == "__main__":
     unittest.main()

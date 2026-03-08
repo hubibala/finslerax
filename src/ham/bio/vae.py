@@ -25,11 +25,13 @@ class WrappedNormal(eqx.Module):
         v_flat = jax.random.normal(key, shape + (d,)) * self.scale
         
         origin = jnp.zeros_like(self.mean)
-        if isinstance(self.manifold, Hyperboloid):
+        if hasattr(self.manifold, "ambient_dim") and self.manifold.ambient_dim == self.manifold.intrinsic_dim:
+            v_origin = v_flat
+        elif isinstance(self.manifold, Hyperboloid):
             origin = origin.at[..., 0].set(1.0)
             v_origin = jnp.concatenate([jnp.zeros(shape + (1,)), v_flat], axis=-1)
         else:
-            # Sphere or Euclidean flat space fallback
+            # Sphere or other fallback
             radius = getattr(self.manifold, "radius", 1.0)
             origin = origin.at[..., -1].set(radius)
             v_origin = jnp.concatenate([v_flat, jnp.zeros(shape + (1,))], axis=-1)
@@ -53,20 +55,29 @@ class GeometricVAE(eqx.Module):
     
     data_dim: int = eqx.field(static=True)
     latent_dim: int = eqx.field(static=True) 
+    solver: Any = eqx.field(default=None)
 
-    def __init__(self, data_dim, latent_dim, metric, key):
+    def __init__(self, data_dim, latent_dim, metric, key, solver=None, encoder_net=None, decoder_net=None):
         self.data_dim = data_dim
         self.latent_dim = latent_dim
         self.metric = metric
         self.manifold = metric.manifold
+        self.solver = solver
         
         k1, k2 = jax.random.split(key)
         
         d_amb = self.manifold.ambient_dim
         d_int = self.manifold.intrinsic_dim
         
-        self.encoder_net = eqx.nn.MLP(data_dim, d_amb + d_int, 128, 3, activation=jax.nn.gelu, key=k1)
-        self.decoder_net = eqx.nn.MLP(d_amb, data_dim, 128, 3, activation=jax.nn.gelu, key=k2)
+        if encoder_net is not None:
+            self.encoder_net = encoder_net
+        else:
+            self.encoder_net = eqx.nn.MLP(data_dim, d_amb + d_int, 128, 3, activation=jax.nn.gelu, key=k1)
+            
+        if decoder_net is not None:
+            self.decoder_net = decoder_net
+        else:
+            self.decoder_net = eqx.nn.MLP(d_amb, data_dim, 128, 3, activation=jax.nn.gelu, key=k2)
 
     def _get_dist(self, x):
         out = self.encoder_net(x)

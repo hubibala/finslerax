@@ -115,6 +115,12 @@ class AVBDSolver(eqx.Module):
             # Project to Tangent Space
             grad_tan = metric.manifold.to_tangent(x, grad_f)
             
+            # Prevent exploding gradients by clipping the norm
+            from ham.utils.math import safe_norm
+            grad_norm = safe_norm(grad_tan)
+            clip_value = 10.0
+            grad_tan = jnp.where(grad_norm > clip_value, grad_tan * (clip_value / grad_norm), grad_tan)
+            
             # Update Step (with Momentum if needed, simplified here for stability)
             # x_new = Retract(x, -lr * grad)
             step = -self.step_size * grad_tan

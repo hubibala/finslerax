@@ -77,30 +77,26 @@ class Sphere(Manifold):
         return self.exp_map(x, delta)
 
     def log_map(self, x: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
-        """Riemannian logarithmic map on the sphere.
-
-        Uses the arccos-based formula which is valid for all angular
-        separations in [0, π].  The arcsin-based variant would fail for
-        angles > π/2.
-        """
-        # cos(θ) = <x, y> / r²
-        cos_theta = jnp.clip(
-            jnp.einsum('...i,...i->...', x, y) / (self.radius ** 2), -1.0, 1.0
-        )
-        theta = _safe_arccos(cos_theta)  # angle in [0, π]
-
-        # Tangent direction: project (y - x) onto T_x M
-        v = self.to_tangent(x, y - x)
-        norm_v = safe_norm(v, axis=-1, keepdims=True)
-        safe_nv = jnp.maximum(norm_v, NORM_EPS)
-
-        # Scale so that ||log_map(x, y)|| = θ * r
+        # 1. Safe dot product: strictly clip away from 1.0 and -1.0
+        # Normalize by radius squared to get cos(theta)
+        u = jnp.sum(x * y, axis=-1, keepdims=True) / (self.radius ** 2)
+        u_clipped = jnp.clip(u, -1.0 + GRAD_EPS, 1.0 - GRAD_EPS)
+        
+        # 2. Safe distance (theta)
+        dist = jnp.arccos(u_clipped)
+        
+        # 3. Safe tangent direction
+        # We need v = (y - cos(theta)x) * (theta / sin(theta))
+        # For small theta, theta/sin(theta) ~ 1 + theta^2/6
+        safe_sin = jnp.sqrt(jnp.maximum(1.0 - u_clipped**2, GRAD_EPS))
         scale = jnp.where(
-            norm_v < NORM_EPS,
-            1.0,
-            (theta[..., None] * self.radius) / safe_nv,
+            dist < TAYLOR_EPS,
+            1.0 + (dist ** 2) / 6.0,
+            dist / safe_sin,
         )
-        return v * scale
+        
+        diff = y - u_clipped * x
+        return scale * diff
 
     def parallel_transport(self, x: jnp.ndarray, y: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
         # Reflection through the bisector of x and y

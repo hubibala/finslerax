@@ -25,9 +25,18 @@ class ExponentialMap:
         
         def dynamics(y):
             curr_x, curr_v = y[:x.shape[0]], y[x.shape[0]:]
-            dx = curr_v
-            dv = metric.geod_acceleration(curr_x, curr_v) # -2G
-            return jnp.concatenate([dx, dv])
+            curr_v_norm = jnp.linalg.norm(curr_v) + 1e-12
+            # Explicit maximum speed limit to prevent the ODE from exploding to infinity
+            safe_v = jnp.where(curr_v_norm > 10.0, curr_v * (10.0 / curr_v_norm), curr_v)
+            
+            dx = safe_v
+            dv = metric.geod_acceleration(curr_x, safe_v) # -2G
+            
+            # Clip acceleration as well for extreme safety
+            dv_norm = jnp.linalg.norm(dv) + 1e-12
+            safe_dv = jnp.where(dv_norm > 100.0, dv * (100.0 / dv_norm), dv)
+            
+            return jnp.concatenate([dx, safe_dv])
 
         y0 = jnp.concatenate([x, v])
         

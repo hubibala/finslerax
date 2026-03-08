@@ -56,9 +56,14 @@ class Randers(FinslerMetric):
     def __repr__(self) -> str:
         return f"Randers(manifold={self.manifold}, epsilon={self.epsilon})"
 
-    def _get_zermelo_data(self, x: jnp.ndarray):
-        H = self.h_net(x)
-        H = 0.5 * (H + H.T) 
+    def _get_zermelo_data(self, z: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array]:
+        """
+        Returns the Riemannian tensor H, the Wind vector W, and the Lambda scalar.
+        Enforces the strict Zermelo causality constraint ||W||_H < 1.
+        """
+        # 1. Get Riemannian metric H(z) from the h_net (PSD matrix field)
+        H = self.h_net(z)
+        H = 0.5 * (H + H.T)  # Symmetrize
         
         # Ensure H is positive definite
         diag = jnp.diag(H)
@@ -66,17 +71,29 @@ class Randers(FinslerMetric):
         H = H.at[jnp.diag_indices_from(H)].set(diag_safe)
         H = H + 0.005 * jnp.eye(H.shape[-1])
         
-        W_raw = self.w_net(x)
-        # Project tangent to avoid exploding components
-        W_raw = self.manifold.to_tangent(x, W_raw)
+        # 2. Get raw wind W(z) from the w_net (vector field)
+        W_raw = self.w_net(z)
+        # Project to tangent space to avoid exploding components
+        W_raw = self.manifold.to_tangent(z, W_raw)
         
+        # 3. THE CAUSALITY SQUASHER
+        # Calculate the norm of the wind in the local Riemannian metric: sqrt(W^T * H * W)
         w_norm_sq = jnp.dot(W_raw, jnp.dot(H, W_raw))
-        w_norm = jnp.sqrt(w_norm_sq + 1e-8)
+        w_norm = jnp.sqrt(jnp.maximum(w_norm_sq, 1e-8))
         
-        scale = (1.0 - self.epsilon) * jnp.tanh(w_norm) / (w_norm + 1e-8)
-        W = W_raw * scale
-        lam = 1.0 - (w_norm * scale)**2
-        return H, W, lam
+        # Squash the norm so it is strictly < 0.95 (leaving a 0.05 safety margin)
+        max_speed = 1.0 - self.epsilon
+        squash_factor = (max_speed * jnp.tanh(w_norm)) / (w_norm + 1e-8)
+        
+        # Scale the wind vector
+        W_safe = W_raw * squash_factor
+        
+        # 4. Compute the conformal factor Lambda (standard Randers formula)
+        # Lambda = 1 - ||W||_H^2 (Since we squashed it, this is guaranteed to be > 0)
+        safe_w_norm_sq = jnp.dot(W_safe, jnp.dot(H, W_safe))
+        lambda_factor = 1.0 - safe_w_norm_sq
+        
+        return H, W_safe, lambda_factor
 
     def metric_fn(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
         v_mag = safe_norm(v, axis=-1)
