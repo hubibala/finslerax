@@ -1,11 +1,24 @@
 import jax
 import jax.numpy as jnp
 import equinox as eqx
+from typing import Any
 from ..geometry.metric import FinslerMetric
 from ..geometry.manifold import Manifold
-from ..geometry.zoo import Randers
+from ..geometry.zoo import Randers, Riemannian
 from ..nn.networks import VectorField, PSDMatrixField
 from ..utils.math import safe_norm
+
+class NeuralRiemannian(Riemannian, eqx.Module):
+    """
+    A Learnable Riemannian Metric parameterized by Neural Networks.
+    """
+    dim: int = eqx.field(static=True)
+
+    def __init__(self, manifold: Manifold, key: jax.Array, 
+                 hidden_dim: int = 32, depth: int = 2):
+        self.dim = manifold.ambient_dim
+        g_net = PSDMatrixField(self.dim, hidden_dim, depth, key)
+        super().__init__(manifold, g_net)
 
 class NeuralRanders(Randers, eqx.Module):
     """
@@ -25,47 +38,91 @@ class NeuralRanders(Randers, eqx.Module):
                             use_fourier=use_fourier, fourier_scale=3.0)
                             
         super().__init__(manifold, h_net, w_net, epsilon=1e-5)
+    
 
-class PullbackRanders(Randers, eqx.Module):
+
+class PullbackRanders(Randers):
     """
     A Randers Metric where H(z) is strictly defined by the Decoder's 
     geometry (Pullback Metric), and only the Wind W(z) is learned.
     """
     decoder: eqx.Module # Pass the frozen decoder here
     dim: int = eqx.field(static=True)
+    use_wind: bool = eqx.field(static=True, default=True)
 
-    def __init__(self, manifold, decoder, key, hidden_dim=32):
-        self.dim = manifold.ambient_dim
+    def __init__(self, manifold, decoder, key, hidden_dim=64, depth=3, use_fourier=False, fourier_scale=1.0, use_wind=True):
+        self.dim = int(manifold.ambient_dim)
         self.decoder = decoder
+        self.use_wind = bool(use_wind)
         
-        # We NO LONGER need a PSDMatrixField! 
         # We only need the VectorField for the Wind.
-        w_net = VectorField(self.dim, hidden_dim, 2, key)
+        w_net = VectorField(self.dim, hidden_dim, depth, key, 
+                            use_fourier=use_fourier, fourier_scale=fourier_scale)
         
-        # Pass a dummy h_net to the parent class, we will override it in _get_zermelo_data
-        super().__init__(manifold, h_net=lambda x: x, w_net=w_net, epsilon=1e-5)
+        # Proper eqx.Module for H(z)
+        h_net = PullbackGNet(decoder=decoder, dim=self.dim)
+        
+        super().__init__(manifold, h_net=h_net, w_net=w_net, epsilon=1e-5, use_wind=self.use_wind)
 
-    def _get_zermelo_data(self, z: jax.Array):
-        # 1. The Exact Pullback Metric H(z) = J^T J
+
+class KernelWindField(eqx.Module):
+    """
+    Non-parametric nearest-neighbor kernel smoother for exact
+    pseudo-velocities in latent space.
+    """
+    anchors_z: Any
+    anchors_v: Any
+    sigma: Any
+
+    def __init__(self, anchors_z, anchors_v, sigma=0.5):
+        self.anchors_z = anchors_z
+        self.anchors_v = anchors_v
+        self.sigma = sigma
+
+    def __call__(self, z: jax.Array) -> jax.Array:
+        dists_sq = jnp.sum((self.anchors_z - z)**2, axis=-1)
+        weights = jax.nn.softmax(-dists_sq / (2 * self.sigma**2))
+        return jnp.sum(weights[:, None] * self.anchors_v, axis=0)
+
+class DataDrivenPullbackRanders(Randers):
+    """
+    Instead of a parameterized neural network, uses a kernel smoother
+    over the dataset's exact RNA velocities projected into the latent space.
+    """
+    decoder: Any
+    dim: int = eqx.field(static=True)
+    use_wind: bool = eqx.field(static=True, default=True)
+
+    def __init__(self, manifold, decoder, anchors_z, anchors_v, sigma=0.5, use_wind=True):
+        self.dim = int(manifold.ambient_dim)
+        self.decoder = decoder
+        self.use_wind = bool(use_wind)
+        h_net = PullbackGNet(decoder=decoder, dim=self.dim)
+        w_net = KernelWindField(anchors_z, anchors_v, sigma)
+        super().__init__(manifold, h_net=h_net, w_net=w_net, epsilon=1e-5, use_wind=self.use_wind)
+
+
+class PullbackGNet(eqx.Module):
+    decoder: Any
+    dim: Any = eqx.field(static=True)
+
+    
+    def __call__(self, z: jax.Array) -> jax.Array:
         J = jax.jacfwd(self.decoder)(z)
         H = jnp.dot(J.T, J)
-        
         # Add a tiny diagonal for numerical stability
-        H = H + 1e-4 * jnp.eye(self.dim)
-        
-        # 2. The Learned Wind W(z)
-        W_raw = self.w_net(z)
-        W_raw = self.manifold.to_tangent(z, W_raw)
-        
-        # 3. The Causality Squasher (Same as before)
-        w_norm_sq = jnp.dot(W_raw, jnp.dot(H, W_raw))
-        w_norm = jnp.sqrt(jnp.maximum(w_norm_sq, 1e-8))
-        max_speed = 1.0 - self.epsilon
-        squash_factor = (max_speed * jnp.tanh(w_norm)) / (w_norm + 1e-8)
-        W_safe = W_raw * squash_factor
-        
-        # 4. Conformal factor
-        safe_w_norm_sq = jnp.dot(W_safe, jnp.dot(H, W_safe))
-        lambda_factor = 1.0 - safe_w_norm_sq
-        
-        return H, W_safe, lambda_factor
+        return H + 1e-4 * jnp.eye(self.dim)
+
+class PullbackRiemannian(Riemannian, eqx.Module):
+    """
+    A Riemannian Metric where G(z) is strictly defined by the Decoder's 
+    geometry (Pullback Metric).
+    """
+    decoder: eqx.Module # Pass the frozen decoder here
+    dim: int = eqx.field(static=True)
+
+    def __init__(self, manifold: Manifold, decoder: eqx.Module, key: jax.Array = None, hidden_dim: int = 32):
+        self.dim = manifold.ambient_dim
+        self.decoder = decoder
+        g_net = PullbackGNet(decoder=decoder, dim=self.dim)
+        super().__init__(manifold, g_net)

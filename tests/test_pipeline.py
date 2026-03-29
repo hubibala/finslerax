@@ -41,7 +41,8 @@ class MSELoss(LossComponent):
         super().__init__(weight, "MSE")
 
     def __call__(self, model, batch, key):
-        x, y = batch
+        x = batch[0]
+        y = batch[1]
         return jnp.mean((model(x) - y) ** 2) * self.weight
 
 
@@ -63,6 +64,7 @@ class DummyDataset:
         self.X = jax.random.normal(key, (n, 2))
         self.V = jnp.zeros((n, 2))
         self.lineage_pairs = lineage_pairs
+        self.labels = None
 
 
 def _filter_layer1(model):

@@ -21,7 +21,7 @@ class HAMPipeline:
     def __init__(self, model: eqx.Module):
         self.model = model
 
-    def fit(self, dataset, phases: List[TrainingPhase], batch_size: int = 256, seed: int = 2025):
+    def fit(self, dataset, phases: List[TrainingPhase], batch_size: int = 256, seed: int = 2025, lineage_triples: Any = None):
         key = jax.random.PRNGKey(seed)
         
         for phase in phases:
@@ -67,9 +67,15 @@ class HAMPipeline:
             data_x, data_v = dataset.X, dataset.V
             num_samples = data_x.shape[0]
             
-            if phase.requires_pairs and dataset.lineage_pairs is None:
-                print("Skipping phase: requires lineage pairs but none found.")
+            if phase.requires_pairs and dataset.lineage_pairs is None and lineage_triples is None:
+                print("Skipping phase: requires lineage pairs/triples but none found.")
                 continue
+
+            # Before the epoch loop, extract labels once
+            data_x, data_v = dataset.X, dataset.V
+            data_labels = dataset.labels if dataset.labels is not None \
+                        else jnp.zeros(dataset.X.shape[0])  # fallback if no labels
+            num_samples = data_x.shape[0]
                 
             for epoch in range(phase.epochs):
                 key, subkey = jax.random.split(key)
@@ -77,7 +83,10 @@ class HAMPipeline:
                 epoch_stats = {l.name: 0.0 for l in phase.losses}
                 
                 if phase.requires_pairs:
-                    num_items = dataset.lineage_pairs.shape[0]
+                    if lineage_triples is not None:
+                        num_items = lineage_triples.shape[0]
+                    else:
+                        num_items = dataset.lineage_pairs.shape[0]
                     perm = jax.random.permutation(subkey, num_items)
                 else:
                     num_items = num_samples
@@ -90,10 +99,20 @@ class HAMPipeline:
                     
                     # Unpack batch data depending on what the phase requires
                     if phase.requires_pairs:
-                        pair_indices = dataset.lineage_pairs[idx]
-                        batch_data = (data_x[pair_indices[:, 0]], data_x[pair_indices[:, 1]])
+                        if lineage_triples is not None:
+                            triple_idx = lineage_triples[idx]
+                            i2 = triple_idx[:, 0]
+                            i4 = triple_idx[:, 1]
+                            i6 = triple_idx[:, 2]
+                            batch_data = (data_x[i2], data_v[i2], data_labels[i2], data_x[i4], data_x[i6])
+                        else:
+                            pair_indices = dataset.lineage_pairs[idx]
+                            batch_data = (data_x[pair_indices[:, 0]], data_x[pair_indices[:, 1]])
+                            # If the dataset has long trajectories, pass them as the third element
+                            if hasattr(dataset, "Traj_long"):
+                                batch_data += (dataset.Traj_long[idx],)
                     else:
-                        batch_data = (data_x[idx], data_v[idx])
+                         batch_data = (data_x[idx], data_v[idx], data_labels[idx])
                         
                     step_key = jax.random.fold_in(subkey, step)
                     

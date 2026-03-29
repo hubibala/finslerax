@@ -56,11 +56,10 @@ class ExponentialMap:
         
         return GeodesicState(x_proj, v_proj, state.t + dt)
 
-    def shoot(self, metric: FinslerMetric, x0: jnp.ndarray, v0: jnp.ndarray) -> jnp.ndarray:
-        """Computes the endpoint Exp_x0(v0) assuming t=1."""
+    def shoot(self, metric: FinslerMetric, x0: jnp.ndarray, v0: jnp.ndarray, t_max: float = 1.0) -> jnp.ndarray:
+        """Computes the endpoint Exp_x0(t_max * v0)."""
         n_steps = self.max_steps
-        dt = 1.0 / n_steps
-        
+        dt = t_max / n_steps
         init_state = GeodesicState(x0, v0, 0.0)
         
         def body_fn(i, s):
@@ -69,10 +68,10 @@ class ExponentialMap:
         final_state = jax.lax.fori_loop(0, n_steps, body_fn, init_state)
         return final_state.x
 
-    def trace(self, metric: FinslerMetric, x0: jnp.ndarray, v0: jnp.ndarray) -> Tuple[jnp.ndarray, jnp.ndarray]:
-        """Returns the full trajectory (xs, vs)."""
+    def trace(self, metric: FinslerMetric, x0: jnp.ndarray, v0: jnp.ndarray, t_max: float = 1.0) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        """Returns the full trajectory (xs, vs) up to t_max."""
         n_steps = self.max_steps
-        dt = 1.0 / n_steps
+        dt = t_max / n_steps
         
         def step_fn(s, _):
             s_new = self._step_rk4(metric, s, dt)

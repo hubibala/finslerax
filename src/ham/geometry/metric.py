@@ -50,9 +50,20 @@ class FinslerMetric(eqx.Module):
         hess_v = jax.hessian(self.energy, argnums=1)(x, v)
         
         # Solve for acceleration
-        # Regularize hessian slightly to avoid singular matrices
-        acc = jnp.linalg.solve(hess_v + 1e-12 * jnp.eye(x.shape[0]), rhs)
+        # Regularize hessian slightly to avoid singular matrices (Randers ill-conditioning near boundary)
+        acc = jnp.linalg.solve(hess_v + 1e-4 * jnp.eye(x.shape[0]), rhs)
         return -0.5 * acc
 
     def geod_acceleration(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
         return -2.0 * self.spray(x, v)
+
+    def arc_length(self, gamma: jnp.ndarray) -> jnp.ndarray:
+        """
+        Computes the integrated Finsler length of a continuous path gamma (N, D).
+        Uses midpoint evaluation.
+        """
+        def segment_length(x1, x2):
+            v = x2 - x1
+            return self.metric_fn(0.5 * (x1 + x2), v)
+            
+        return jnp.sum(jax.vmap(segment_length)(gamma[:-1], gamma[1:]))

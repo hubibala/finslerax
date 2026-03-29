@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 import equinox as eqx
-from typing import Callable
+from typing import Callable, Any
 
 from ham.geometry.metric import FinslerMetric
 from ham.geometry.manifold import Manifold
@@ -20,7 +20,7 @@ class Euclidean(FinslerMetric):
 
 class Riemannian(FinslerMetric):
     """General Riemannian metric: F(x, v) = sqrt( v^T G(x) v )."""
-    g_net: Callable[[jnp.ndarray], jnp.ndarray]
+    g_net: Any
 
     def __init__(self, manifold: Manifold, g_net: Callable[[jnp.ndarray], jnp.ndarray]):
         super().__init__(manifold)
@@ -39,19 +39,24 @@ class Randers(FinslerMetric):
     """
     Rigorous Randers Metric (Zermelo Navigation).
     """
-    h_net: Callable[[jnp.ndarray], jnp.ndarray]
-    w_net: Callable[[jnp.ndarray], jnp.ndarray]
-    epsilon: float = eqx.field(static=True)
+    h_net: Any
+    w_net: Any
+
+    epsilon: Any = eqx.field(static=True)
+    use_wind: Any = eqx.field(static=True)
+
 
     def __init__(self, 
                  manifold: Manifold, 
                  h_net: Callable[[jnp.ndarray], jnp.ndarray],
                  w_net: Callable[[jnp.ndarray], jnp.ndarray],
-                 epsilon: float = 1e-5):
+                 epsilon: float = 1e-5,
+                 use_wind: bool = True):
         super().__init__(manifold)
         self.h_net = h_net
         self.w_net = w_net
-        self.epsilon = epsilon
+        self.epsilon = float(epsilon)
+        self.use_wind = bool(use_wind)
 
     def __repr__(self) -> str:
         return f"Randers(manifold={self.manifold}, epsilon={self.epsilon})"
@@ -68,7 +73,7 @@ class Randers(FinslerMetric):
         # Ensure H is positive definite
         diag = jnp.diag(H)
         diag_safe = jnp.maximum(diag, 0.01)
-        H = H.at[jnp.diag_indices_from(H)].set(diag_safe)
+        H = jnp.where(jnp.eye(H.shape[-1], dtype=bool), jnp.diag(diag_safe), H)
         H = H + 0.005 * jnp.eye(H.shape[-1])
         
         # 2. Get raw wind W(z) from the w_net (vector field)
@@ -93,6 +98,9 @@ class Randers(FinslerMetric):
         safe_w_norm_sq = jnp.dot(W_safe, jnp.dot(H, W_safe))
         lambda_factor = 1.0 - safe_w_norm_sq
         
+        if not self.use_wind:
+            return H, jnp.zeros_like(W_safe), 1.0
+            
         return H, W_safe, lambda_factor
 
     def metric_fn(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:

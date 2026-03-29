@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 import equinox as eqx
-from typing import Tuple, Any
+from typing import Tuple, Any, Optional
 
 from ham.geometry.metric import FinslerMetric
 from ham.geometry.surfaces import Hyperboloid
@@ -52,17 +52,19 @@ class GeometricVAE(eqx.Module):
     decoder_net: eqx.Module
     metric: FinslerMetric 
     manifold: Any
+    classifier_head: Optional[eqx.nn.Linear] = None  # add this field
     
     data_dim: int = eqx.field(static=True)
     latent_dim: int = eqx.field(static=True) 
     solver: Any = eqx.field(default=None)
 
-    def __init__(self, data_dim, latent_dim, metric, key, solver=None, encoder_net=None, decoder_net=None):
+    def __init__(self, data_dim, latent_dim, metric, key, solver=None, encoder_net=None, decoder_net=None, classifier_head=None):
         self.data_dim = data_dim
         self.latent_dim = latent_dim
         self.metric = metric
         self.manifold = metric.manifold
         self.solver = solver
+        self.classifier_head = classifier_head
         
         k1, k2 = jax.random.split(key)
         
