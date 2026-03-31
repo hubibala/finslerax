@@ -4,25 +4,23 @@
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![JAX](https://img.shields.io/badge/backend-JAX-green.svg)](https://github.com/google/jax)
 
-**HAMTools** is a rigorous, differentiable library for **Finsler Geometry**, built on JAX. It treats geometric metrics as learnable neural networks ("Generative Geometry"), enabling applications in Model-Based RL, Physics Discovery, and Representation Learning.
+**HAMTools** is a differentiable library for **Finsler Geometry**, built on JAX. It treats geometric metrics as learnable neural networks ("Generative Geometry"), enabling applications in Model-Based RL, Physics Discovery, and Representation Learning.
 
-> **Note:** This is the v1.1.0 Core Infrastructure ("The Rocket Engine"). 
-> For the experimental World Model research code (v0.x), see the [`legacy/`](legacy/) directory.
+## Key Features
 
-## 🚀 Key Features
+- **Metric-First Design:** Define $F(x, v)$, and the library automatically derives Geodesics, Sprays, and Curvature via Auto-Differentiation.
+- **Implicit Dynamics:** Uses `jax.grad` and `jax.jvp` to solve Euler-Lagrange equations without expanding Christoffel symbols ($O(N^3)$ avoided).
+- **Berwald Transport:** Native parallel transport for non-Riemannian (asymmetric) spaces.
+- **The Zoo:** Verified implementations of **Euclidean**, **Riemannian**, and **Randers** (Zermelo) metrics.
 
-* **Metric-First Design:** Define $F(x, v)$, and the library automatically derives Geodesics, Sprays, and Curvature via Auto-Differentiation.
-* **Implicit Dynamics:** Uses `jax.grad` and `jax.jvp` to solve Euler-Lagrange equations without expanding Christoffel symbols ($O(N^3)$ avoided).
-* **Berwald Transport:** Native parallel transport for non-Riemannian (asymmetric) spaces.
-* **The Zoo:** Verified implementations of **Euclidean**, **Riemannian**, and **Randers** (Zermelo) metrics.
-
-## 📦 Installation
+## Installation
 
 ```bash
 pip install -e .
 ```
 
 ⚡ Quick Start
+
 1. Define a Metric
 
 ```python
@@ -48,6 +46,7 @@ metric = Randers(Plane(), h_net, w_net)
 ```
 
 2. Solve for Geodesics
+
 ```python
 from ham.solvers import AVBDSolver
 
@@ -67,18 +66,22 @@ print(f"Path Cost: {traj.energy}")
 - `src/ham/sim/`: Fields and simulation utilities.
 - `src/ham/solvers/`: Geodesic solvers (Boundary-Value via `AVBD`, Initial-Value via `ExponentialMap`).
 - `src/ham/utils/`: Core math utilities for numerical stability.
-- `src/ham/vis/`: Visualization routines for manifolds.
+- `src/ham/vis/`: Visualization tools for manifolds.
 - `tests/`: Comprehensive unit and integration test suite.
-- `legacy/`: Archived research code from the initial "World Model" experiments.
+- `examples/`: Some geometrically motivated examples to test the geometric correctness and applicability of the framework. Early examples for the Weinreb data usecase to model cell differentiation processes in the latent space.
 
 📝 Citation
 If you use HAMTools in your research:
 
 ```
+
 @software{hamtools2025,
-  author = {HAM Research Team},
-  title = {HAMTools: Differentiable Finsler Geometry in JAX},
-  year = {2025},
-  url = {[https://github.com/hubibala/ham](https://github.com/hubibala/ham)}
+author = {HAM Research Team},
+title = {HAMTools: Differentiable Finsler Geometry in JAX},
+year = {2025},
+url = {[https://github.com/hubibala/ham](https://github.com/hubibala/ham)}
 }
+
+```
+
 ```
