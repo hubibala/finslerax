@@ -21,8 +21,6 @@ import equinox as eqx
 import anndata
 
 from ham.bio.data import BioDataset
-from ham.bio.vae import GeometricVAE
-from ham.models.learned import DataDrivenPullbackRanders
 from ham.solvers.geodesic import ExponentialMap
 
 # Reuse helpers
