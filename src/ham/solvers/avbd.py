@@ -132,20 +132,20 @@ class AVBDSolver(eqx.Module):
         def step_fn(s: SolverState, _):
             # Reconstruct full path for context
             full_path = jnp.concatenate([p_start[None, :], s.path, p_end[None, :]], axis=0)
-            
             # Randomize update order (Stochastic Block Descent)
             step_key = jax.random.fold_in(k2, s.step) # Fold in step for reproducibility
             order = jax.random.permutation(step_key, jnp.arange(n_inner))
+
+            # Re-index order to account for boundaries in the full path
+            full_order = order + 1
             
             # Scan over vertices to update them
-            def scan_body(curr_path_inner, idx):
-                # Construct temporary full path to get neighbors
-                # (Note: In pure JAX this is cheap if JIT compiled)
-                temp_full = jnp.concatenate([p_start[None, :], curr_path_inner, p_end[None, :]], axis=0)
-                new_node = update_vertex(temp_full, idx, s)
-                return curr_path_inner.at[idx].set(new_node), None
+            def scan_body(curr_path_full, idx):
+                new_node = update_vertex(curr_path_full, idx - 1, s)
+                return curr_path_full.at[idx].set(new_node), None
 
-            new_inner, _ = jax.lax.scan(scan_body, s.path, order)
+            new_full, _ = jax.lax.scan(scan_body, full_path, full_order)
+            new_inner = new_full[1:-1]
             
             # Dual Updates (Constraints)
             # ... (Simplified: omitted for core geodesic regression unless needed) ...

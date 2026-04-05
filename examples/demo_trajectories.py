@@ -90,7 +90,7 @@ def main():
     # 2. Solve optimal path (BVP) — RED
     # ────────────────────────────────────────────────────────────────
     print("Solving optimal Randers geodesic (BVP)...")
-    solver_bvp = AVBDSolver(step_size=0.05, beta=3.0, iterations=5000, tol=1e-6)
+    solver_bvp = AVBDSolver(step_size=0.05, beta=3.0, iterations=1000, tol=1e-6)
     traj_bvp = solver_bvp.solve(metric, start, end, n_steps=40)
 
     # ────────────────────────────────────────────────────────────────

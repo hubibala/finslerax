@@ -80,9 +80,20 @@ class KernelWindField(eqx.Module):
         self.sigma = sigma
 
     def __call__(self, z: jax.Array) -> jax.Array:
-        dists_sq = jnp.sum((self.anchors_z - z)**2, axis=-1)
+        # Optimized distance calculation for vmap scaling: (a-b)^2 = a^2 + b^2 - 2ab
+        # Instead of (anchors - z)**2 which materializes a (B, N, D) array when vmapped over B queries.
+        z_sq = jnp.sum(z**2, axis=-1, keepdims=True)
+        anchors_sq = jnp.sum(self.anchors_z**2, axis=-1)
+        dots = jnp.dot(self.anchors_z, z.T).T if z.ndim > 0 else jnp.dot(self.anchors_z, z)
+        
+        # dists_sq = z_sq + anchors_sq - 2 * z @ anchors.T
+        if z.ndim > 0:
+            dists_sq = z_sq + anchors_sq - 2 * dots
+        else:
+            dists_sq = z_sq + anchors_sq - 2 * dots
+            
         weights = jax.nn.softmax(-dists_sq / (2 * self.sigma**2))
-        return jnp.sum(weights[:, None] * self.anchors_v, axis=0)
+        return jnp.dot(weights, self.anchors_v)
 
 class DataDrivenPullbackRanders(Randers):
     """

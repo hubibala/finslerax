@@ -126,36 +126,47 @@ def main():
     Z4 = jax.vmap(lambda x: vae_base._get_dist(x).mean)(jnp.array(X4))
     Z6 = jax.vmap(lambda x: vae_base._get_dist(x).mean)(jnp.array(X6))
 
-    solver = AVBDSolver(iterations=20)
+    solver = AVBDSolver(iterations=200)
 
     print("\n" + "─"*95)
     print(f"{'sigma':>6} {'seed':>6} {'L_fwd_mean':>12} {'L_bwd_mean':>12} {'ratio':>9} {'p-val':>12} {'frac<1':>8}")
     print("─"*95)
 
+    @eqx.filter_jit
+    def batch_arc_lengths(metric, zs_batch, ze_batch):
+        def single_pair(zs, ze):
+            traj = solver.solve(metric, zs, ze, n_steps=25, train_mode=False)
+            xs = traj.xs
+            Lf = metric.arc_length(xs)
+            Lb = metric.arc_length(xs[::-1])
+            return Lf, Lb
+        return jax.vmap(single_pair)(zs_batch, ze_batch)
+
     sweep_results = {}
     for sigma in SIGMAS:
         per_sigma_ratios, per_sigma_pvals, per_sigma_fracs = [], [], []
         for seed in SEEDS:
-            vae = attach_datadriven_randers_metric(vae_base, dataset, n_anchors=2000, sigma=sigma, seed=seed)
+            vae = attach_datadriven_randers_metric(vae_base, dataset, n_anchors=2000, sigma=jnp.array(sigma), seed=seed)
 
-            # ── Batch BVP Solving (Optimized) ──────────────────────────────
+            # ── Batch BVP Solving (Chunked for memory) ──────────────────────────────
             Z_starts = jnp.concatenate([Z2, Z4], axis=0) # (2*N, D)
             Z_ends   = jnp.concatenate([Z4, Z6], axis=0) # (2*N, D)
+            
+            print(f"  Batch solving {Z_starts.shape[0]} BVPs (sigma={sigma}, seed={seed}) in chunks...")
+            
+            chunk_size = 200 # Adjust based on GPU memory
+            Lf_list, Lb_list = [], []
+            
+            # Use jax.lax.map for memory-efficient batching if needed, or simple loop
+            for i in range(0, len(Z_starts), chunk_size):
+                zs_chunk = Z_starts[i:i+chunk_size]
+                ze_chunk = Z_ends[i:i+chunk_size]
+                L_fwd_c, L_bwd_c = batch_arc_lengths(vae.metric, zs_chunk, ze_chunk)
+                Lf_list.append(np.array(L_fwd_c))
+                Lb_list.append(np.array(L_bwd_c))
 
-            @eqx.filter_jit
-            def batch_arc_lengths(metric, zs_batch, ze_batch):
-                def single_pair(zs, ze):
-                    traj = solver.solve(metric, zs, ze, n_steps=25, train_mode=False)
-                    xs = traj.xs
-                    Lf = metric.arc_length(xs)
-                    Lb = metric.arc_length(xs[::-1])
-                    return Lf, Lb
-                return jax.vmap(single_pair)(zs_batch, ze_batch)
-
-            print(f"  Batch solving {Z_starts.shape[0]} BVPs (short segments) ...")
-            L_fwds, L_bwds = batch_arc_lengths(vae.metric, Z_starts, Z_ends)
-            Lf = np.array(L_fwds)
-            Lb = np.array(L_bwds)
+            Lf = np.concatenate(Lf_list)
+            Lb = np.concatenate(Lb_list)
             valid = (Lf > 0) & (Lb > 0) & np.isfinite(Lf) & np.isfinite(Lb)
             Lf, Lb = Lf[valid], Lb[valid]
 
