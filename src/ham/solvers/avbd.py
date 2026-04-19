@@ -26,11 +26,23 @@ class SolverState(NamedTuple):
 
 class AVBDSolver(eqx.Module):
     """
-    Augmented Vertex Block Descent (AVBD) - Differentiable Version.
+    Augmented Vertex Block Descent (AVBD) Geodesic Solver.
+
+    A differentiable Boundary-Value Problem (BVP) solver that finds geodesics 
+    by minimizing path energy over a discretized set of path points. Fully 
+    JAX-compatible and autodiff-friendly.
+
+    Attributes:
+        step_size: Gradient descent learning rate for inner path points.
+        beta: Penalty stiffness coefficient for equality constraints.
+        iterations: Number of full relaxation passes per solve.
+        tol: Tolerance for convergence (gradient norm).
+        momentum: Momentum factor for descent updates.
+        energy_tol: Tolerance for convergence (energy change).
     """
-    step_size: float = 0.05  # Higher for training speed
+    step_size: float = 0.05
     beta: float = 10.0
-    iterations: int = 20     # Fixed iterations for training stability
+    iterations: int = 20
     tol: float = 1e-4
     momentum: float = 0.5
     energy_tol: float = 1e-4

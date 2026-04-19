@@ -7,16 +7,25 @@ from ham.geometry.manifold import Manifold
 
 class FinslerMetric(eqx.Module):
     """
-    The abstract base class for all Finsler metrics.
-    Inheriting from eqx.Module ensures all subclasses are valid JAX PyTrees.
+    Abstract base class for all Finsler metrics.
+
+    Inheriting from `eqx.Module` ensures all subclasses are valid JAX PyTrees.
     """
     manifold: Manifold
 
     @abstractmethod
     def metric_fn(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
         """
-        The fundamental Finsler cost function F(x, v).
-        Must be 1-homogeneous in v.
+        Computes the fundamental Finsler cost function F(x, v).
+
+        The metric must be positively 1-homogeneous in v, meaning F(x, λv) = λF(x, v) for λ > 0.
+        
+        Args:
+            x: Position vector on the manifold.
+            v: Tangent vector at position x.
+            
+        Returns:
+            Scalar cost (length) of the tangent vector.
         """
         pass
 

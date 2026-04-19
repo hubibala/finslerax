@@ -37,7 +37,17 @@ class Riemannian(FinslerMetric):
 
 class Randers(FinslerMetric):
     """
-    Rigorous Randers Metric (Zermelo Navigation).
+    Rigorous Randers Metric using Zermelo Navigation.
+    
+    A Randers metric is an asymmetric Finsler metric defined by a Riemannian 
+    "sea" (h) and a drift "wind" field (W). The wind strictly satisfies ||W||_h < 1 
+    to preserve strong convexity.
+
+    Attributes:
+        h_net: Network outputting positive definite matrices for the Riemannian component.
+        w_net: Network outputting the wind vector field.
+        epsilon: Small numerical stabilizer for singularities at v=0.
+        use_wind: If False, ignores the wind field (falls back to Riemannian).
     """
     h_net: Any
     w_net: Any

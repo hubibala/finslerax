@@ -10,14 +10,18 @@ class GeodesicState(NamedTuple):
 
 class ExponentialMap:
     """
-    Solves the Initial Value Problem (IVP) for Geodesics.
-    Given (x0, v0), computes x(t).
+    Solves the Initial Value Problem (IVP) for Geodesics via RK4.
     
-    Equivalent to the Riemannian Exponential Map: Exp_x(v).
+    Given an initial position (x0) and velocity (v0), computes the resulting
+    geodesic trajectory x(t). This is equivalent to the Riemannian Exponential Map.
+
+    Attributes:
+        step_size: Timestep dt for the RK4 numerical integration.
+        max_steps: Number of integration steps to simulate.
     """
     def __init__(self, step_size: float = 0.01, max_steps: int = 200):
         self.step_size = step_size
-        self.max_steps = max_steps  # Increased default for better manifold adherence
+        self.max_steps = max_steps
 
     def _step_rk4(self, metric: FinslerMetric, state: GeodesicState, dt: float) -> GeodesicState:
         """Standard Runge-Kutta 4 integration step for the Spray ODE."""
