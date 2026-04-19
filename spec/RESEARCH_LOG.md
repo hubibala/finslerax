@@ -46,17 +46,23 @@ This project has evolved through four distinct theoretical phases. This narrativ
 **3.1. Validated Components**
 * **Automatic Spray Generation:** Verified `jax.grad` and `jax.hessian` Euler-Lagrange implicit solver logic.
 * **Convexity Protection:** The `tanh` gating on the Randers wind vector $W$ prevents metric collapse.
-* **Manifold Implementations:** Spheres, Tori, and meshes undergo AVBD boundary value solving reliably.
+* **Manifold Implementations:** Spheres, Tori, Hyperboloids, and triangular meshes undergo AVBD boundary value solving reliably.
+* **Berwald Parallel Transport:** Verified on Sphere (norm-preserving) and Randers (correct holonomy).
+* **Training Pipeline:** Multi-phase `HAMPipeline` with per-phase parameter freezing validated across 9 test configurations.
+* **Weinreb Hematopoiesis Experiments (H1-H4):**
+    * H1: Geometric topology (pullback metric structure) validated.
+    * H2: Directional asymmetry (Finsler forward/backward arc length) confirmed.
+    * H3: Discriminative cost (Randers vs Riemannian null) validated.
+    * H4: Forward predictive simulation with wind-guided geodesic shooting.
 
-**3.2. Current Blockers & Instabilities (Critical Update)**
-* **Geometric VAE Failure:** The initial attempt at coupling a Geometric VAE using complex geometries like the `Hyperboloid` in `src/ham/bio/` is fundamentally unstable. The joint training mechanism frequently collapses early in training, generating `nil` values.
-* **Geodesic Learning Collapse:** Complex analytical geometries (e.g., Sphere, Hyperboloid) yield very poor cosine similarities during geodesic joint learning tests. The ODE solver collapses or fails to converge properly. The issue is heavily localized around the Hyperboloid formulation and its application/backpropagation interaction in deeper neural tasks.
+**3.2. Known Limitations**
+* **Hyperboloid VAE:** Joint training coupling complex curved manifolds (Sphere, Hyperboloid) with the full VAE remains numerically sensitive. The flat `EuclideanSpace` latent space with pullback geometry is the recommended setup for biological applications.
 
 ---
 
 ## 5. Artifacts & References
 
 * **Math Spec:** `MATH_SPEC.md` (Version 1.1, Berwald Edition)
-* **Architecture:** `ARCH_SPEC.md` (Version 1.0)
-* **Legacy Code:** `src/ham/` (To be refactored)
-* **Validation Data:** `notebooks/geometry-check.ipynb` (To be expanded)
+* **Architecture:** `ARCH_SPEC.md` (Version 1.1)
+* **Test Suite:** `tests/` (16 test modules, all passing)
+* **Weinreb Experiments:** `examples/experiment_h{1,2,3,4}_*.py`

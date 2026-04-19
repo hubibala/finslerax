@@ -1,8 +1,8 @@
 # ARCH_SPEC.md: Software Architecture of HAMTools
 
 **Version:** 1.1.0
-**Date:** December 6, 2025
-**Dependencies:** JAX, Equinox (optional, for clean class state), Optax
+**Date:** April 2026
+**Dependencies:** JAX, Equinox, Optax
 
 ## 1. Design Philosophy
 
@@ -156,41 +156,46 @@ Implemented in `src/ham/solvers/geodesic.py` via standard Runge-Kutta 4 integrat
 ## 5. Module Structure
 
 ```text
-src/
+src/ham/
 ├── bio/
-│   ├── vae.py            # Geometric VAE wrappers
-│   └── data.py           # AnnData integrations for single-cell
+│   ├── vae.py            # GeometricVAE with Zermelo control dynamics
+│   └── data.py           # BioDataset (AnnData integration, lineage triples)
 ├── geometry/
 │   ├── manifold.py       # Abstract Base Class
 │   ├── metric.py         # FinslerMetric ABC & AutoDiff Physics
-│   ├── surfaces.py       # Sphere, Torus, Hyperboloid, Paraboloid
+│   ├── surfaces.py       # Sphere, Torus, Hyperboloid, Paraboloid, EuclideanSpace
 │   ├── zoo.py            # Euclidean, Riemannian, Randers, DiscreteRanders
+│   ├── mesh.py           # Triangular mesh manifold
 │   └── transport.py      # Berwald transport integrator
 ├── models/
-│   └── learned.py        # Neural implementations of metrics
+│   └── learned.py        # NeuralRiemannian, NeuralRanders, PullbackRanders,
+│                          # PullbackRiemannian, DataDrivenPullbackRanders
 ├── nn/
-│   └── networks.py       # Neural network architecture blocks
+│   └── networks.py       # VectorField, PSDMatrixField, RandomFourierFeatures
 ├── sim/
 │   └── fields.py         # Field abstractions for sim
 ├── solvers/
-│   ├── avbd.py           # BVP Robust Solver
-│   └── geodesic.py       # IVP Solver (Exponential Map via RK4)
+│   ├── avbd.py           # BVP solver (Augmented Vertex Block Descent)
+│   └── geodesic.py       # IVP solver (ExponentialMap via RK4)
+├── training/
+│   ├── pipeline.py       # HAMPipeline: multi-phase declarative training
+│   └── losses.py         # Modular loss components
 ├── utils/
-│   └── math.py           # Math stabilizers and norms
+│   └── math.py           # safe_norm, numerical stability primitives
 └── vis/
-    └── hyperbolic.py     # Hyperbolic disk plotting utilities
+    └── hyperbolic.py     # Poincaré disk visualization
 ```
 
-## 6. Implementation Status (Revised)
+## 6. Implementation Status
 
-### ✅ Completed & Validated
-1.  **Geometry Core:** `src/ham/geometry/metric.py`, `zoo.py`, and `surfaces.py` are structurally complete.
-    * `FinslerMetric` auto-differentiates the energy to correctly deduce generalized Geodesic Spray.
-    * `Randers` and `DiscreteRanders` models are implemented.
-2.  **Solvers:** AVBD Boundary Value solver and Geodesic Shooting Initial Value solver exist and are analytically functional for simpler surfaces.
+### Completed & Validated
+1.  **Geometry Core:** `metric.py`, `zoo.py`, `surfaces.py`, `mesh.py` — structurally complete with 16 passing test modules.
+    * `FinslerMetric` auto-differentiates the energy to correctly derive the geodesic spray.
+    * `Randers` and `DiscreteRanders` models implement the Zermelo navigation formula.
+2.  **Solvers:** AVBD (BVP) and ExponentialMap (IVP) solvers are validated on Sphere, Torus, Hyperboloid, and triangular meshes.
+3.  **Parallel Transport:** Berwald connection verified — norm-preservation on Sphere and non-trivial Randers transport produce correct holonomy.
+4.  **Training Pipeline:** `HAMPipeline` supports multi-phase training with per-phase parameter freezing, lineage-triple batching, and modular losses.
+5.  **Bio Application (Weinreb):** GeometricVAE + DataDrivenPullbackRanders trained on Weinreb hematopoiesis data. Experiments H1-H4 validate geometric topology, directional asymmetry, discriminative cost, and forward predictive simulation.
 
-### 🚧 Experimental & Unstable
-3.  **Bio-Wrappers & Geometric VAE:** 
-    * **Current Status:** A first attempt at `pancreas_vae` and joint geodesic training has been completed in `src/ham/bio/`, but the results are entirely unsatisfactory. 
-    * **Known Issues:** The learning process is not stable; the solver collapses with `nil` or `NaN` values. The complex geometries (e.g., Sphere, Hyperboloid) yield very bad cosine similarities during geodesic learning tests.
-    * **Diagnosis:** The problem is likely tied to the `Hyperboloid` numerical implementation, its exponential map, or its interaction with backpropagation in deep neural environments. Significant architectural fixes are necessary here.
+### Known Limitations
+6.  **Hyperboloid VAE:** Joint training on complex curved manifolds (Sphere, Hyperboloid) with the full VAE pipeline remains numerically sensitive. The flat `EuclideanSpace` latent space is the recommended default for biological applications.
