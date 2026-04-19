@@ -39,7 +39,7 @@ from ham.bio.vae import GeometricVAE
 from ham.models.learned import DataDrivenPullbackRanders
 from ham.geometry.metric import FinslerMetric
 from weinreb_vae import build_diagnostic_vae, encode_all, TARGET_FATES
-from experiment_h2_directional import attach_datadriven_randers_metric, load_phase1_vae
+from weinreb_experiment import attach_datadriven_randers_metric, load_phase1_vae
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

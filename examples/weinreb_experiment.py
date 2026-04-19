@@ -185,45 +185,16 @@ def attach_randers_metric(vae: GeometricVAE, key: jax.Array) -> GeometricVAE:
     return eqx.tree_at(lambda m: m.metric, vae, metric)
 
 
-class KernelWindField(eqx.Module):
-    anchors_z: jax.Array
-    anchors_v: jax.Array
-    sigma: float
-
-    def __init__(self, anchors_z, anchors_v, sigma=0.5):
-        self.anchors_z = anchors_z
-        self.anchors_v = anchors_v
-        self.sigma = sigma
-
-    def __call__(self, z: jax.Array) -> jax.Array:
-        dists_sq = jnp.sum((self.anchors_z - z)**2, axis=-1)
-        weights = jax.nn.softmax(-dists_sq / (2 * self.sigma**2))
-        return jnp.sum(weights[:, None] * self.anchors_v, axis=0)
-
-class DataDrivenPullbackRanders(PullbackRanders):
-    """
-    Instead of a parameterized neural network, uses a kernel smoother
-    over the dataset's exact RNA velocities projected into the latent space.
-    """
-    def __init__(self, manifold, decoder, anchors_z, anchors_v, sigma=0.5):
-        self.dim = manifold.ambient_dim
-        self.decoder = decoder
-        self.manifold = manifold
-        self.epsilon = 1e-5
-        
-        # Override w_net with the non-parametric kernel smoother
-        self.w_net = KernelWindField(anchors_z, anchors_v, sigma)
-        # We don't need to call super().__init__ if we fully define the properties, 
-        # but to satisfy eqx.Module we define all fields exactly as they exist in PullbackRanders.
-        # Actually PullbackRanders inherits from Randers. Let's just bypass standard initialization safely.
-        
-        # We must initialize h_net correctly to satisfy Randers base class signature.
-        self.h_net = lambda x: x 
+from ham.models.learned import DataDrivenPullbackRanders
 
 def attach_datadriven_randers_metric(vae: GeometricVAE, dataset: BioDataset, n_anchors: int = 5000, sigma: float = 0.5) -> GeometricVAE:
     """
     Builds a non-parametric wind field by projecting dataset velocities
     into the latent space and using a Nadaraya-Watson (softmax) kernel smoother.
+    
+    Uses the canonical DataDrivenPullbackRanders from ham.models.learned,
+    which has a correct PullbackGNet (h_net = J^T J) for the Riemannian
+    component of the Randers metric.
     """
     # 1. Filter cells with valid velocity
     vel_norms = np.linalg.norm(dataset.V, axis=1)

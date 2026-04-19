@@ -6,6 +6,7 @@ import equinox as eqx
 
 # Assuming FinslerMetric is defined in ham.geometry.metric
 from ham.geometry.metric import FinslerMetric
+from ham.utils.math import safe_norm
 
 class Trajectory(NamedTuple):
     xs: jnp.ndarray
@@ -42,7 +43,12 @@ class AVBDSolver(eqx.Module):
               key: Optional[jax.Array] = None) -> Trajectory:
         
         if key is None:
-            key = jax.random.PRNGKey(42)
+            # Derive a data-dependent key so vmap'd calls get different
+            # permutation orders instead of all sharing PRNGKey(42).
+            # fold_in with a hash of the start/end points makes each
+            # geodesic pair get a unique key under vmap.
+            data_hash = jnp.sum(p_start * 1e4 + p_end * 1e2).astype(jnp.int32)
+            key = jax.random.fold_in(jax.random.PRNGKey(42), data_hash)
         k1, k2 = jax.random.split(key)
         
         if constraints is None: constraints = []
@@ -116,7 +122,7 @@ class AVBDSolver(eqx.Module):
             grad_tan = metric.manifold.to_tangent(x, grad_f)
             
             # Prevent exploding gradients by clipping the norm
-            from ham.utils.math import safe_norm
+
             grad_norm = safe_norm(grad_tan)
             clip_value = 10.0
             grad_tan = jnp.where(grad_norm > clip_value, grad_tan * (clip_value / grad_norm), grad_tan)

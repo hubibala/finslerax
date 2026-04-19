@@ -126,7 +126,9 @@ def main():
     Z4 = jax.vmap(lambda x: vae_base._get_dist(x).mean)(jnp.array(X4))
     Z6 = jax.vmap(lambda x: vae_base._get_dist(x).mean)(jnp.array(X6))
 
-    solver = AVBDSolver(iterations=200)
+    # Use scan-based solver (train_mode=True) — much faster under vmap than while_loop.
+    # 60 iterations is sufficient for short observed segments (day2→day4, day4→day6).
+    solver = AVBDSolver(iterations=60)
 
     print("\n" + "─"*95)
     print(f"{'sigma':>6} {'seed':>6} {'L_fwd_mean':>12} {'L_bwd_mean':>12} {'ratio':>9} {'p-val':>12} {'frac<1':>8}")
@@ -135,7 +137,9 @@ def main():
     @eqx.filter_jit
     def batch_arc_lengths(metric, zs_batch, ze_batch):
         def single_pair(zs, ze):
-            traj = solver.solve(metric, zs, ze, n_steps=25, train_mode=False)
+            # train_mode=True uses jax.lax.scan (fixed-length, vmap-friendly)
+            # instead of while_loop which stalls on worst-case convergence
+            traj = solver.solve(metric, zs, ze, n_steps=15, train_mode=True)
             xs = traj.xs
             Lf = metric.arc_length(xs)
             Lb = metric.arc_length(xs[::-1])
@@ -152,18 +156,20 @@ def main():
             Z_starts = jnp.concatenate([Z2, Z4], axis=0) # (2*N, D)
             Z_ends   = jnp.concatenate([Z4, Z6], axis=0) # (2*N, D)
             
-            print(f"  Batch solving {Z_starts.shape[0]} BVPs (sigma={sigma}, seed={seed}) in chunks...")
+            n_total = Z_starts.shape[0]
+            chunk_size = 50  # Smaller chunks for faster first-result and lower memory
+            n_chunks = (n_total + chunk_size - 1) // chunk_size
+            print(f"  σ={sigma}, seed={seed}: solving {n_total} BVPs in {n_chunks} chunks of {chunk_size}...")
             
-            chunk_size = 200 # Adjust based on GPU memory
             Lf_list, Lb_list = [], []
             
-            # Use jax.lax.map for memory-efficient batching if needed, or simple loop
-            for i in range(0, len(Z_starts), chunk_size):
+            for ci, i in enumerate(range(0, n_total, chunk_size)):
                 zs_chunk = Z_starts[i:i+chunk_size]
                 ze_chunk = Z_ends[i:i+chunk_size]
                 L_fwd_c, L_bwd_c = batch_arc_lengths(vae.metric, zs_chunk, ze_chunk)
                 Lf_list.append(np.array(L_fwd_c))
                 Lb_list.append(np.array(L_bwd_c))
+                print(f"    chunk {ci+1}/{n_chunks} done ({i+len(zs_chunk)}/{n_total} pairs)", flush=True)
 
             Lf = np.concatenate(Lf_list)
             Lb = np.concatenate(Lb_list)

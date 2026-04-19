@@ -99,7 +99,12 @@ class TestMeshSolver(unittest.TestCase):
         start = jnp.array([0.0, 0.9, 0.1])
         end = jnp.array([0.0, -0.9, 0.1])
         
-        traj = self.solver.solve(metric, start, end, n_steps=30)
+        # Higher iterations needed: the obstacle avoidance geometry with near-singular
+        # 0.95 headwind requires more convergence steps to fully deviate the path,
+        # especially since the AVBD permutation order is data-dependent.
+        solver_hard = AVBDSolver(step_size=0.05, beta=10.0, iterations=400)
+        
+        traj = solver_hard.solve(metric, start, end, n_steps=40)
         
         # Calculate mean X position of the trajectory
         mean_x = jnp.mean(traj.xs[:, 0])

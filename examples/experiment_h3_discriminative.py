@@ -8,13 +8,13 @@ import equinox as eqx
 import anndata
 from ham.bio.data import BioDataset
 from ham.bio.vae import GeometricVAE
-from ham.models.learned import DataDrivenPullbackRanders
+from ham.models.learned import DataDrivenPullbackRanders, PullbackRiemannian
 from ham.solvers.avbd import AVBDSolver
 
 from weinreb_vae import build_diagnostic_vae, encode_all, TARGET_FATES
 
-# Reuse the datadriven attachment created for H2
-from experiment_h2_directional import attach_datadriven_randers_metric
+# Reuse the datadriven attachment from the main experiment module
+from weinreb_experiment import attach_datadriven_randers_metric
 
 def load_phase1_vae(checkpoint, d_in, d_lat, n_cls, k):
     model = build_diagnostic_vae(d_in, d_lat, n_cls, k)
@@ -22,30 +22,24 @@ def load_phase1_vae(checkpoint, d_in, d_lat, n_cls, k):
 
 def build_riemannian_fallback(vae: GeometricVAE) -> GeometricVAE:
     """
-    Build a null (Riemannian, W=0) VAE with use_wind=False by directly
-    setting the metric field on a copy of the frozen module.
-
-    Uses object.__setattr__ to bypass eqx.Module's frozen-field guard,
-    which is the canonical equinox approach for one-shot field replacement
-    when the field contains a new static structure (use_wind).
+    Build a proper Riemannian (W=0) null baseline using PullbackRiemannian.
+    
+    This creates a metric G(z) = J^T J from the decoder Jacobian alone,
+    with NO wind field at all — structurally independent of the Randers model.
+    This ensures the null baseline is a true Riemannian metric.
     """
-    old_m = vae.metric
-    null_metric = DataDrivenPullbackRanders(
-        manifold=old_m.manifold,
-        decoder=old_m.decoder,
-        anchors_z=old_m.w_net.anchors_z,
-        anchors_v=old_m.w_net.anchors_v,
-        sigma=old_m.w_net.sigma,
-        use_wind=False,
-    )
-    return eqx.tree_at(lambda m: m.metric, vae, null_metric)
+    metric = PullbackRiemannian(vae.manifold, decoder=vae.decoder_net)
+    return eqx.tree_at(lambda m: m.metric, vae, metric)
 
 
 def arc_length_normalized(metric, z_start, z_end, solver, steps=20):
     """
-    Computes \int F(gamma, u) dt along the ACTUAL geodesic computed via AVBD.
-    This normalizes the Finsler arc length by the Euclidean length,
-    removing the distance confound.
+    Computes \int F(gamma, u) dt along the ACTUAL geodesic computed via AVBD,
+    normalized by the Euclidean path length of the trajectory.
+    
+    This controls for distance while properly accounting for curved paths:
+    the ratio measures how much more the Finsler metric costs compared to
+    the Euclidean length of the same path (not the chord between endpoints).
     """
     # Solve for the ACTUAL geodesic
     trajectory = solver.solve(metric, z_start, z_end, n_steps=steps, train_mode=False)
@@ -53,11 +47,11 @@ def arc_length_normalized(metric, z_start, z_end, solver, steps=20):
     # Integrated Finsler Length along the geodesic
     finsler_len = metric.arc_length(trajectory.xs)
     
-    # Euclidean Length of the path (baseline for normalization)
-    eucl_len = jnp.linalg.norm(z_end - z_start) + 1e-8
+    # Euclidean path length along the trajectory (sum of segment lengths)
+    diffs = trajectory.xs[1:] - trajectory.xs[:-1]
+    eucl_path_len = jnp.sum(jnp.sqrt(jnp.sum(diffs**2, axis=-1) + 1e-12))
     
-    # Unit speed equivalent
-    return finsler_len / eucl_len
+    return finsler_len / (eucl_path_len + 1e-8)
 
 def two_segment_normalized_cost(metric, z2, z4, z6, solver):
     cost_1 = arc_length_normalized(metric, z2, z4, solver)

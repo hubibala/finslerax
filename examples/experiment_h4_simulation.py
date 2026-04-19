@@ -25,7 +25,7 @@ from ham.solvers.geodesic import ExponentialMap
 
 # Reuse helpers
 from weinreb_vae import build_diagnostic_vae, encode_all, TARGET_FATES
-from experiment_h2_directional import attach_datadriven_randers_metric, load_phase1_vae
+from weinreb_experiment import attach_datadriven_randers_metric, load_phase1_vae
 from experiment_h3_discriminative import build_riemannian_fallback
 
 
@@ -65,12 +65,18 @@ def main():
 
     Z_all = encode_all(vae_randers, jnp.array(X_norm))
 
-    # Fate centroids
+    # Fate centroids — use day-6 cells only (from ALL test triples, not just N_EVAL)
+    # This prevents progenitor cells from diluting the centroid
+    all_triples = np.load(TEST_TRIPLES)
+    day6_indices = np.unique(all_triples[:, 2])
+    day6_label_mask = np.zeros(len(labels), dtype=bool)
+    day6_label_mask[day6_indices] = True
+    
     fate_centroids = {}
     for fname in TARGET_FATES:
         if fname not in fate_names: continue
         fidx = fate_names.index(fname)
-        mask = labels == fidx
+        mask = (labels == fidx) & day6_label_mask
         if mask.sum() > 10:
             fate_centroids[fname] = jnp.array(Z_all[mask].mean(axis=0))
 
@@ -100,8 +106,9 @@ def main():
         @eqx.filter_jit
         def run_batch_simulation(model, zs):
             def single_shoot(z):
-                # Use wind as velocity if available
-                if hasattr(model.metric, 'w_net'):
+                # Use wind as velocity if available AND wind is enabled
+                has_wind = hasattr(model.metric, 'w_net') and getattr(model.metric, 'use_wind', False)
+                if has_wind:
                     w = model.metric.w_net(z)
                 else:
                     w = jnp.zeros_like(z)
@@ -151,8 +158,9 @@ def main():
     # Background latent dots
     ax.scatter(z2d_all[:, 0], z2d_all[:, 1], s=1, alpha=0.1, color='lightgray', label='Latent Space')
     
-    # Target centroids
-    colors_fates = {"Monocyte": "steelblue", "Neutrophil": "tomato", "Erythroid": "forestgreen", "Megakaryocyte": "darkorange"}
+    # Target centroids — only show fates that are actually tracked
+    _all_colors = {"Monocyte": "steelblue", "Neutrophil": "tomato", "Erythroid": "forestgreen", "Megakaryocyte": "darkorange"}
+    colors_fates = {f: _all_colors.get(f, "black") for f in TARGET_FATES if f in fate_centroids}
     for fname, centroid in fate_centroids.items():
         c2d = pca2.transform(np.array(centroid)[None])[0]
         color = colors_fates.get(fname, "black")

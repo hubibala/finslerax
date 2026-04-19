@@ -47,8 +47,10 @@ def main():
 
     print("Encoding dataset to latent space...")
     sample_size = min(15000, X_norm.shape[0])
-    X_sample = X_norm[:sample_size]
-    L_sample = labels[:sample_size]
+    rng = np.random.default_rng(42)
+    sample_idx = rng.choice(X_norm.shape[0], sample_size, replace=False)
+    X_sample = X_norm[sample_idx]
+    L_sample = labels[sample_idx]
     
     Z = encode_all(vae_riem, X_sample)
     
