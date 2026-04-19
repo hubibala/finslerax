@@ -1,3 +1,18 @@
-from .learned import NeuralRanders
+"""Learnable metric implementations: neural, pullback, and data-driven."""
 
-__all__ = ["NeuralRanders"]
+from ham.models.learned import (
+    NeuralRiemannian,
+    NeuralRanders,
+    PullbackRanders,
+    PullbackRiemannian,
+    DataDrivenPullbackRanders,
+    KernelWindField,
+    PullbackGNet,
+)
+
+__all__ = [
+    "NeuralRiemannian", "NeuralRanders",
+    "PullbackRanders", "PullbackRiemannian",
+    "DataDrivenPullbackRanders",
+    "KernelWindField", "PullbackGNet",
+]

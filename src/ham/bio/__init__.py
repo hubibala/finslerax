@@ -1,3 +1,6 @@
-from .vae import GeometricVAE
+"""Single-cell biology wrappers: Geometric VAE and AnnData dataset."""
 
-__all__ = ["GeometricVAE"]
+from ham.bio.vae import GeometricVAE
+from ham.bio.data import BioDataset
+
+__all__ = ["GeometricVAE", "BioDataset"]
