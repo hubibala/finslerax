@@ -1,0 +1,48 @@
+# Code Review: `mesh.py`
+**Reviewer:** Code Reviewer Agent  
+**Date:** 2025-05-15  
+**Arch Spec Version:** 1.1.0 (April 2026)
+
+## Summary
+
+`TriangularMesh` is a clean, functionally correct implementation of a discrete 2-manifold embedded in $\mathbb{R}^N$. The barycentric projection logic, differentiable face weighting, and area-weighted sampling are well implemented. No outright bugs were found for well-formed meshes. The main risks are: (1) a fragile traced-value-as-shape pattern in `random_sample` that will break under JIT, (2) silent garbage output for degenerate triangles in `to_tangent`, and (3) missing batch-dimension support required by `spec/ARCH_SPEC.md § 1`. Test coverage is reasonable but has notable gaps in direct testing of `get_face_index`, `get_face_weights`, `retract`, and all edge-case/degeneracy scenarios.
+
+## Issue Tracker
+
+| # | Severity | Location | Description | Suggested Fix |
+|---|----------|----------|-------------|---------------|
+| 1 | **RISK** | `src/ham/geometry/mesh.py:113` | `random_sample` computes `n = jnp.prod(jnp.array(shape))`, producing a traced JAX scalar. This value is then used as the `shape=` argument to `jax.random.choice(k1, ..., shape=(n,), ...)`. Under eager execution this works because JAX scalars can implicitly convert to Python ints, but wrapping this call in `jax.jit` will fail with a `ConcretizationTypeError` because shape arguments must be static. The method is intentionally not JIT-decorated, but nothing prevents a caller from JIT-wrapping it. | Recommended Action: Replace with pure Python: `n = 1` / `for s in shape: n *= s`, or `import math; n = math.prod(shape)`. This makes the intent explicit and avoids any traced-value ambiguity. |
+| 2 | **RISK** | `src/ham/geometry/mesh.py:90-95` | `to_tangent` computes a Gram-Schmidt basis from triangle edges `u = b - a`, `w = c - a`. For degenerate triangles (zero-area, e.g. coincident vertices), `jnp.linalg.norm(u)` is 0 and the division `u / (0 + 1e-10)` produces a near-zero vector scaled by $10^{10}$, yielding a meaningless basis. Downstream operations (`jnp.dot(v, e1) * e1 + ...`) would then produce numerically garbage tangent vectors without any indication of failure. | Recommended Action: Either (a) validate that meshes have no degenerate triangles at construction time, or (b) return the zero vector when the triangle is degenerate (norm below threshold). |
+| 3 | **RISK** | `src/ham/geometry/mesh.py:83` → `:72` | `to_tangent` (decorated `@eqx.filter_jit`) calls `self.get_face_index(x)` (also decorated `@eqx.filter_jit`). Nested JIT is handled by JAX (inner JIT is inlined), but the double decoration adds unnecessary tracing overhead and can obscure error messages. The same pattern does **not** apply to `retract` → `project` because `retract` legitimately delegates to `project` as a separate entry point. | Recommended Action: Extract the shared distance-computation logic into an un-decorated private helper, then have both `get_face_index` and `to_tangent` call it directly. Only decorate the public entry points. |
+| 4 | **RISK** | `src/ham/geometry/mesh.py:40` | `det = jnp.maximum(d3 * d5 - d4 * d4, 1e-10)` clamps the Gram determinant to be positive. However, for nearly-degenerate triangles where the true determinant is small but positive (e.g., $10^{-15}$), the clamp silently replaces it with $10^{-10}$, which changes the computed barycentric coordinates `s` and `t`. This could cause the point to be classified as inside the triangle when it is actually outside (or vice versa), leading to a subtly wrong closest point. | Recommended Action: Consider a two-tier approach: clamp for division safety, but also flag/handle the case where the determinant is below a meaningful threshold (e.g., fall back to edge-only projection for near-degenerate triangles). |
+| 5 | **RISK** | `src/ham/geometry/mesh.py:78` | `get_face_weights` default `temperature=100.0` is a bare Python `float`, not an `eqx.field`. Since it's passed as a function argument (not a module field), it becomes a static constant traced by JIT. If a user wants to sweep temperature values, every unique value will trigger a full retrace. Additionally, for points exactly on a face (`dists_sq ≈ 0` for one face), `−dists\_sq \cdot 100$ ranges from $0$ to $−\infty$, which is numerically fine for softmax but produces near-one-hot gradients that can destabilize optimisation. | Recommended Action: Document the temperature sensitivity. Consider making it an `eqx.field` if tunability is expected. |
+| 6 | **STYLE** | `src/ham/geometry/mesh.py` (all public methods) | `spec/ARCH_SPEC.md § 1` mandates batch-first convention: "All operations assume a leading batch dimension `(B, ...)`." Every public method in `TriangularMesh` (`project`, `to_tangent`, `get_face_index`, `get_face_weights`, `retract`) operates on a single point with no batch support. Callers must manually `vmap` over batches. Other manifolds in `surfaces.py` follow the same per-point pattern, so this is a library-wide convention rather than a `mesh.py`-specific defect. | Recommended Action: Either add explicit `vmap`-wrapped batch variants or document that callers are expected to `vmap` themselves. Update `spec/ARCH_SPEC.md` to clarify the convention for `Manifold` methods if per-point is intentional. |
+| 7 | **STYLE** | `src/ham/geometry/mesh.py:37` | Comment says `# Metric Tensor entries` for variables `d1`–`d5`, but `d1 = jnp.dot(ab, ap)` and `d2 = jnp.dot(ac, ap)` are not metric tensor entries — they are projections of `ap` onto the edge vectors. Only `d3`, `d4`, `d5` form the Gram matrix $\begin{pmatrix}d_3 & d_4 \\ d_4 & d_5\end{pmatrix}$. | Recommended Action: Split the comment: `# Gram matrix entries` for `d3, d4, d5` and `# Projections of ap` for `d1, d2`. |
+| 8 | **STYLE** | `src/ham/geometry/mesh.py:64` | `dists, points = jax.vmap(dist_fn)(self.triangles)` — the variable `dists` actually holds **squared** distances (the helper returns `dist_sq`). The name is misleading and could cause bugs if a future contributor treats them as true distances. | Recommended Action: Rename to `dists_sq` for consistency with `get_face_weights` (line 80) which already uses `dists_sq`. |
+| 9 | **STYLE** | `src/ham/geometry/mesh.py:105` | `random_sample` is the only public method without `@eqx.filter_jit`. This is correct (see Issue #1 — it cannot be JIT'd due to dynamic shapes), but the asymmetry is unexplained. | Recommended Action: Add a brief comment explaining why JIT is omitted, e.g. `# Not JIT-compatible: shape arguments must be static.` |
+
+## Test Coverage Assessment
+
+| Public Method | Tested? | Test Location | Gaps |
+|---|---|---|---|
+| `__init__` | ✅ Indirect | `tests/test_mesh.py:setUp` | — |
+| `ambient_dim` | ✅ Direct | `tests/test_mesh.py:test_high_dim_embedding` L50 | — |
+| `intrinsic_dim` | ❌ | — | No test asserts `intrinsic_dim == 2`. |
+| `project` | ✅ Direct | `tests/test_mesh.py:test_standard_3d_tetrahedron` L23, `test_high_dim_embedding` L55 | Only 2 simple cases. No edge cases: point on edge, point equidistant from two faces, degenerate triangle. |
+| `get_face_index` | ⚠️ Indirect | Used internally by `to_tangent`; no direct assertion on returned index. | Should have a direct test asserting the correct face index is returned. |
+| `get_face_weights` | ⚠️ Indirect | Exercised via `DiscreteRanders` in `tests/test_mesh_solver.py` | No direct test of weight distribution, gradient flow, or temperature sensitivity. |
+| `to_tangent` | ✅ Direct | `tests/test_mesh.py:test_standard_3d_tetrahedron` L29, `test_high_dim_embedding` L62 | No test for degenerate triangle, collinear edges, or near-tangent vectors. |
+| `retract` | ❌ | — | No test. Should verify `retract(x, 0) == x` and `retract(x, delta)` stays on surface. |
+| `random_sample` | ✅ Direct | `tests/test_mesh.py:test_high_dim_embedding` L66 | Tests shape and plane constraint. Does NOT test area-weighting correctness (statistical distribution across faces). |
+| `_point_triangle_distance` | ⚠️ Indirect | Via `project` tests | No unit test with known analytical distances. No test for point on edge, point at vertex, or degenerate triangle. |
+
+**Gap Summary:** 5 of 9 public methods lack direct or edge-case testing. The highest-priority gaps are: (1) `get_face_weights` differentiability — no test uses `jax.grad` through it; (2) `retract` — entirely untested; (3) edge-case geometry — no degenerate-triangle, on-edge, or equidistant-face tests.
+
+## Positive Patterns
+
+1. **Consistent numerical guards.** `jnp.maximum(..., 1e-10)` is used at every division site (`_point_triangle_distance:40,47`, `to_tangent:92,94`, `random_sample:111`). This prevents NaN propagation for well-formed meshes.
+2. **Differentiable face selection.** The split between `get_face_index` (discrete) and `get_face_weights` (softmax-based, differentiable) is a clean design that lets `DiscreteRanders` flow gradients through the face assignment.
+3. **Correct barycentric projection.** Interior projection via Gram-matrix solve with edge/vertex fallback via `project_segment` + `argmin` is textbook-correct and avoids the common pitfall of Voronoi region enumeration.
+4. **Area-weighted sampling with fold-over.** The `r1 + r2 > 1` reflection in `random_sample` correctly produces a uniform distribution over the triangle, avoiding the common sqrt-transform approach that is less numerically stable.
+5. **Clean `eqx.Module` usage.** Fields (`vertices`, `faces`, `triangles`) are properly typed as class annotations and assigned in `__init__`, which lets `eqx.filter_jit` correctly partition static/dynamic data.
+6. **Arbitrary ambient dimension.** The implementation is fully $N$-dimensional (no hardcoded 3D assumptions), as validated by the 4D embedding test.
