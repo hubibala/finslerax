@@ -6,8 +6,8 @@ This document tracks our progress in applying the 161 detailed reviews (Math, Co
 These files form the foundation of the differentiable Finsler geometry framework. We will implement math, code, and doc reviews for each.
 
 - [x] `src/ham/geometry/manifold.py` (Starting Point)
-- [ ] `src/ham/geometry/metric.py`
-- [ ] `src/ham/geometry/transport.py`
+- [x] `src/ham/geometry/metric.py`
+- [x] `src/ham/geometry/transport.py`
 - [ ] `src/ham/geometry/curvature.py`
 - [ ] `src/ham/geometry/surfaces.py`
 - [ ] `src/ham/geometry/zoo.py`
@@ -46,9 +46,9 @@ These files apply the framework to biological data (RNA velocity) and model arch
 ## Phase 6: Test Suite (16 Files)
 Tests need to be updated to reflect API changes, fix bugs (e.g., PRNG reuse), and improve coverage (e.g., JAX transforms).
 
-- [ ] `tests/test_metric.py`
-- [ ] `tests/test_manifold.py` (if applicable)
-- [ ] `tests/test_transport.py`
+- [x] `tests/test_metric.py` (Completed)
+- [x] `tests/test_manifold.py` (Completed)
+- [x] `tests/test_transport.py` (Completed)
 - [ ] `tests/test_surfaces.py`
 - [ ] `tests/test_zoo.py`
 - [ ] `tests/test_mesh.py`
