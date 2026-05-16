@@ -87,15 +87,42 @@ class TestHyperboloid(unittest.TestCase):
             self.assertAlmostEqual(norm_sq, -1.0, places=5)
             self.assertGreater(p[0], 0.0)
 
-    def test_metric_tensor_signature(self):
+    def test_exp_log_roundtrip(self):
         """
-        The metric tensor returned should be Minkowski diag(-1, 1, 1).
+        log_x(exp_x(v)) == v and exp_x(log_x(y)) == y.
         """
         x = jnp.array([1.0, 0.0, 0.0])
-        g = self.manifold.metric_tensor(x)
+        v = jnp.array([0.0, 0.5, 0.5])
         
-        expected = jnp.diag(jnp.array([-1.0, 1.0, 1.0]))
-        np.testing.assert_allclose(g, expected)
+        y = self.manifold.exp_map(x, v)
+        # y should be on the manifold
+        norm_sq = self.minkowski_dot(y, y)
+        self.assertAlmostEqual(norm_sq, -1.0, places=6)
+        
+        v_recovered = self.manifold.log_map(x, y)
+        np.testing.assert_allclose(v_recovered, v, atol=1e-6)
+
+        # Reverse roundtrip
+        y2 = self.manifold.random_sample(self.key, ())
+        v2 = self.manifold.log_map(x, y2)
+        y2_recovered = self.manifold.exp_map(x, v2)
+        np.testing.assert_allclose(y2_recovered, y2, atol=1e-6)
+
+    def test_parallel_transport(self):
+        """
+        Parallel transport should preserve Minkowski norm and inner products.
+        """
+        x = jnp.array([1.0, 0.0, 0.0])
+        v = jnp.array([0.0, 0.5, 0.5])
+        y = self.manifold.random_sample(self.key, ())
+        
+        v_trans = self.manifold.parallel_transport(x, y, v)
+        
+        # Norm preserved
+        self.assertAlmostEqual(self.minkowski_dot(v_trans, v_trans), self.minkowski_dot(v, v), places=6)
+        
+        # Orthogonal to y
+        self.assertAlmostEqual(self.minkowski_dot(y, v_trans), 0.0, places=6)
 
     def test_retraction_stays_on_manifold(self):
         """
