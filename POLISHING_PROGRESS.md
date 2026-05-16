@@ -18,7 +18,7 @@ These files form the foundation of the differentiable Finsler geometry framework
 Next, we tackle the numerical solvers for geodesics and simulated physics fields.
 
 - [x] `src/ham/solvers/geodesic.py`
-- [ ] `src/ham/solvers/avbd.py`
+- [x] `src/ham/solvers/avbd.py`
 - [ ] `src/ham/sim/fields.py`
 
 ## Phase 3: Neural Architectures & Training
@@ -54,7 +54,8 @@ Tests need to be updated to reflect API changes, fix bugs (e.g., PRNG reuse), an
 - [x] `tests/test_zoo.py`
 - [x] `tests/test_mesh.py`
 - [x] `tests/test_geodesic.py`
-- [ ] `tests/test_solver.py`
+- [x] `tests/test_avbd.py` (New)
+- [x] `tests/test_solver.py`
 - [ ] `tests/test_fields.py`
 - [ ] `tests/test_network.py`
 - [ ] `tests/test_learned_metric.py`
@@ -63,7 +64,7 @@ Tests need to be updated to reflect API changes, fix bugs (e.g., PRNG reuse), an
 - [ ] `tests/test_hyperbolic_vae.py`
 - [ ] `tests/test_joint_training.py`
 - [ ] `tests/test_geodesic_learning.py`
-- [ ] `tests/test_mesh_solver.py`
+- [x] `tests/test_mesh_solver.py`
 - [x] `tests/test_hyperboloid.py`
 
 ## Phase 7: Demos & Examples (13 Files)
