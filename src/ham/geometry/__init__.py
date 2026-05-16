@@ -1,7 +1,7 @@
 from .manifold import Manifold
 from .metric import FinslerMetric
 from .zoo import Euclidean, Riemannian, Randers, DiscreteRanders
-from .transport import berwald_transport, BerwaldConnection
+from .transport import BerwaldConnection
 from .mesh import TriangularMesh  
 from .surfaces import Sphere, Hyperboloid, Torus, Paraboloid, EuclideanSpace
 from .curvature import sectional_curvature, scalar_curvature
@@ -13,7 +13,6 @@ __all__ = [
     "EuclideanSpace",
     "Riemannian",
     "Randers",
-    "berwald_transport",
     "BerwaldConnection",
     "TriangularMesh",
     "DiscreteRanders",

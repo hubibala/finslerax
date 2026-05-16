@@ -152,15 +152,16 @@ The Augmented Vertex Block Descent solver.
 Implemented as an integrator on top of the metric.
 
 ```python
-def berwald_transport(metric: FinslerMetric, path: jnp.ndarray, v0: jnp.ndarray) -> jnp.ndarray:
-    """
-    Transports vector v0 along 'path' using the Berwald connection.
-    Differentiation: 
-        Gamma = Hessian_v(metric.spray)
-    Integration:
-        dv/dt = -Gamma(x, dx/dt) * v * dx/dt
-    """
-    pass
+class BerwaldConnection(Connection):
+    def parallel_transport(self, path_x: jax.Array, path_v: jax.Array, vec_start: jax.Array) -> jax.Array:
+        """
+        Transports vector vec_start along a trajectory using the Berwald connection.
+        Differentiation: 
+            Gamma = Hessian_v(metric.spray)
+        Integration:
+            dX/dt = -Gamma(x, v) * v * X
+        """
+        pass
 ```
 
 ### 4.4. Initial Value Solver (Exponential Map)

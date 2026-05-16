@@ -22,7 +22,7 @@ from ham.geometry.manifold import Manifold
 from ham.geometry.metric import FinslerMetric
 from ham.geometry.zoo import Euclidean, Riemannian, Randers, DiscreteRanders
 from ham.geometry.surfaces import Sphere, Hyperboloid, Torus, Paraboloid, EuclideanSpace
-from ham.geometry.transport import BerwaldConnection, berwald_transport
+from ham.geometry.transport import BerwaldConnection
 
 # Solvers
 from ham.solvers.avbd import AVBDSolver, Trajectory
@@ -34,7 +34,7 @@ __all__ = [
     "Manifold", "FinslerMetric",
     "Euclidean", "Riemannian", "Randers", "DiscreteRanders",
     "Sphere", "Hyperboloid", "Torus", "Paraboloid", "EuclideanSpace",
-    "BerwaldConnection", "berwald_transport",
+    "BerwaldConnection",
     # Solvers
     "AVBDSolver", "Trajectory", "ExponentialMap",
 ]
