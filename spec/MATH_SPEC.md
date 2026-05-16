@@ -84,6 +84,24 @@ $$
 
 In JAX, this is simply an ODE integration where the `force` term uses the Hessian of the `spray` function.
 
+### 3.3. Holonomy and Projection-Based Transport
+
+**Remark (Ambient vs. Intrinsic Convention):**
+When the metric is defined in ambient coordinates as $g(x) = I_n$ (the identity), the Berwald connection satisfies $\Gamma^i_{jk} = 0$ everywhere. In this case, the parallel transport reduces to a pure tangent-space projection at each discrete step:
+
+$$X_{k+1} = \Pi_{T_{\gamma_{k+1}}\mathcal{M}} \left( X_k - \Gamma^i_{jk} \dot\gamma^j X^k \Delta t \right) = \Pi_{T_{\gamma_{k+1}}\mathcal{M}}(X_k)$$
+
+This is a valid approximation of the Levi-Civita connection via the Gauss equation ($\nabla^M_X Y = \Pi_{TM}(\bar\nabla_X Y)$), but it produces a holonomy angle that is the complement of the standard solid-angle formula:
+
+| Mechanism | Holonomy angle for latitude $\theta$ on $S^2$ |
+|---|---|
+| Projection-based ($\Gamma = 0$, ambient coords) | $2\pi\cos\theta$ |
+| Intrinsic Levi-Civita ($\Gamma \neq 0$, chart coords) | $2\pi(1 - \cos\theta)$ |
+
+Both are equivalent modulo $2\pi$ (since $\cos(2\pi\cos\theta) = \cos(2\pi(1-\cos\theta))$). The implementation uses the projection-based approach when the metric is position-independent in ambient coordinates.
+
+For metrics defined in intrinsic coordinates where $g(x)$ is position-dependent (e.g., the Poincaré half-plane $ds^2 = (dx^2+dy^2)/y^2$), the Berwald connection is non-trivially non-zero and the ODE integration genuinely drives the transport.
+
 ---
 
 ## 4. The Geometric Hierarchy
