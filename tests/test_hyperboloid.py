@@ -7,7 +7,7 @@ from jax import config
 # Use 64-bit precision for geometric checks
 config.update("jax_enable_x64", True)
 
-from ham.geometry.surfaces import Hyperboloid
+from ham.geometry.manifolds import Hyperboloid
 
 class TestHyperboloid(unittest.TestCase):
     

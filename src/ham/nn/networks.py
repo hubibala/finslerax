@@ -93,12 +93,7 @@ class PSDMatrixField(eqx.Module):
         if self.embedding is not None:
             x = self.embedding(x)
             
-        # Predict Factor A
+        # Predict Factor A (the network outputs the "square root" of the metric)
         flat_A = self.mlp(x)
         A = flat_A.reshape(self.dim, self.dim)
-        
-        # Construct PSD matrix
-        # G = A A^T + eps I
-        G = jnp.dot(A, A.T) + 1e-4 * jnp.eye(self.dim)
-        
-        return G
+        return A

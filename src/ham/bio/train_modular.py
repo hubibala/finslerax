@@ -58,7 +58,7 @@ def main():
     # Just a basic NeuralRanders metric
     # The actual hyper-parameters for the metric depend on the manifold, which is handled inside VAE.
     # We'll instantiate a placeholder manifold to init the metric, or just init it.
-    from ham.geometry.surfaces import Hyperboloid
+    from ham.geometry import Hyperboloid
     base_manifold = Hyperboloid(intrinsic_dim=latent_dim)
     metric = NeuralRanders(base_manifold, hidden_dim=64, key=subkey)
     

@@ -6,7 +6,7 @@ from jax import config
 config.update("jax_enable_x64", True)
 
 from ham.solvers.avbd import AVBDSolver
-from ham.geometry.surfaces import Sphere, Torus, Paraboloid
+from ham.geometry import Sphere, Torus, Paraboloid
 from ham.geometry.zoo import Euclidean, Randers
 from ham.utils.math import safe_norm
 

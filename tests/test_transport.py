@@ -15,7 +15,7 @@ from jax import config
 # Ensure precision for geometric drift checks
 config.update("jax_enable_x64", True)
 
-from ham.geometry.surfaces import Sphere, EuclideanSpace
+from ham.geometry import Sphere, EuclideanSpace
 from ham.geometry.zoo import Euclidean, Riemannian, Randers
 from ham.geometry.transport import BerwaldConnection
 

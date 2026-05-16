@@ -7,7 +7,7 @@ from jax import config
 # Use 64-bit precision for geometric checks
 config.update("jax_enable_x64", True)
 
-from ham.geometry.surfaces import Sphere, Torus, Paraboloid, Hyperboloid, EuclideanSpace
+from ham.geometry import Sphere, Torus, Paraboloid, Hyperboloid, EuclideanSpace
 
 class SurfaceTestMixin:
     """Common tests for all manifolds."""

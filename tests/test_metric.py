@@ -17,7 +17,7 @@ config.update("jax_enable_x64", True)
 
 from ham.geometry.manifold import Manifold
 from ham.geometry.metric import FinslerMetric
-from ham.geometry.surfaces import EuclideanSpace
+from ham.geometry import EuclideanSpace
 from ham.geometry.zoo import Randers
 from ham.utils.math import safe_norm
 

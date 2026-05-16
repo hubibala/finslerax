@@ -8,7 +8,7 @@ from jax import config
 config.update("jax_enable_x64", True)
 
 from ham.geometry.manifold import Manifold, _safe_norm_ratio
-from ham.geometry.surfaces import Torus
+from ham.geometry import Torus
 
 class MockManifold(Manifold):
     """A minimal concrete manifold for testing default methods."""

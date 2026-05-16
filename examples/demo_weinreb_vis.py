@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ham.geometry.surfaces import Hyperboloid
+from ham.geometry import Hyperboloid
 from ham.vis.hyperbolic import plot_poincare_disk
 
 def generate_synthetic_tree(n_branches=2, depth=5):

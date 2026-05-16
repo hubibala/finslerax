@@ -43,7 +43,7 @@ import anndata
 
 from ham.bio.data import BioDataset
 from ham.bio.vae import GeometricVAE
-from ham.geometry.surfaces import EuclideanSpace
+from ham.geometry import EuclideanSpace
 from ham.models.learned import PullbackRanders, PullbackRiemannian
 from ham.training.losses import LossComponent
 from ham.solvers.avbd import AVBDSolver

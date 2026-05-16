@@ -7,7 +7,7 @@ from jax import config
 config.update("jax_enable_x64", True)
 
 from ham.geometry import Sphere
-from ham.geometry.zoo import Randers
+from ham.geometry import Randers
 from ham.sim.fields import rossby_haurwitz
 from ham.solvers import AVBDSolver
 from ham.solvers.geodesic import ExponentialMap

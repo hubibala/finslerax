@@ -4,7 +4,7 @@ import equinox as eqx
 from typing import Tuple, Any, Optional
 
 from ham.geometry.metric import FinslerMetric
-from ham.geometry.surfaces import Hyperboloid
+from ham.geometry import Hyperboloid
 
 class WrappedNormal(eqx.Module):
     """

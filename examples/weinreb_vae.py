@@ -59,10 +59,10 @@ import optax
 import anndata
 
 from ham.bio.data import BioDataset
-from ham.geometry.surfaces import EuclideanSpace
+from ham.geometry import EuclideanSpace
 from ham.models.learned import PullbackRiemannian
 from ham.training.losses import LossComponent
-from ham.geometry.zoo import Euclidean
+from ham.geometry import Euclidean
 
 
 # ══════════════════════════════════════════════════════════════════════════════

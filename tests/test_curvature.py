@@ -23,8 +23,8 @@ from jax import config
 
 config.update("jax_enable_x64", True)
 
-from ham.geometry.surfaces import EuclideanSpace, Sphere
-from ham.geometry.zoo import Euclidean, Riemannian, Randers
+from ham.geometry import EuclideanSpace, Sphere
+from ham.geometry import Euclidean, Riemannian, Randers
 from ham.geometry.curvature import (
     riemann_curvature_tensor,
     sectional_curvature,

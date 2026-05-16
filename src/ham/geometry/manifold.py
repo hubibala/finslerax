@@ -9,7 +9,7 @@ those are the responsibility of :class:`~ham.geometry.metric.FinslerMetric`.
 Subclasses must implement :meth:`project`, :meth:`to_tangent`,
 :meth:`retract`, and :meth:`random_sample`. Optionally override
 :meth:`exp_map` and :meth:`log_map` with closed-form expressions
-for better accuracy (see :mod:`ham.geometry.surfaces`).
+for better accuracy (see :mod:`ham.geometry.manifolds`).
 
 Architecture reference: spec/ARCH_SPEC.md § 2.1.
 """
@@ -84,7 +84,7 @@ class Manifold(eqx.Module, ABC):
     Inherits from `eqx.Module`, making all subclasses valid JAX PyTrees composable 
     with `jax.jit`, `jax.vmap`, and `jax.grad`.
     
-    See `ham.geometry.surfaces` for concrete implementations (Sphere, Torus, 
+    See `ham.geometry.manifolds` for concrete implementations (Sphere, Torus, 
     Hyperboloid, etc.) and `examples/demo_trajectories.py` for usage.
     
     Reference: ARCH_SPEC.md, Section 2.1
