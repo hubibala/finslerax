@@ -1,48 +1,126 @@
+"""
+Finsler Metric base class — the core geometric abstraction of HAMTools.
+
+This module defines :class:`FinslerMetric`, from which all concrete
+metrics (Euclidean, Riemannian, Randers, learned neural metrics) inherit.
+The metric provides the fundamental cost function F(x, v) and its derived
+energy E = ½ F². Every downstream geometric object — geodesic spray,
+curvature, parallel transport — is auto-differentiated from ``metric_fn``.
+
+Mathematical reference: spec/MATH_SPEC.md §§ 1–2.
+Architecture reference: spec/ARCH_SPEC.md § 2.2.
+
+See Also:
+    ham.geometry.zoo : Concrete metric implementations.
+    ham.geometry.transport : Berwald parallel transport built on this class.
+"""
+
 import jax
 import jax.numpy as jnp
 import equinox as eqx
 from abc import abstractmethod
 
 from ham.geometry.manifold import Manifold
+from ham.utils.math import PSD_EPS
 
 class FinslerMetric(eqx.Module):
     """
     Abstract base class for all Finsler metrics.
 
-    Inheriting from `eqx.Module` ensures all subclasses are valid JAX PyTrees.
+    Defines the geometry of a manifold via the fundamental cost function $F(x, v)$ 
+    and its derived energy $E = \\tfrac{1}{2}F^2$. All downstream geometry 
+    (geodesic spray, curvature, parallel transport) is auto-differentiated from 
+    `metric_fn`. Inherits from `eqx.Module` so subclasses are valid JAX PyTrees.
+    
+    Implementations may be vmapped externally; methods operate on single points.
     """
     manifold: Manifold
+    spray_reg: float = eqx.field(static=True, default=PSD_EPS)
 
     @abstractmethod
-    def metric_fn(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+    def metric_fn(self, x: jax.Array, v: jax.Array) -> jax.Array:
         """
         Computes the fundamental Finsler cost function F(x, v).
 
         The metric must be positively 1-homogeneous in v, meaning F(x, λv) = λF(x, v) for λ > 0.
+        Implementations must be gradient-safe at v = 0 (e.g., using `safe_norm`).
         
         Args:
             x: Position vector on the manifold.
             v: Tangent vector at position x.
             
         Returns:
-            Scalar cost (length) of the tangent vector.
+            Scalar Finsler cost $F(x, v) \geq 0$. Shape: `()`.
         """
         pass
 
-    def energy(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+    def energy(self, x: jax.Array, v: jax.Array) -> jax.Array:
+        """
+        Lagrangian energy E(x, v) = ½ F²(x, v).
+
+        This scalar is the root of the computational graph: the geodesic
+        spray, fundamental tensor, and inner product are all derived from
+        automatic differentiation of this function.
+
+        Args:
+            x: Position on the manifold. Shape ``(D,)`` or ``(N,)``.
+            v: Tangent vector at x. Shape ``(D,)`` or ``(N,)``.
+
+        Returns:
+            Scalar energy. Shape ``()``.
+
+        Reference:
+            spec/MATH_SPEC.md § 1.2.
+        """
         return 0.5 * self.metric_fn(x, v)**2
 
-    def inner_product(self, x: jnp.ndarray, v: jnp.ndarray, 
-                      w1: jnp.ndarray, w2: jnp.ndarray) -> jnp.ndarray:
-        # Hessian of E w.r.t v, evaluated at (x, v)
+    def inner_product(self, x: jax.Array, v: jax.Array, 
+                      w1: jax.Array, w2: jax.Array) -> jax.Array:
+        """
+        Finsler inner product <w1, w2>_v using the fundamental tensor g_ij(x, v).
+
+        Computes  w1ᵀ · g(x, v) · w2  where g_ij = ∂²E/∂vⁱ∂vʲ (the Hessian
+        of the energy with respect to velocity).  Note: unlike Riemannian
+        geometry, the inner product depends on a *reference direction* v.
+
+        Args:
+            x: Position on the manifold. Shape ``(D,)`` or ``(N,)``.
+            v: Reference tangent direction for the fundamental tensor. Shape ``(D,)`` or ``(N,)``.
+            w1: First tangent vector. Shape ``(D,)`` or ``(N,)``.
+            w2: Second tangent vector. Shape ``(D,)`` or ``(N,)``.
+
+        Returns:
+            Scalar inner product. Shape ``()``.
+
+        Reference:
+            spec/MATH_SPEC.md § 1.1 (fundamental tensor);
+            spec/ARCH_SPEC.md § 2.2.
+        """
+        # Hessian of E w.r.t v, evaluated at (x, v).
+        # We compute this dynamically on every call; JAX optimizes this away under JIT.
         g_fn = jax.hessian(self.energy, argnums=1)
         g_x_v = g_fn(x, v)
         return jnp.dot(w1, jnp.dot(g_x_v, w2))
 
-    def spray(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+    def spray(self, x: jax.Array, v: jax.Array) -> jax.Array:
         """
-        Computes the Geodesic Spray G(x, v).
-        Solves: Hess_v(E) * (-2G) = Grad_x(E) - Jac_x(Grad_v(E)) * v
+        Geodesic spray coefficients Gⁱ(x, v).
+
+        Solves the implicit linear system derived from Euler-Lagrange:
+            Hess_v(E) · (−2G) = ∇ₓE − Jacₓ(∇ᵥE) · v
+        for the spray coefficients $G^i$, per `spec/MATH_SPEC.md` § 2.2.
+
+        Args:
+            x: Position on the manifold. Shape ``(D,)`` or ``(N,)``.
+            v: Velocity (tangent vector). Shape ``(D,)`` or ``(N,)``.
+
+        Returns:
+            Spray vector G(x, v). Shape ``(D,)`` or ``(N,)``.
+
+        Note:
+            A Tikhonov term ε·I (ε = spray_reg) is added to the Hessian to
+            regularize near-degenerate directions (Randers boundary).
+            See spec/MATH_SPEC.md § 6.1.
         """
         grad_v_fn = jax.grad(self.energy, argnums=1)
         
@@ -60,19 +138,52 @@ class FinslerMetric(eqx.Module):
         
         # Solve for acceleration
         # Regularize hessian slightly to avoid singular matrices (Randers ill-conditioning near boundary)
-        acc = jnp.linalg.solve(hess_v + 1e-4 * jnp.eye(x.shape[0]), rhs)
+        acc = jnp.linalg.solve(hess_v + self.spray_reg * jnp.eye(v.shape[-1]), rhs)
         return -0.5 * acc
 
-    def geod_acceleration(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+    def geod_acceleration(self, x: jax.Array, v: jax.Array) -> jax.Array:
+        """
+        Geodesic acceleration  ẍⁱ = −2 Gⁱ(x, v).
+
+        Returns the acceleration vector that, combined with velocity v,
+        defines the geodesic ODE:  dx/dt = v,  dv/dt = −2G(x, v).
+
+        Args:
+            x: Position on the manifold. Shape ``(D,)`` or ``(N,)``.
+            v: Velocity (tangent vector). Shape ``(D,)`` or ``(N,)``.
+
+        Returns:
+            Acceleration vector. Shape ``(D,)`` or ``(N,)``.
+
+        Reference:
+            spec/MATH_SPEC.md § 2.1.
+        """
         return -2.0 * self.spray(x, v)
 
-    def arc_length(self, gamma: jnp.ndarray) -> jnp.ndarray:
+    def arc_length(self, gamma: jax.Array) -> jax.Array:
         """
-        Computes the integrated Finsler length of a continuous path gamma (N, D).
-        Uses midpoint evaluation.
+        Approximate Finsler arc length of a discrete path.
+
+        Uses the midpoint rule: each segment [γᵢ, γᵢ₊₁] is evaluated at
+        the projected midpoint with velocity v = γᵢ₊₁ − γᵢ. This is a first-order
+        quadrature; accuracy improves with finer discretization.
+
+        Args:
+            gamma: Waypoints of the path. Shape ``(N, D)`` where N ≥ 2.
+
+        Returns:
+            Total arc length (scalar). Shape ``()``. If N < 2, returns 0.0.
+
+        Example:
+            >>> path = jnp.linspace(start, end, num=50)
+            >>> length = metric.arc_length(path)
         """
+        if gamma.shape[0] < 2:
+            return jnp.array(0.0)
+
         def segment_length(x1, x2):
             v = x2 - x1
-            return self.metric_fn(0.5 * (x1 + x2), v)
+            midpoint = self.manifold.project(0.5 * (x1 + x2))
+            return self.metric_fn(midpoint, v)
             
         return jnp.sum(jax.vmap(segment_length)(gamma[:-1], gamma[1:]))

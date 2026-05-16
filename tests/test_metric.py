@@ -5,6 +5,7 @@ import numpy as np
 
 from ham.geometry.manifold import Manifold
 from ham.geometry.metric import FinslerMetric
+from ham.utils.math import safe_norm
 
 class MockManifold(Manifold):
     """A trivial R^3 manifold for testing."""
@@ -21,12 +22,12 @@ class MockManifold(Manifold):
 class EuclideanMetric(FinslerMetric):
     """F(x, v) = |v|"""
     def metric_fn(self, x, v):
-        return jnp.linalg.norm(v)
+        return safe_norm(v)
 
 class ScaledEuclideanMetric(FinslerMetric):
     """F(x, v) = 0.5 * |v| (Should behave same as Euclidean structurally)"""
     def metric_fn(self, x, v):
-        return 0.5 * jnp.linalg.norm(v)
+        return 0.5 * safe_norm(v)
 
 class TestMetricPhysics(unittest.TestCase):
     
@@ -130,6 +131,43 @@ class TestMetricPhysics(unittest.TestCase):
         acc = self.euc.geod_acceleration(x, v)
         
         np.testing.assert_allclose(acc, -2.0 * spray, atol=1e-6)
+
+    def test_arc_length_degenerate(self):
+        """Test arc_length handles paths with < 2 points gracefully."""
+        path = jnp.array([[1.0, 2.0, 3.0]])
+        self.assertEqual(float(self.euc.arc_length(path)), 0.0)
+
+    def test_arc_length_straight_line(self):
+        """Test arc_length computes Euclidean distance correctly."""
+        path = jnp.linspace(jnp.zeros(3), jnp.ones(3), 10)
+        length = self.euc.arc_length(path)
+        expected = jnp.sqrt(3.0)
+        np.testing.assert_allclose(length, expected, atol=1e-5)
+        
+    def test_spray_jit_vmap(self):
+        """Test that spray composes safely with vmap and jit."""
+        x = jax.random.normal(self.key, (10, 3))
+        v = jax.random.normal(self.key, (10, 3))
+        
+        vmap_spray = jax.vmap(self.euc.spray)
+        sprays = vmap_spray(x, v)
+        self.assertEqual(sprays.shape, (10, 3))
+        
+        jit_vmap_spray = jax.jit(vmap_spray)
+        sprays_jit = jit_vmap_spray(x, v)
+        np.testing.assert_allclose(sprays, sprays_jit, atol=1e-6)
+
+    def test_gradient_safety(self):
+        """Test that gradients are stable at v=0 (no NaNs)."""
+        x = jnp.array([1.0, 1.0, 1.0])
+        v_zero = jnp.zeros(3)
+        
+        spray_zero = self.euc.spray(x, v_zero)
+        self.assertFalse(jnp.any(jnp.isnan(spray_zero)))
+        
+        grad_v = jax.grad(self.euc.energy, argnums=1)(x, v_zero)
+        self.assertFalse(jnp.any(jnp.isnan(grad_v)))
+        np.testing.assert_allclose(grad_v, jnp.zeros(3), atol=1e-6)
 
 if __name__ == '__main__':
     unittest.main()
