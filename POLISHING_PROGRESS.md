@@ -17,7 +17,7 @@ These files form the foundation of the differentiable Finsler geometry framework
 ## Phase 2: Solvers & Fields
 Next, we tackle the numerical solvers for geodesics and simulated physics fields.
 
-- [ ] `src/ham/solvers/geodesic.py`
+- [x] `src/ham/solvers/geodesic.py`
 - [ ] `src/ham/solvers/avbd.py`
 - [ ] `src/ham/sim/fields.py`
 
@@ -53,7 +53,7 @@ Tests need to be updated to reflect API changes, fix bugs (e.g., PRNG reuse), an
 - [x] `tests/test_surfaces.py`
 - [x] `tests/test_zoo.py`
 - [x] `tests/test_mesh.py`
-- [ ] `tests/test_geodesic.py`
+- [x] `tests/test_geodesic.py`
 - [ ] `tests/test_solver.py`
 - [ ] `tests/test_fields.py`
 - [ ] `tests/test_network.py`

@@ -21,7 +21,7 @@ class Riemannian(FinslerMetric):
 
     def __init__(self, manifold: Manifold, g_net: Callable[[jax.Array], jax.Array]):
         """Initializes the Riemannian metric."""
-        super().__init__(manifold)
+        self.manifold = manifold
         self.g_net = g_net
 
     def __repr__(self) -> str:

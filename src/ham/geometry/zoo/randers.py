@@ -27,7 +27,7 @@ class Randers(FinslerMetric):
                  epsilon: float = 1e-5,
                  use_wind: bool = True):
         """Initializes the Randers metric."""
-        super().__init__(manifold)
+        self.manifold = manifold
         self.h_net = h_net
         self.w_net = w_net
         self.epsilon = float(epsilon)
