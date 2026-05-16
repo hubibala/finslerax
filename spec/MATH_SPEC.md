@@ -48,13 +48,13 @@ $$
 
 Where $G^i$ are the **Spray Coefficients**. They are given by:
 $$
-G^i(x, v) = \frac{1}{4} g^{il}(x, v) \left( 2 \frac{\partial^2 E}{\partial v^l \partial x^k} v^k - \frac{\partial E}{\partial x^l} \right)
+G^i(x, v) = \frac{1}{2} g^{il}(x, v) \left( \frac{\partial^2 E}{\partial x^k \partial v^l} v^k - \frac{\partial E}{\partial x^l} \right)
 $$
 
 ### 2.2. JAX Implementation (Implicit Solve)
 We avoid inverting $g_{ij}$ explicitly. Instead, we compute $G^i$ by solving the linear system:
 $$
-\text{Hess}_v(E) \cdot (2G) = \nabla_x E - \text{Jac}_x(\nabla_v E) \cdot v
+\text{Hess}_v(E) \cdot (-2G) = \nabla_x E - \text{Jac}_x(\nabla_v E) \cdot v
 $$
 
 ---
@@ -138,3 +138,10 @@ $$
 F_{net}(x, v) = \|v\| \cdot \text{NN}(x, v / \|v\|)
 $$
 This ensures the Berwald coefficients (which depend on homogeneity) remain well-defined.
+
+### 6.3. Secant Scaling for Logarithmic Maps
+The projected secant $\Pi_{T_xM}(y - x)$ can have a shorter ambient length than the chord $y - x$ on highly curved manifolds, which can cause topological shortcuts. To correct this, we rescale the tangent projection by the chord length:
+$$
+\log_x(y) \approx \frac{\|y - x\|}{\|\Pi_{T_xM}(y - x)\|} \cdot \Pi_{T_xM}(y - x)
+$$
+This preserves the direction but scales the magnitude correctly to avoid optimizer exploitation of the manifold's interior.
