@@ -24,10 +24,10 @@ Next, we tackle the numerical solvers for geodesics and simulated physics fields
 ## Phase 3: Neural Architectures & Training
 With the geometry and solvers fixed, we polish the neural components, losses, and training pipelines.
 
-- [ ] `src/ham/nn/networks.py`
-- [ ] `src/ham/models/learned.py`
-- [ ] `src/ham/training/losses.py`
-- [ ] `src/ham/training/pipeline.py`
+- [x] `src/ham/nn/networks.py`
+- [x] `src/ham/models/learned.py`
+- [x] `src/ham/training/losses.py`
+- [x] `src/ham/training/pipeline.py`
 
 ## Phase 4: Biology & Models
 These files apply the framework to biological data (RNA velocity) and model architectures (VAE).
@@ -57,10 +57,10 @@ Tests need to be updated to reflect API changes, fix bugs (e.g., PRNG reuse), an
 - [x] `tests/test_avbd.py` (New)
 - [x] `tests/test_solver.py`
 - [x] `tests/test_fields.py` (New)
-- [ ] `tests/test_network.py`
-- [ ] `tests/test_learned_metric.py`
+- [x] `tests/test_network.py`
+- [x] `tests/test_learned_metric.py`
 - [ ] `tests/test_losses.py` (if applicable)
-- [ ] `tests/test_pipeline.py`
+- [x] `tests/test_pipeline.py`
 - [ ] `tests/test_hyperbolic_vae.py`
 - [ ] `tests/test_joint_training.py`
 - [ ] `tests/test_geodesic_learning.py`
