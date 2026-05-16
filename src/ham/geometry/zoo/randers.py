@@ -38,8 +38,10 @@ class Randers(FinslerMetric):
 
     def _get_zermelo_data(self, x: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array]:
         """Returns the Riemannian tensor H, the Wind vector W, and the Lambda scalar."""
-        A = self.h_net(x)
-        H = jnp.dot(A, A.T) + PSD_EPS * jnp.eye(A.shape[-1])
+        # Get the sea metric H(x)
+        H = self.h_net(x)
+        # Defensive symmetrization
+        H = 0.5 * (H + H.T)
         
         W_raw = self.w_net(x)
         W_raw = self.manifold.to_tangent(x, W_raw)

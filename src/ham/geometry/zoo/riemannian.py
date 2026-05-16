@@ -10,12 +10,12 @@ from ham.utils import PSD_EPS, GRAD_EPS
 class Riemannian(FinslerMetric):
     """General Riemannian metric: F(x, v) = sqrt( v^T G(x) v ).
 
-    The metric tensor field G(x) is reconstructed from a raw factor A(x) provided by `g_net`.
-    This Cholesky-like construction (G = A A^T + eps I) guarantees positive-definiteness.
+    The metric tensor field G(x) is provided by `g_net`. This implementation 
+    assumes `g_net` handles positive-definiteness (e.g., via PSDMatrixField).
 
     Args:
         manifold: The topological domain M.
-        g_net: Callable mapping position x (shape `(D,)`) to a metric factor A(x) (shape `(D, D)`).
+        g_net: Callable mapping position x (shape `(D,)`) to a metric tensor G(x) (shape `(D, D)`).
     """
     g_net: Any
 
@@ -32,9 +32,11 @@ class Riemannian(FinslerMetric):
         v_sq = jnp.sum(v**2, axis=-1)
         is_zero = v_sq < GRAD_EPS
         
-        # Symmetrize and construct PSD metric via Cholesky factor A
-        A = self.g_net(x)
-        G_x = jnp.dot(A, A.T) + PSD_EPS * jnp.eye(A.shape[-1])
+        # Get the metric tensor G(x)
+        G_x = self.g_net(x)
+        
+        # Defensive symmetrization
+        G_x = 0.5 * (G_x + G_x.T)
         
         quad = jnp.dot(v, jnp.dot(G_x, v))
         return jnp.where(is_zero, 0.0, jnp.sqrt(jnp.maximum(quad, GRAD_EPS)))

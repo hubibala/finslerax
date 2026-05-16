@@ -1,41 +1,91 @@
+"""Neural network building blocks for learned Finsler geometry.
+
+Provides differentiable parameterizations for vector fields (wind) and 
+positive-definite matrix fields (Riemannian base metrics) used by the 
+learned metric classes in ham.models.learned.
+
+All modules are compatible with JAX transforms (jit, vmap, grad).
+"""
+
 import jax
 import jax.numpy as jnp
 import equinox as eqx
 from typing import Optional
 
+from ..utils.math import PSD_EPS
+
 class RandomFourierFeatures(eqx.Module):
-    """
-    Maps input x to high-dimensional frequency space: [cos(Bx), sin(Bx)].
-    Mitigates spectral bias in coordinate-based MLPs.
+    """Random Fourier Feature (RFF) embedding (Rahimi & Recht, 2007).
+    
+    Maps input x ∈ R^D to a 2M-dimensional feature space via:
+        γ(x) = [cos(Bx), sin(Bx)]
+    where B ∈ R^{M×D} is sampled from N(0, scale²I). This approximates a 
+    shift-invariant kernel and mitigates spectral bias in coordinate-based 
+    MLPs, allowing them to learn high-frequency spatial variation.
     """
     B: jnp.ndarray
     
     def __init__(self, in_dim: int, mapping_size: int, scale: float, key: jax.Array):
+        """Initializes the Fourier frequency matrix.
+        
+        Args:
+            in_dim: Dimensionality of the input vector D.
+            mapping_size: Number of random frequencies M.
+            scale: Standard deviation of the Gaussian sampling for B.
+            key: JAX PRNG key.
+        """
         # B is sampled from N(0, scale^2)
-        self.B = jax.random.normal(key, (mapping_size, in_dim)) * scale
+        # We wrap in stop_gradient to ensure it remains a frozen basis.
+        self.B = jax.lax.stop_gradient(
+            jax.random.normal(key, (mapping_size, in_dim)) * scale
+        )
 
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+        """Computes the embedding γ(x).
+        
+        Args:
+            x: Input vector of shape (D,).
+            
+        Returns:
+            Fourier-embedded vector of shape (2*M,).
+        """
         # x: (D,) -> Bx: (M,)
         projected = jnp.dot(self.B, x)
         return jnp.concatenate([jnp.cos(projected), jnp.sin(projected)], axis=0)
 
 class VectorField(eqx.Module):
-    """
-    Learns a vector field W(x): R^D -> R^D.
+    """Neural-network approximation of a smooth vector field W: R^D → R^D.
+    
+    In the Zermelo parameterization of Randers metrics (see MATH_SPEC § 5),
+    this network produces the raw wind field W^i(x). The strong-convexity 
+    constraint ||W||_h < 1 is enforced downstream by the RandersMetric.
+    
+    Uses tanh activation for C^∞ smoothness, which is critical for higher-order 
+    autodiff through the spray and Berwald connection.
     """
     embedding: Optional[RandomFourierFeatures]
     mlp: eqx.nn.MLP
 
     def __init__(self, dim: int, hidden_dim: int, depth: int, key: jax.Array, 
                  use_fourier: bool = True, fourier_scale: float = 10.0):
+        """Initializes the vector field network.
         
+        Args:
+            dim: Input and output dimensionality D.
+            hidden_dim: Width of the hidden layers.
+            depth: Number of hidden layers.
+            key: JAX PRNG key.
+            use_fourier: Whether to use RFF embedding.
+            fourier_scale: Scale parameter for RFF frequencies.
+        """
         k_emb, k_mlp = jax.random.split(key)
         
         if use_fourier:
-            # Mapping size usually hidden_dim // 2 so output is hidden_dim
+            # Output dim of RFF is 2 * map_size. Note: if hidden_dim is odd, 
+            # the effective embedding dimension will be hidden_dim - 1.
             map_size = hidden_dim // 2
             self.embedding = RandomFourierFeatures(dim, map_size, fourier_scale, k_emb)
-            in_size = map_size * 2 # cos + sin
+            in_size = map_size * 2
         else:
             self.embedding = None
             in_size = dim
@@ -45,33 +95,54 @@ class VectorField(eqx.Module):
             out_size=dim,
             width_size=hidden_dim,
             depth=depth,
-            activation=jax.nn.tanh, # smoother than relu for gradients
+            activation=jax.nn.tanh,
             key=k_mlp
         )
 
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+        """Evaluates the vector field at point x.
+        
+        Args:
+            x: Point on the manifold, shape (D,).
+            
+        Returns:
+            Vector value W(x), shape (D,).
+            Operates on single points; use jax.vmap for batching.
+        """
         if self.embedding is not None:
             x = self.embedding(x)
         return self.mlp(x)
 
 class PSDMatrixField(eqx.Module):
-    """
-    Learns a Symmetric Positive Definite matrix field G(x).
-    Method:
-        1. Network outputs matrix A of shape (D, D).
-        2. G = A @ A.T + epsilon * I
+    """Learns a Symmetric Positive Definite matrix field G(x).
+    
+    Reconstructs G(x) via a Cholesky-like factor A:
+        G(x) = A(x) A(x)^T + ε I
+    guaranteeing eigenvalues ≥ ε (default 1e-4). 
+    
+    Used to parameterize the Riemannian base metric h_{ij}(x) in Zermelo data.
     """
     embedding: Optional[RandomFourierFeatures]
     mlp: eqx.nn.MLP
     dim: int = eqx.field(static=True)
 
     def __init__(self, dim: int, hidden_dim: int, depth: int, key: jax.Array, 
-                 use_fourier: bool = False): # Metric usually smoother than wind
+                 use_fourier: bool = False):
+        """Initializes the matrix field network.
         
+        Args:
+            dim: Dimension of the square matrix D.
+            hidden_dim: Width of the hidden layers.
+            depth: Number of hidden layers.
+            key: JAX PRNG key.
+            use_fourier: Whether to use RFF embedding (default False for smoother metrics).
+        """
         k_emb, k_mlp = jax.random.split(key)
         self.dim = dim
         
         if use_fourier:
+            # Output dim of RFF is 2 * map_size. Note: if hidden_dim is odd, 
+            # the effective embedding dimension will be hidden_dim - 1.
             map_size = hidden_dim // 2
             self.embedding = RandomFourierFeatures(dim, map_size, 1.0, k_emb)
             in_size = map_size * 2
@@ -79,7 +150,9 @@ class PSDMatrixField(eqx.Module):
             self.embedding = None
             in_size = dim
             
-        # Output flattened D*D matrix
+        # We output a full D*D matrix for factor A. 
+        # While Cholesky (D(D+1)/2) is more efficient, a full matrix A 
+        # simplifies implementation and ensures surjectivity over SPD matrices.
         self.mlp = eqx.nn.MLP(
             in_size=in_size,
             out_size=dim * dim,
@@ -90,10 +163,21 @@ class PSDMatrixField(eqx.Module):
         )
 
     def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+        """Evaluates the SPD matrix at point x.
+        
+        Args:
+            x: Point on the manifold, shape (D,).
+            
+        Returns:
+            Symmetric positive-definite matrix G(x), shape (D, D).
+            Operates on single points; use jax.vmap for batching.
+        """
         if self.embedding is not None:
             x = self.embedding(x)
             
-        # Predict Factor A (the network outputs the "square root" of the metric)
         flat_A = self.mlp(x)
         A = flat_A.reshape(self.dim, self.dim)
-        return A
+        
+        # Construct G = A @ A.T + eps * I
+        G = jnp.dot(A, A.T) + PSD_EPS * jnp.eye(self.dim)
+        return G
