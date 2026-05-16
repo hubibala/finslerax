@@ -8,7 +8,7 @@ These files form the foundation of the differentiable Finsler geometry framework
 - [x] `src/ham/geometry/manifold.py` (Starting Point)
 - [x] `src/ham/geometry/metric.py`
 - [x] `src/ham/geometry/transport.py`
-- [ ] `src/ham/geometry/curvature.py`
+- [x] `src/ham/geometry/curvature.py`
 - [ ] `src/ham/geometry/surfaces.py`
 - [ ] `src/ham/geometry/zoo.py`
 - [ ] `src/ham/geometry/mesh.py`
@@ -49,6 +49,7 @@ Tests need to be updated to reflect API changes, fix bugs (e.g., PRNG reuse), an
 - [x] `tests/test_metric.py` (Completed)
 - [x] `tests/test_manifold.py` (Completed)
 - [x] `tests/test_transport.py` (Completed)
+- [x] `tests/test_curvature.py` (New)
 - [ ] `tests/test_surfaces.py`
 - [ ] `tests/test_zoo.py`
 - [ ] `tests/test_mesh.py`

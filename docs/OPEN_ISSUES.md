@@ -19,6 +19,20 @@ The geodesic IVP solver (`ExponentialMap`) already uses RK4. For long transport 
 
 ---
 
+## [PERFORMANCE] 4th-Order Autodiff Compilation Cost in Curvature
+**Component:** `ham.geometry.curvature`
+**Status:** Open
+
+**Description:**
+The Riemann curvature tensor $R^i_{jk}$ computation involves 4th-order differentiation of the energy $E$ (Energy -> Spray -> Nonlinear Connection -> Riemann Tensor). For higher-dimensional manifolds ($D \geq 8$), XLA compilation of the `jacfwd` chain can take minutes. 
+
+**Proposed Action:**
+- Investigate if `jax.lax.stop_gradient` can be used to prevent redundant tracing in the horizontal derivative terms.
+- Consider implementing an analytical expansion of $R^i_{jk}$ for Riemannian metrics to avoid the generic Finsler pipeline when possible.
+- Provide a `jax.checkpoint`-wrapped variant of the curvature module to trade recomputation for memory pressure.
+
+---
+
 ## [PERFORMANCE] Batched Transport for Jacobian Frames
 **Component:** `ham.geometry.transport`
 **Status:** Open
@@ -79,3 +93,15 @@ Added `MATH_SPEC.md § 3.3` documenting the ambient vs. intrinsic holonomy conve
 - Projection-based transport ($\Gamma = 0$) produces angle $2\pi\cos\theta$.
 - Intrinsic Levi-Civita ($\Gamma \neq 0$) produces angle $2\pi(1 - \cos\theta)$.
 - Both are equivalent modulo $2\pi$. The test docstrings now explicitly explain which mechanism is active.
+---
+
+## ~~[BUG] Curvature Module Bugs and Test Gaps~~
+**Component:** `ham.geometry.curvature`
+**Status:** ✅ Resolved
+
+**Resolution:**
+- Replaced `jnp.linalg.norm` with `safe_norm` to prevent NaN gradients in `flag_curvature_sample`.
+- Replaced Euclidean Gram-Schmidt with metric-aware Gram-Schmidt using `metric.inner_product`.
+- Renamed `scalar_curvature` to `flag_curvature_sample` (with backward-compat alias) to reflect direction-dependence in Finsler geometry.
+- Added 17 exhaustive tests in `tests/test_curvature.py` covering zero curvature, curved spaces, antisymmetry, Euler homogeneity, and JAX transforms.
+- Formalized the PRNG key API for stochastic curvature sampling.
