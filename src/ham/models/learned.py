@@ -6,9 +6,9 @@ from ..geometry.metric import FinslerMetric
 from ..geometry.manifold import Manifold
 from ..geometry.zoo import Randers, Riemannian
 from ..nn.networks import VectorField, PSDMatrixField
-from ..utils.math import safe_norm
+from ..utils.math import PSD_EPS
 
-class NeuralRiemannian(Riemannian, eqx.Module):
+class NeuralRiemannian(Riemannian):
     """
     A Learnable Riemannian Metric parameterized by Neural Networks.
     """
@@ -20,7 +20,7 @@ class NeuralRiemannian(Riemannian, eqx.Module):
         g_net = PSDMatrixField(self.dim, hidden_dim, depth, key)
         super().__init__(manifold, g_net)
 
-class NeuralRanders(Randers, eqx.Module):
+class NeuralRanders(Randers):
     """
     A Learnable Randers Metric parameterized by Neural Networks.
     Inherits from Randers to reuse the correct Zermelo cost logic.
@@ -38,7 +38,6 @@ class NeuralRanders(Randers, eqx.Module):
                             use_fourier=use_fourier, fourier_scale=3.0)
                             
         super().__init__(manifold, h_net, w_net, epsilon=1e-5)
-    
 
 
 class PullbackRanders(Randers):
@@ -72,26 +71,24 @@ class KernelWindField(eqx.Module):
     """
     anchors_z: Any
     anchors_v: Any
-    sigma: Any
+    sigma: float = eqx.field(static=True)
 
     def __init__(self, anchors_z, anchors_v, sigma=0.5):
         self.anchors_z = anchors_z
         self.anchors_v = anchors_v
-        self.sigma = sigma
+        self.sigma = float(sigma)
 
     def __call__(self, z: jax.Array) -> jax.Array:
         # Optimized distance calculation for vmap scaling: (a-b)^2 = a^2 + b^2 - 2ab
         # Instead of (anchors - z)**2 which materializes a (B, N, D) array when vmapped over B queries.
         z_sq = jnp.sum(z**2, axis=-1, keepdims=True)
         anchors_sq = jnp.sum(self.anchors_z**2, axis=-1)
-        dots = jnp.dot(self.anchors_z, z.T).T if z.ndim > 0 else jnp.dot(self.anchors_z, z)
+        dots = jnp.dot(self.anchors_z, z)
         
-        # dists_sq = z_sq + anchors_sq - 2 * z @ anchors.T
-        if z.ndim > 0:
-            dists_sq = z_sq + anchors_sq - 2 * dots
-        else:
-            dists_sq = z_sq + anchors_sq - 2 * dots
-            
+        dists_sq = z_sq + anchors_sq - 2 * dots
+        # Clamp to avoid small negative values from floating-point cancellation
+        dists_sq = jnp.maximum(dists_sq, 0.0)
+
         weights = jax.nn.softmax(-dists_sq / (2 * self.sigma**2))
         return jnp.dot(weights, self.anchors_v)
 
@@ -121,10 +118,9 @@ class PullbackGNet(eqx.Module):
     def __call__(self, z: jax.Array) -> jax.Array:
         J = jax.jacfwd(self.decoder)(z)
         H = jnp.dot(J.T, J)
-        # Add a tiny diagonal for numerical stability
-        return H + 1e-4 * jnp.eye(self.dim)
+        return H + PSD_EPS * jnp.eye(self.dim)
 
-class PullbackRiemannian(Riemannian, eqx.Module):
+class PullbackRiemannian(Riemannian):
     """
     A Riemannian Metric where G(z) is strictly defined by the Decoder's 
     geometry (Pullback Metric).
@@ -132,7 +128,7 @@ class PullbackRiemannian(Riemannian, eqx.Module):
     decoder: eqx.Module # Pass the frozen decoder here
     dim: int = eqx.field(static=True)
 
-    def __init__(self, manifold: Manifold, decoder: eqx.Module, key: jax.Array = None, hidden_dim: int = 32):
+    def __init__(self, manifold: Manifold, decoder: eqx.Module):
         self.dim = manifold.ambient_dim
         self.decoder = decoder
         g_net = PullbackGNet(decoder=decoder, dim=self.dim)

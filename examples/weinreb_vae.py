@@ -408,7 +408,7 @@ def attach_pullback_metric(vae, key: jax.Array):
     decoder's Jacobian defines the metric for evaluation and geodesics.
     """
     manifold = vae.manifold
-    metric   = PullbackRiemannian(manifold, decoder=vae.decoder_net, key=key)
+    metric   = PullbackRiemannian(manifold, decoder=vae.decoder_net)
     return eqx.tree_at(lambda m: m.metric, vae, metric)
 
 

@@ -425,7 +425,7 @@ def run_validation(
 
 
 def build_riemannian_baseline(vae: GeometricVAE, key: jax.Array) -> GeometricVAE:
-    metric = PullbackRiemannian(vae.manifold, decoder=vae.decoder_net, key=key)
+    metric = PullbackRiemannian(vae.manifold, decoder=vae.decoder_net)
     return eqx.tree_at(lambda m: m.metric, vae, metric)
 
 
