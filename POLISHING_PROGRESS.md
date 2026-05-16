@@ -11,8 +11,8 @@ These files form the foundation of the differentiable Finsler geometry framework
 - [x] `src/ham/geometry/curvature.py`
 - [x] `src/ham/geometry/manifolds/` (Reorganized from `surfaces.py`)
 - [x] `src/ham/geometry/zoo/` (Reorganized from `zoo.py`)
-- [ ] `src/ham/geometry/mesh.py`
-- [ ] `src/ham/utils/math.py`
+- [x] `src/ham/geometry/mesh.py`
+- [x] `src/ham/utils/math.py`
 
 ## Phase 2: Solvers & Fields
 Next, we tackle the numerical solvers for geodesics and simulated physics fields.
@@ -52,7 +52,7 @@ Tests need to be updated to reflect API changes, fix bugs (e.g., PRNG reuse), an
 - [x] `tests/test_curvature.py` (New)
 - [x] `tests/test_surfaces.py`
 - [x] `tests/test_zoo.py`
-- [ ] `tests/test_mesh.py`
+- [x] `tests/test_mesh.py`
 - [ ] `tests/test_geodesic.py`
 - [ ] `tests/test_solver.py`
 - [ ] `tests/test_fields.py`

@@ -48,6 +48,9 @@ addopts = "-ra -q"
 testpaths = [
     "tests",
 ]
+filterwarnings = [
+    "ignore:Module already imported so cannot be rewritten. (fast_array_utils|jaxtyping|zarr):pytest.PytestAssertRewriteWarning",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
