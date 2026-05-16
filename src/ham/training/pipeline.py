@@ -64,14 +64,10 @@ class HAMPipeline:
                 return new_diff, new_state, loss, stats
 
             # Training loop for the phase
-            data_x, data_v = dataset.X, dataset.V
-            num_samples = data_x.shape[0]
-            
             if phase.requires_pairs and dataset.lineage_pairs is None and lineage_triples is None:
                 print("Skipping phase: requires lineage pairs/triples but none found.")
                 continue
 
-            # Before the epoch loop, extract labels once
             data_x, data_v = dataset.X, dataset.V
             data_labels = dataset.labels if dataset.labels is not None \
                         else jnp.zeros(dataset.X.shape[0])  # fallback if no labels
@@ -112,7 +108,7 @@ class HAMPipeline:
                             if hasattr(dataset, "Traj_long"):
                                 batch_data += (dataset.Traj_long[idx],)
                     else:
-                         batch_data = (data_x[idx], data_v[idx], data_labels[idx])
+                        batch_data = (data_x[idx], data_v[idx], data_labels[idx])
                         
                     step_key = jax.random.fold_in(subkey, step)
                     

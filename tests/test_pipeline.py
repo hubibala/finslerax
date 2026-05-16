@@ -269,6 +269,54 @@ class TestMultiPhaseExecution(unittest.TestCase):
         self.assertLess(float(final_loss), float(initial_loss),
                         "Loss should decrease over training")
 
+    def test_requires_pairs_with_actual_pairs(self):
+        """When requires_pairs=True and lineage_pairs exist, phase should execute."""
+        key = jax.random.PRNGKey(0)
+        model = DummyModel(key)
+        w_init = model.layer2.weight.copy()
+
+        pairs = jnp.array([[0, 1], [2, 3], [4, 5], [6, 7], [8, 9]])
+        ds = DummyDataset(n=10, lineage_pairs=pairs)
+
+        phase = TrainingPhase(
+            name="PairPhase", epochs=3, optimizer=optax.sgd(0.1),
+            losses=[MSELoss()], filter_spec=_filter_all,
+            requires_pairs=True,
+        )
+
+        trained = HAMPipeline(model).fit(ds, [phase], batch_size=5)
+        self.assertFalse(jnp.allclose(trained.layer2.weight, w_init),
+                         "Weights should update when pairs are provided")
+
+    def test_multi_loss_pipeline(self):
+        """Multiple losses should be summed inside the pipeline."""
+        key = jax.random.PRNGKey(0)
+        model = DummyModel(key)
+
+        phase = TrainingPhase(
+            name="MultiLoss", epochs=3, optimizer=optax.sgd(0.01),
+            losses=[MSELoss(weight=1.0), ConstantLoss(value=0.0, weight=1.0, name="Zero")],
+            filter_spec=_filter_all,
+        )
+
+        ds = DummyDataset(n=10)
+        trained = HAMPipeline(model).fit(ds, [phase], batch_size=5)
+        # Should complete without error and weights should update
+        self.assertFalse(jnp.allclose(trained.layer1.weight, model.layer1.weight),
+                         "Weights should change with multi-loss")
+
+    def test_mse_under_vmap(self):
+        """Loss must work under vmap (as the pipeline does internally)."""
+        model = DummyModel(jax.random.PRNGKey(0))
+        loss = MSELoss()
+        xs = jnp.ones((4, 2))
+        ys = jnp.zeros((4, 2))
+        keys = jax.random.split(jax.random.PRNGKey(1), 4)
+
+        vals = jax.vmap(loss, in_axes=(None, 0, 0))(model, (xs, ys), keys)
+        self.assertEqual(vals.shape, (4,))
+        self.assertTrue(jnp.all(jnp.isfinite(vals)))
+
 
 if __name__ == "__main__":
     unittest.main()
