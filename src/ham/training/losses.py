@@ -2,13 +2,13 @@ import jax
 import jax.numpy as jnp
 import equinox as eqx
 from typing import Tuple, Any
-from ham.utils.math import safe_norm
+from ham.utils.math import safe_norm, NORM_EPS
 from ham.solvers.geodesic import ExponentialMap
 
 class LossComponent(eqx.Module):
     """Base class for modular loss components."""
-    weight: float
-    name: str
+    weight: float = eqx.field(static=True)
+    name: str = eqx.field(static=True)
 
     def __init__(self, weight: float = 1.0, name: str = "Loss"):
         self.weight = weight
@@ -56,8 +56,8 @@ class ZermeloAlignmentLoss(LossComponent):
         norm_w = model.manifold._minkowski_norm(W)
         norm_v = model.manifold._minkowski_norm(u_lat)
         
-        w_dir = W / jnp.maximum(norm_w, 1e-6)[..., None]
-        v_dir = u_lat / jnp.maximum(norm_v, 1e-6)[..., None]
+        w_dir = W / jnp.maximum(norm_w, NORM_EPS)[..., None]
+        v_dir = u_lat / jnp.maximum(norm_v, NORM_EPS)[..., None]
         
         return -model.manifold._minkowski_dot(w_dir, v_dir) * self.weight
 
@@ -106,8 +106,8 @@ class VelocityDirectionAlignmentLoss(LossComponent):
         norm_w = safe_norm(W, axis=-1)
         norm_v = safe_norm(v_lat, axis=-1)
         
-        w_dir = W / jnp.maximum(norm_w, 1e-8)[..., None]
-        v_dir = v_lat / jnp.maximum(norm_v, 1e-8)[..., None]
+        w_dir = W / jnp.maximum(norm_w, NORM_EPS)[..., None]
+        v_dir = v_lat / jnp.maximum(norm_v, NORM_EPS)[..., None]
         
         cos_sim = jnp.sum(w_dir * v_dir, axis=-1)
         
@@ -125,7 +125,10 @@ class ContrastiveAlignmentLoss(LossComponent):
         parent_z = model.encode(parent_x, k1)
         child_z = model.encode(child_x, k2)
         
-        _, W_out, _ = model.metric._get_zermelo_data(parent_z)
+        if hasattr(model.metric, '_get_zermelo_data'):
+            _, W_out, _ = model.metric._get_zermelo_data(parent_z)
+        else:
+            W_out = jnp.zeros_like(parent_z)
         v_tan = model.manifold.log_map(parent_z, child_z)
         
         align_score = -model.manifold._minkowski_dot(W_out, v_tan)
@@ -146,7 +149,7 @@ class MetricAnchorLoss(LossComponent):
             H_out = model.metric.g_net(parent_z)
             H_out = 0.5 * (H_out + H_out.T)
         else:
-            return 0.0
+            return jnp.float32(0.0)
 
         dim = H_out.shape[-1]
         I = jnp.eye(dim)
@@ -220,7 +223,6 @@ class LongTrajectoryAlignmentLoss(LossComponent):
         z_geo = _solve_avbd_trajectory(model, z_start, z_end, n_segments)
         
         # 3. Penalize the difference
-    # 3. Penalize the difference
         # This forces the learned geometry's 'straight lines' to be the data's paths.
         return jnp.mean((z_geo - z_obs)**2) * self.weight
 
@@ -275,7 +277,7 @@ class EulerLagrangeResidualLoss(LossComponent):
                 # F_eps = sqrt(v^T H v + eps^2) - <W, v>_H
                 # This formulation ensures smoothness at v=0 while capturing Randers asymmetry
                 v_norm_sq = jnp.dot(v_pt, jnp.dot(H_pt, v_pt))
-                v_norm_eps = jnp.sqrt(v_norm_sq + self.epsilon**2)
+                v_norm_eps = jnp.sqrt(jnp.maximum(v_norm_sq, 0.0) + self.epsilon**2)
                 
                 # Wind interaction using the local metric tensor
                 W_dot_v = jnp.dot(W_pt, jnp.dot(H_pt, v_pt))
@@ -341,7 +343,7 @@ class WindThermodynamicLoss(LossComponent):
             H_matrix, W, _ = model.metric._get_zermelo_data(z)
             wind_cost = jnp.dot(W, jnp.dot(H_matrix, W))
         else:
-            wind_cost = 0.0
+            wind_cost = jnp.float32(0.0)
         return wind_cost * self.weight
 
 class KinematicPriorLoss(LossComponent):
@@ -397,14 +399,15 @@ class WindAssistedTrajectoryAlignmentLoss(LossComponent):
     Aligns short rolled-out trajectories (using geodesic shooter) with observed displacements.
     Encourages the learned Wind/Metric to produce geodesics that match the observed flows.
     """
-    rollout_steps: int
-    dt: float
+    rollout_steps: int = eqx.field(static=True)
+    dt: float = eqx.field(static=True)
+    ivp_shooter: ExponentialMap
 
     def __init__(self, weight: float = 1.0, rollout_steps: int = 1, dt: float = 1.0):
         super().__init__(weight, "WindTrajAlign")
-        # Ensure rollout_steps is at least 1 for the particle shooter
         self.rollout_steps = max(1, rollout_steps)
         self.dt = dt
+        self.ivp_shooter = ExponentialMap(max_steps=self.rollout_steps)
 
     def __call__(self, model, batch, key):
         x_start, x_end = batch[0], batch[1]
@@ -419,8 +422,7 @@ class WindAssistedTrajectoryAlignmentLoss(LossComponent):
         # Shoot using the geodesic ODE (Particle Shooter)
         # Using 1 step to avoid gradient chaos through RK4 loops, 
         # while explicitly utilizing geod_acceleration(z)
-        ivp_shooter = ExponentialMap(max_steps=self.rollout_steps)
-        z_pred = ivp_shooter.shoot(model.metric, z_start, v_init)
+        z_pred = self.ivp_shooter.shoot(model.metric, z_start, v_init)
         
         # Decode rolled z and align with observed future endpoint
         x_pred = model.decode(z_pred)
@@ -446,7 +448,7 @@ class FinslerianFlowMatchingLoss(LossComponent):
     def __call__(self, model: eqx.Module, batch: Tuple[Any, ...], key: jax.random.PRNGKey) -> jnp.ndarray:
         # batch[2] is Traj_long: (T, D_data)
         if len(batch) < 3 or batch[2] is None:
-            return 0.0
+            return jnp.float32(0.0)
             
         traj_obs = batch[2]
         T = traj_obs.shape[0]
@@ -473,8 +475,8 @@ class FinslerianFlowMatchingLoss(LossComponent):
         # the cost F(z, v) is minimized. 
         # This loss encourages W to align with the normalized tangent vector.
         
-        v_norm_h = jax.vmap(lambda v, H: jnp.sqrt(jnp.dot(v, jnp.dot(H, v)) + 1e-8))(v_traj, H_traj)
-        v_unit = v_traj / jnp.maximum(v_norm_h, 1e-6)[..., None]
+        v_norm_h = jax.vmap(lambda v, H: jnp.sqrt(jnp.maximum(jnp.dot(v, jnp.dot(H, v)), 0.0) + NORM_EPS))(v_traj, H_traj)
+        v_unit = v_traj / jnp.maximum(v_norm_h, NORM_EPS)[..., None]
         
         # We align W with v_unit
         # Higher alignment (dot product) reduces the loss
