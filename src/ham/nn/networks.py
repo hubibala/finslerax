@@ -81,8 +81,9 @@ class VectorField(eqx.Module):
         k_emb, k_mlp = jax.random.split(key)
         
         if use_fourier:
-            # Output dim of RFF is 2 * map_size. Note: if hidden_dim is odd, 
-            # the effective embedding dimension will be hidden_dim - 1.
+            assert hidden_dim % 2 == 0, (
+                f"hidden_dim must be even when use_fourier=True, got {hidden_dim}"
+            )
             map_size = hidden_dim // 2
             self.embedding = RandomFourierFeatures(dim, map_size, fourier_scale, k_emb)
             in_size = map_size * 2
