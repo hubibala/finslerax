@@ -3,10 +3,6 @@
 Verifies that AVBDSolver correctly finds energy-minimizing paths on various 
 topologies (Torus, Sphere, Paraboloid) and respects physical invariants 
 like Zermelo asymmetry.
-
-See also: 
-    reviews/math/test_solver.md
-    reviews/code/test_solver.md
 """
 
 import unittest
