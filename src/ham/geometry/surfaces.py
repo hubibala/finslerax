@@ -1,18 +1,18 @@
 """Concrete manifold implementations: Sphere, Torus, Paraboloid, Hyperboloid, EuclideanSpace.
 
-Changes from review:
-  P0-1: Removed ``import jax._src.cudnn.scaled_matmul_stablehlo``
-  P0-2: Removed duplicate ``_safe_norm_jvp``; use canonical ``safe_norm`` from utils.math
-  P1-6: Sphere.log_map now uses the arccos-based formula valid for all angular separations
-  P1-7: ``_safe_minkowski_norm`` renamed to ``_safe_minkowski_self_norm`` and enforced x is y
-  P2-10: Added ``exp_map`` / ``log_map`` to every manifold (Sphere, Torus, Paraboloid, EuclideanSpace)
-  P2-14: Added ``__repr__`` to all geometry classes
+This module provides standard smooth submanifolds of Euclidean/Minkowski space
+along with closed-form exponential and logarithmic maps, retractions, and
+parallel transports. All implementations are batch-safe and numerically stable.
 """
 import jax
 import jax.numpy as jnp
 import equinox as eqx
 from .manifold import Manifold
 from ..utils.math import safe_norm, GRAD_EPS, NORM_EPS, TAYLOR_EPS
+
+# Module constant for capping retraction magnitude to prevent float overflow
+# Constants for numerical stability
+RETRACT_MAX_NORM = 10.0
 
 
 # =======================================================================
@@ -73,8 +73,8 @@ class Sphere(Manifold):
         return cos_theta * x + sin_theta_over_theta * v
 
     def retract(self, x: jnp.ndarray, delta: jnp.ndarray) -> jnp.ndarray:
-        """Retraction (delegates to exp_map)."""
-        return self.exp_map(x, delta)
+        """Retraction via exponential map with re-projection."""
+        return self.project(self.exp_map(x, delta))
 
     def log_map(self, x: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
         # 1. Safe dot product: strictly clip away from 1.0 and -1.0
@@ -83,19 +83,20 @@ class Sphere(Manifold):
         u_clipped = jnp.clip(u, -1.0 + GRAD_EPS, 1.0 - GRAD_EPS)
         
         # 2. Safe distance (theta)
-        dist = jnp.arccos(u_clipped)
+        dist = _safe_arccos(u_clipped)
         
         # 3. Safe tangent direction
         # We need v = (y - cos(theta)x) * (theta / sin(theta))
         # For small theta, theta/sin(theta) ~ 1 + theta^2/6
-        safe_sin = jnp.sqrt(jnp.maximum(1.0 - u_clipped**2, GRAD_EPS))
+        diff = y - u_clipped * x
+        norm_diff = safe_norm(diff, axis=-1, keepdims=True)
+        
         scale = jnp.where(
             dist < TAYLOR_EPS,
             1.0 + (dist ** 2) / 6.0,
-            dist / safe_sin,
+            dist / jnp.maximum(norm_diff / self.radius, GRAD_EPS),
         )
         
-        diff = y - u_clipped * x
         return scale * diff
 
     def parallel_transport(self, x: jnp.ndarray, y: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
@@ -103,9 +104,12 @@ class Sphere(Manifold):
         xy = jnp.sum(x * y, axis=-1)
         yv = jnp.sum(y * v, axis=-1)
         # Denominator should be (r^2 + <x, y>)
-        denom = jnp.maximum(self.radius**2 + xy, 1e-5)
-        scale = yv / denom
-        return v - scale[..., None] * (x + y)
+        denom = self.radius**2 + xy
+        safe_denom = jnp.maximum(denom, 1e-5)
+        scale = yv / safe_denom
+        transported = v - scale[..., None] * (x + y)
+        # If points are near-antipodal, transport is undefined. Return v unchanged.
+        return jnp.where(denom[..., None] < 1e-5, v, transported)
 
     def random_sample(self, key: jax.Array, shape: tuple[int, ...]) -> jnp.ndarray:
         gauss = jax.random.normal(key, shape=shape + (self.ambient_dim,))
@@ -117,6 +121,12 @@ class Sphere(Manifold):
 # =======================================================================
 
 class Torus(Manifold):
+    """Torus embedded in R^3.
+    
+    Note: `exp_map` is an approximate projected retraction.
+    Base class `log_map` and `parallel_transport` are used, which are
+    approximations using ambient secants and orthogonal projection.
+    """
     R: float = eqx.field(static=True)
     r: float = eqx.field(static=True)
 
@@ -136,52 +146,87 @@ class Torus(Manifold):
         return 2
 
     def project(self, x: jnp.ndarray) -> jnp.ndarray:
-        rho = safe_norm(x[:2])
+        rho = safe_norm(x[..., :2], axis=-1)
 
         dir_xy = jnp.where(
-            rho > NORM_EPS,
-            x[:2] / jnp.maximum(rho, NORM_EPS),
-            jnp.array([1.0, 0.0]),
+            rho[..., None] > NORM_EPS,
+            x[..., :2] / jnp.maximum(rho, NORM_EPS)[..., None],
+            jnp.zeros_like(x[..., :2]).at[..., 0].set(1.0),
         )
 
         dist = rho - self.R
-        n_xy = jnp.concatenate([dir_xy * dist, jnp.array([x[2]])])
-        n_norm = safe_norm(n_xy)
+        n_xy = jnp.concatenate([dir_xy * dist[..., None], x[..., 2:3]], axis=-1)
+        n_norm = safe_norm(n_xy, axis=-1, keepdims=True)
 
         n = jnp.where(
             n_norm > NORM_EPS,
             n_xy / jnp.maximum(n_norm, NORM_EPS),
-            jnp.array([0.0, 0.0, 1.0]),
+            jnp.zeros_like(x).at[..., 2].set(1.0),
         )
 
         projected = x - n * (n_norm - self.r)
 
-        fallback = jnp.array([self.R + self.r, 0.0, 0.0])
+        fallback = jnp.zeros_like(x).at[..., 0].set(self.R + self.r)
         use_fallback = rho < TAYLOR_EPS
-        return jnp.where(use_fallback, fallback, projected)
+        return jnp.where(use_fallback[..., None], fallback, projected)
 
     def to_tangent(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
-        rho = safe_norm(x[:2])
+        rho = safe_norm(x[..., :2], axis=-1)
 
         dir_xy = jnp.where(
-            rho > NORM_EPS,
-            x[:2] / jnp.maximum(rho, NORM_EPS),
-            jnp.zeros(2),
+            rho[..., None] > NORM_EPS,
+            x[..., :2] / jnp.maximum(rho, NORM_EPS)[..., None],
+            jnp.zeros_like(x[..., :2]).at[..., 0].set(1.0),
         )
         dist = rho - self.R
-        n_xy = jnp.concatenate([dir_xy * dist, jnp.array([x[2]])])
-        n_norm = safe_norm(n_xy)
+        n_xy = jnp.concatenate([dir_xy * dist[..., None], x[..., 2:3]], axis=-1)
+        n_norm = safe_norm(n_xy, axis=-1, keepdims=True)
 
         n = jnp.where(
             n_norm > NORM_EPS,
             n_xy / jnp.maximum(n_norm, NORM_EPS),
-            jnp.array([0.0, 0.0, 1.0]),
+            jnp.zeros_like(x).at[..., 2].set(1.0),
         )
-        return v - jnp.dot(n, v) * n
+        inner = jnp.sum(n * v, axis=-1, keepdims=True)
+        return v - inner * n
 
     def exp_map(self, x: jnp.ndarray, delta: jnp.ndarray) -> jnp.ndarray:
         """Approximate exp map via projected retraction."""
         return self.project(x + delta)
+
+    def log_map(self, x: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
+        """Approximate log map via angular parameterization."""
+        # 1. Project both to angular coordinates (u, v)
+        # u is angle in xy-plane
+        ux = jnp.atan2(x[..., 1], x[..., 0])
+        uy = jnp.atan2(y[..., 1], y[..., 0])
+        
+        # v is angle in the minor circle
+        rho_x = safe_norm(x[..., :2], axis=-1)
+        rho_y = safe_norm(y[..., :2], axis=-1)
+        vx = jnp.atan2(x[..., 2], rho_x - self.R)
+        vy = jnp.atan2(y[..., 2], rho_y - self.R)
+        
+        # 2. Shortest angular differences (with 2pi wrapping)
+        du = (uy - ux + jnp.pi) % (2 * jnp.pi) - jnp.pi
+        dv = (vy - vx + jnp.pi) % (2 * jnp.pi) - jnp.pi
+        
+        # 3. Tangent basis at x
+        sin_u, cos_u = jnp.sin(ux), jnp.cos(ux)
+        sin_v, cos_v = jnp.sin(vx), jnp.cos(vx)
+        
+        e_u = jnp.stack([-(self.R + self.r * cos_v) * sin_u, 
+                          (self.R + self.r * cos_v) * cos_u, 
+                          jnp.zeros_like(ux)], axis=-1)
+        e_v = jnp.stack([-self.r * sin_v * cos_u, 
+                         -self.r * sin_v * sin_u, 
+                          self.r * cos_v], axis=-1)
+        
+        return du[..., None] * e_u + dv[..., None] * e_v
+
+    def parallel_transport(self, x: jnp.ndarray, y: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+        """Approximate parallel transport via orthogonal projection onto T_y M."""
+        return self.to_tangent(y, v)
 
     def retract(self, x: jnp.ndarray, delta: jnp.ndarray) -> jnp.ndarray:
         return self.project(x + delta)
@@ -201,6 +246,12 @@ class Torus(Manifold):
 # =======================================================================
 
 class Paraboloid(Manifold):
+    """Paraboloid z = x^2 + y^2.
+    
+    Note: `exp_map` is an approximate exact retraction ignoring delta_z.
+    Base class `log_map` and `parallel_transport` are used, which are
+    approximations using ambient secants and orthogonal projection.
+    """
 
     def __repr__(self) -> str:
         return "Paraboloid()"
@@ -214,21 +265,31 @@ class Paraboloid(Manifold):
         return 2
 
     def project(self, x: jnp.ndarray) -> jnp.ndarray:
-        return jnp.array([x[0], x[1], x[0] ** 2 + x[1] ** 2])
+        z = x[..., 0] ** 2 + x[..., 1] ** 2
+        return jnp.concatenate([x[..., :2], z[..., None]], axis=-1)
 
     def to_tangent(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
-        n = jnp.array([-2 * x[0], -2 * x[1], 1.0])
-        n = n / safe_norm(n)
-        return v - jnp.dot(n, v) * n
+        n = jnp.concatenate([-2 * x[..., 0:1], -2 * x[..., 1:2], jnp.ones_like(x[..., 0:1])], axis=-1)
+        n = n / safe_norm(n, axis=-1, keepdims=True)
+        inner = jnp.sum(n * v, axis=-1, keepdims=True)
+        return v - inner * n
 
     def exp_map(self, x: jnp.ndarray, delta: jnp.ndarray) -> jnp.ndarray:
         """Approximate exp map via exact retraction."""
         return self.retract(x, delta)
 
+    def log_map(self, x: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
+        """Approximate log map via projected ambient secant."""
+        return self.to_tangent(x, y - x)
+
+    def parallel_transport(self, x: jnp.ndarray, y: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+        """Approximate parallel transport via orthogonal projection onto T_y M."""
+        return self.to_tangent(y, v)
+
     def retract(self, x: jnp.ndarray, delta: jnp.ndarray) -> jnp.ndarray:
-        xy_new = x[:2] + delta[:2]
-        z_new = jnp.sum(xy_new ** 2)
-        return jnp.concatenate([xy_new, jnp.array([z_new])])
+        xy_new = x[..., :2] + delta[..., :2]
+        z_new = jnp.sum(xy_new ** 2, axis=-1, keepdims=True)
+        return jnp.concatenate([xy_new, z_new], axis=-1)
 
     def random_sample(self, key: jax.Array, shape: tuple[int, ...]) -> jnp.ndarray:
         xy = jax.random.normal(key, shape + (2,)) * 2.0
@@ -237,16 +298,12 @@ class Paraboloid(Manifold):
 
 
 # =======================================================================
-# Safe Math Primitives for Hyperbolic Geometry
+# Safe Math Primitives
 # =======================================================================
 
 @jax.custom_jvp
 def _safe_minkowski_self_norm(x):
-    """Computes sqrt(-x0² + x1² + ...) for a single vector (self-norm).
-
-    This is intentionally restricted to the self-norm case so that the
-    custom JVP does not silently drop a ``y_dot`` tangent.  (P1-7 fix.)
-    """
+    """Computes sqrt(-x0² + x1² + ...) for a single vector (self-norm)."""
     sq_norm = -x[..., 0] ** 2 + jnp.sum(x[..., 1:] ** 2, axis=-1)
     return jnp.sqrt(jnp.maximum(sq_norm, 0.0))
 
@@ -270,19 +327,19 @@ def _safe_minkowski_self_norm_jvp(primals, tangents):
 
 @jax.custom_jvp
 def _safe_arccos(x):
-    """Safely computes arccos(x) avoiding infinite gradients at |x|=1."""
-    return jnp.arccos(jnp.clip(x, -1.0, 1.0))
+    """Computes arccos(x) with stable gradients at x=±1."""
+    return jnp.arccos(x)
 
 
 @_safe_arccos.defjvp
 def _safe_arccos_jvp(primals, tangents):
     (x,) = primals
     (x_dot,) = tangents
-    x_clipped = jnp.clip(x, -1.0, 1.0)
-    primal_out = jnp.arccos(x_clipped)
-    denom = jnp.sqrt(jnp.maximum(1.0 - x_clipped ** 2, GRAD_EPS))
+    
+    # d/dx arccos(x) = -1 / sqrt(1 - x^2)
+    denom = jnp.sqrt(jnp.maximum(1.0 - x**2, GRAD_EPS))
     tangent_out = -x_dot / denom
-    return primal_out, tangent_out
+    return jnp.arccos(x), tangent_out
 
 
 # =======================================================================
@@ -338,6 +395,11 @@ class Hyperboloid(Manifold):
         return v + inner[..., None] * x
 
     def exp_map(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+        """Riemannian exponential map on the hyperboloid.
+        
+        Note: The returned point is not automatically re-projected. For long integration
+        where floating-point drift is a concern, use `retract` instead.
+        """
         norm_v = self._minkowski_norm(v)
 
         safe_norm_v = jnp.where(norm_v < TAYLOR_EPS, 1.0, norm_v)
@@ -356,9 +418,9 @@ class Hyperboloid(Manifold):
 
         dist = jnp.arcsinh(norm_u)
 
-        safe_norm_u = jnp.maximum(norm_u, NORM_EPS)
+        safe_norm_u = jnp.maximum(norm_u, TAYLOR_EPS)
         scale = jnp.where(
-            norm_u < NORM_EPS,
+            norm_u < TAYLOR_EPS,
             1.0 - (norm_u ** 2) / 6.0,
             dist / safe_norm_u,
         )
@@ -369,15 +431,14 @@ class Hyperboloid(Manifold):
         xy = self._minkowski_dot(x, y)
         yv = self._minkowski_dot(y, v)
 
-        denom = jnp.maximum(1.0 - xy, 2.0)
+        denom = jnp.maximum(1.0 - xy, 2.0 + GRAD_EPS)
         scale = yv / denom
         return v + scale[..., None] * (x + y)
 
     def retract(self, x: jnp.ndarray, delta: jnp.ndarray) -> jnp.ndarray:
         norm_delta = self._minkowski_norm(delta)
-        max_norm = 10.0
         safe_nd = jnp.maximum(norm_delta, GRAD_EPS)
-        scale = jnp.where(norm_delta > max_norm, max_norm / safe_nd, 1.0)
+        scale = jnp.where(norm_delta > RETRACT_MAX_NORM, RETRACT_MAX_NORM / safe_nd, 1.0)
         safe_delta = delta * scale[..., None]
         return self.project(self.exp_map(x, safe_delta))
 
@@ -396,11 +457,6 @@ class Hyperboloid(Manifold):
         )
         x_rest = sinh_over_norm * v_spatial
         return jnp.concatenate([x0, x_rest], axis=-1)
-
-    def metric_tensor(self, x: jnp.ndarray) -> jnp.ndarray:
-        m = jnp.eye(self.ambient_dim)
-        m = m.at[0, 0].set(-1.0)
-        return m
 
 
 # =======================================================================
