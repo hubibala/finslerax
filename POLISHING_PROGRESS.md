@@ -19,7 +19,7 @@ Next, we tackle the numerical solvers for geodesics and simulated physics fields
 
 - [x] `src/ham/solvers/geodesic.py`
 - [x] `src/ham/solvers/avbd.py`
-- [ ] `src/ham/sim/fields.py`
+- [x] `src/ham/sim/fields.py`
 
 ## Phase 3: Neural Architectures & Training
 With the geometry and solvers fixed, we polish the neural components, losses, and training pipelines.
@@ -56,7 +56,7 @@ Tests need to be updated to reflect API changes, fix bugs (e.g., PRNG reuse), an
 - [x] `tests/test_geodesic.py`
 - [x] `tests/test_avbd.py` (New)
 - [x] `tests/test_solver.py`
-- [ ] `tests/test_fields.py`
+- [x] `tests/test_fields.py` (New)
 - [ ] `tests/test_network.py`
 - [ ] `tests/test_learned_metric.py`
 - [ ] `tests/test_losses.py` (if applicable)
