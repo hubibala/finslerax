@@ -38,7 +38,12 @@ def _safe_norm_ratio(x, y):
     """
     nx = safe_norm(x, axis=-1, keepdims=True)
     ny = safe_norm(y, axis=-1, keepdims=True)
-    return jnp.where(ny < GRAD_EPS, 1.0, nx / jnp.maximum(ny, GRAD_EPS))
+    
+    # safe_norm bottoms out at sqrt(GRAD_EPS). We use a 1.5x multiplier to reliably detect 
+    # zero-vectors while absorbing floating-point fuzziness around the mathematical floor.
+    zero_threshold = jnp.sqrt(GRAD_EPS) * 1.5
+    is_zero = ny < zero_threshold
+    return jnp.where(is_zero, 1.0, nx / ny)
 
 @_safe_norm_ratio.defjvp
 def _safe_norm_ratio_jvp(primals, tangents):
@@ -48,7 +53,10 @@ def _safe_norm_ratio_jvp(primals, tangents):
     nx = safe_norm(x, axis=-1, keepdims=True)
     ny = safe_norm(y, axis=-1, keepdims=True)
     
-    is_zero = ny < GRAD_EPS
+    # safe_norm bottoms out at sqrt(GRAD_EPS). We use a 1.5x multiplier to reliably detect 
+    # zero-vectors while absorbing floating-point fuzziness around the mathematical floor.
+    zero_threshold = jnp.sqrt(GRAD_EPS) * 1.5
+    is_zero = ny < zero_threshold
     ny_safe = jnp.where(is_zero, 1.0, ny)
     
     # Primal out
@@ -57,7 +65,7 @@ def _safe_norm_ratio_jvp(primals, tangents):
     # JVP
     # d( ||x|| / ||y|| ) = ( ||y|| * d(||x||) - ||x|| * d(||y||) ) / ||y||^2
     # d(||x||) = x . x_dot / ||x||
-    dnx = jnp.where(nx < GRAD_EPS, 0.0, jnp.sum(x * x_dot, axis=-1, keepdims=True) / jnp.maximum(nx, GRAD_EPS))
+    dnx = jnp.where(nx < zero_threshold, 0.0, jnp.sum(x * x_dot, axis=-1, keepdims=True) / nx)
     dny = jnp.where(is_zero, 0.0, jnp.sum(y * y_dot, axis=-1, keepdims=True) / ny_safe)
     
     # Quot rule
