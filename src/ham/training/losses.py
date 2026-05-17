@@ -534,3 +534,71 @@ class FinslerianFlowMatchingLoss(LossComponent):
         loss = 1.0 - alignment
         
         return jnp.mean(loss) * self.weight
+
+
+# =====================================================================
+# ARRIVAL TIME LOSS FOR METRIC RECOVERY (Gahtan Experiment)
+# =====================================================================
+
+class ArrivalTimeLoss(eqx.Module):
+    """MSE between predicted geodesic arc length and observed arrival time.
+
+    Solves a boundary-value geodesic from source to each observation point
+    using the AVBD solver, computes the discrete arc length along the path,
+    and penalizes the squared difference to the observed arrival time.
+
+    This loss operates directly on spatial coordinates (no VAE encoder).
+    It is designed for metric recovery experiments where the metric acts
+    in the spatial domain. It does NOT inherit from LossComponent because
+    its __call__ signature is (metric, source, x_obs, t_obs) rather than
+    (model, batch, key).
+
+    Mathematical formulation (uses 1-homogeneity of F):
+        T_pred = sum_{k=0}^{N-1} F(x_k, x_{k+1} - x_k)
+        L = (1/K) sum_{i=1}^{K} (T_pred_i - T_obs_i)^2
+
+    Args:
+        solver: AVBDSolver instance for computing geodesics.
+        solver_steps: Number of discrete path segments for the BVP.
+        weight: Loss weight multiplier.
+
+    Reference:
+        spec/MATH_SPEC.md § 1.2 (Energy Functional).
+        Gahtan et al. (2026), Section 5 (Metric Recovery).
+    """
+    solver: eqx.Module
+    solver_steps: int = eqx.field(static=True)
+    weight: float = eqx.field(static=True)
+    name: str = eqx.field(static=True)
+
+    def __init__(self, solver, solver_steps: int = 20, weight: float = 1.0):
+        self.solver = solver
+        self.solver_steps = solver_steps
+        self.weight = weight
+        self.name = "ArrivalTime"
+
+    def __call__(self, metric, source, x_obs, t_obs):
+        """Compute arrival time MSE for a batch of observations.
+
+        Args:
+            metric: FinslerMetric defining the geometry.
+            source: Source point, shape (D,).
+            x_obs: Observation points, shape (K, D).
+            t_obs: Observed arrival times, shape (K,).
+
+        Returns:
+            Scalar MSE loss, already multiplied by self.weight.
+        """
+        def single_arrival_time(x_target):
+            traj = self.solver.solve(metric, source, x_target,
+                                     n_steps=self.solver_steps)
+            path = traj.xs  # (T+1, D)
+            # Discrete arc length: sum of F(x_k, x_{k+1} - x_k)
+            segments = jnp.diff(path, axis=0)  # (T, D)
+            positions = path[:-1]  # (T, D)
+            step_costs = jax.vmap(metric.metric_fn)(positions, segments)
+            return jnp.sum(step_costs)
+
+        t_pred = jax.vmap(single_arrival_time)(x_obs)
+        mse = jnp.mean((t_pred - t_obs) ** 2)
+        return mse * self.weight
