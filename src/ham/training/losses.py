@@ -6,7 +6,15 @@ from ham.utils.math import safe_norm, NORM_EPS
 from ham.solvers.geodesic import ExponentialMap
 
 class LossComponent(eqx.Module):
-    """Base class for modular loss components."""
+    """Base class for modular loss components.
+
+    All concrete losses must implement ``__call__`` returning a scalar JAX
+    value already multiplied by ``self.weight``.
+
+    See also:
+        ham.training.pipeline.TrainingPhase -- how losses are composed.
+        examples/weinreb_smoke_test.py -- working usage example.
+    """
     weight: float = eqx.field(static=True)
     name: str = eqx.field(static=True)
 
@@ -15,6 +23,17 @@ class LossComponent(eqx.Module):
         self.name = name
 
     def __call__(self, model: eqx.Module, batch: Tuple[Any, ...], key: jax.random.PRNGKey) -> jnp.ndarray:
+        """Compute the (scalar) loss value.
+
+        Args:
+            model: An eqx.Module providing encode, decode, metric, and manifold.
+            batch: Tuple of JAX arrays. Layout depends on the concrete loss
+                (see module docstring).
+            key: JAX PRNG key for stochastic operations (e.g., sampling).
+
+        Returns:
+            Scalar loss value, already multiplied by self.weight.
+        """
         raise NotImplementedError("Loss component must implement __call__")
 
 class ReconstructionLoss(LossComponent):
@@ -317,6 +336,15 @@ class EulerLagrangeResidualLoss(LossComponent):
         return jnp.mean(el_violations) * self.weight
 
 class AVBDPathEnergyLoss(LossComponent):
+    """Total path energy of the AVBD geodesic between encoded endpoints.
+
+    Expects batch = (x_start, x_end). Encodes both endpoints, solves the
+    BVP using the model's AVBD solver, and returns the total discrete path
+    energy sum_i E(x_i, v_i) * dt.
+
+    Attributes:
+        solver_steps: Number of discrete path segments for the BVP solver.
+    """
     solver_steps: int = eqx.field(static=True)
 
     def __init__(self, weight: float = 1.0, solver_steps: int = 15):
@@ -333,6 +361,12 @@ class AVBDPathEnergyLoss(LossComponent):
         return energy * self.weight
 
 class WindThermodynamicLoss(LossComponent):
+    """Penalizes the Riemannian norm of the Wind vector.
+
+    Computes ||W(z)||_h^2 = W^T H(z) W to encourage the Zermelo convexity
+    constraint ||W||_h < 1 (spec/MATH_SPEC.md § 5). Expects batch = (x, ...).
+    Falls back to 0.0 for non-Randers metrics.
+    """
     def __init__(self, weight: float = 1.0):
         super().__init__(weight, "WindCost")
 
@@ -347,6 +381,16 @@ class WindThermodynamicLoss(LossComponent):
         return wind_cost * self.weight
 
 class KinematicPriorLoss(LossComponent):
+    """Hinge penalty on geodesic distance between paired points.
+
+    Expects batch = (x_start, x_end). Encodes both, computes the log-map
+    distance, and returns:
+        L = weight * mean(ReLU(d - margin)^2)
+
+    Attributes:
+        margin: Maximum acceptable latent distance. Pairs closer than this
+            value incur zero loss.
+    """
     margin: float
 
     def __init__(self, weight: float = 1.0, margin: float = 0.5):
@@ -369,10 +413,14 @@ class KinematicPriorLoss(LossComponent):
 # =====================================================================
 
 class FinslerActionMatchingLoss(LossComponent):
-    """
-    Minimizes the Randers energy of observed biological transitions directly.
+    """Minimizes the Finsler energy of observed biological transitions.
+
     Requires joint training so the VAE reconstruction prevents scale collapse.
-    Calculates $E = F(z, v)^2$, avoiding ODE integration entirely during training.
+    Calculates E = (1/2) F(z, v)^2 (the Finsler energy functional,
+    spec/MATH_SPEC.md § 1.2), avoiding ODE integration entirely during training.
+
+    Expects batch = (x_start, x_end). Approximates the tangent vector as
+    v = z_end - z_start (Euclidean in latent space).
     """
     def __init__(self, weight: float = 1.0):
         super().__init__(weight, "ActionMatching")
