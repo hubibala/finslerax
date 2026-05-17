@@ -7,6 +7,18 @@ vertices using randomized Gauss-Seidel sweeps (Block Descent) on the manifold.
 The solver supports arbitrary Finsler metrics and equality constraints via 
 an Augmented Lagrangian Method (ALM).
 
+An optional **graph-coloring parallel mode** (``parallel=True``) replaces the
+sequential Gauss-Seidel sweep with a colored Gauss-Seidel sweep.  Vertices
+are partitioned into independent sets (colors) using a 2-coloring of the 1D
+path graph; all vertices of the same color are updated simultaneously via
+``jax.vmap``, yielding GPU-parallel speedups proportional to the path length.
+Between color groups the ordering is still Gauss-Seidel, preserving
+convergence properties.
+
+Reference:
+    Giles, Diaz & Yuksel. *Augmented Vertex Block Descent.* SIGGRAPH 2025.
+    Graph-coloring strategy for GPU-parallel block sweeps.
+
 Classes:
     Trajectory: Data container for solver results.
     SolverState: Internal state tracker for iterative optimization.
@@ -18,11 +30,11 @@ See also: spec/ARCH_SPEC.md § 4.2.
 import jax
 import jax.numpy as jnp
 import equinox as eqx
-from typing import NamedTuple, List, Callable, Optional, Union
-from functools import partial
+from typing import NamedTuple, List, Callable, Optional
 
 from ham.geometry.metric import FinslerMetric
 from ham.utils.math import safe_norm, GRAD_EPS
+from ham.solvers.coloring import chain_coloring
 
 __all__ = ["Trajectory", "AVBDSolver"]
 
@@ -78,6 +90,10 @@ class AVBDSolver(eqx.Module):
         iterations: Maximum number of full path sweeps.
         grad_clip: Maximum norm for vertex gradients to ensure stability.
         energy_tol: Tolerance for early stopping (relative energy change).
+        parallel: If True, use graph-coloring parallel sweeps instead of
+            sequential Gauss-Seidel. Vertices are 2-colored (even/odd) and
+            each color group is updated simultaneously via vmap. This
+            trades strict Gauss-Seidel convergence for GPU parallelism.
     """
     step_size: float = 0.05
     beta: float = 1.2
@@ -85,6 +101,7 @@ class AVBDSolver(eqx.Module):
     grad_clip: float = 10.0
     energy_tol: float = 1e-6
     tol: float = 1e-4  # For backward compatibility
+    parallel: bool = False
 
     def solve(
         self, 
@@ -185,19 +202,56 @@ class AVBDSolver(eqx.Module):
             
             return metric.manifold.retract(x, step)
 
+        def update_vertex_triple(x_prev, x, x_next, lam, mu):
+            """Optimizes a single vertex given its neighbors (for vmap)."""
+            def loss_fn(curr_x):
+                E = get_local_energy(x_prev, curr_x, x_next)
+                penalty = 0.0
+                if num_constraints > 0:
+                    c_vals = jnp.stack([c(curr_x) for c in actual_constraints])
+                    penalty = jnp.sum(lam * c_vals + 0.5 * mu * (c_vals**2))
+                return E + penalty
+
+            grad_euc = jax.grad(loss_fn)(x)
+            grad_tan = metric.manifold.to_tangent(x, grad_euc)
+            gnorm = safe_norm(grad_tan, eps=GRAD_EPS)
+            scale = jnp.minimum(1.0, self.grad_clip / (gnorm + GRAD_EPS))
+            step = -self.step_size * grad_tan * scale
+            return metric.manifold.retract(x, step)
+
+        # Pre-compute color groups for the parallel sweep
+        if self.parallel:
+            color_0, color_1 = chain_coloring(n_inner)
+
+        def parallel_color_sweep(full_path, color_indices, s):
+            """Update all vertices of one color simultaneously."""
+            x_prevs = full_path[color_indices - 1]
+            xs = full_path[color_indices]
+            x_nexts = full_path[color_indices + 1]
+            lams = s.lambdas[color_indices - 1]
+            mus = s.stiffness[color_indices - 1]
+            new_xs = jax.vmap(update_vertex_triple)(x_prevs, xs, x_nexts, lams, mus)
+            return full_path.at[color_indices].set(new_xs)
+
         def step_fn(s: SolverState, _):
-            # A. Vertex Sweep (Gauss-Seidel)
             full_path = jnp.concatenate([p_start[None, :], s.path, p_end[None, :]], axis=0)
-            
-            # Randomized order for stochastic block descent
-            sweep_key = jax.random.fold_in(k_sweep, s.step)
-            v_indices = jax.random.permutation(sweep_key, jnp.arange(1, n_steps))
 
-            def sweep_body(curr_p, v_idx):
-                new_v = update_vertex(curr_p, v_idx, s)
-                return curr_p.at[v_idx].set(new_v), None
+            if self.parallel:
+                # Colored Gauss-Seidel: update each color group in parallel,
+                # process groups sequentially to maintain inter-group ordering.
+                new_full = parallel_color_sweep(full_path, color_0, s)
+                new_full = parallel_color_sweep(new_full, color_1, s)
+            else:
+                # Sequential Gauss-Seidel with randomized sweep order
+                sweep_key = jax.random.fold_in(k_sweep, s.step)
+                v_indices = jax.random.permutation(sweep_key, jnp.arange(1, n_steps))
 
-            new_full, _ = jax.lax.scan(sweep_body, full_path, v_indices)
+                def sweep_body(curr_p, v_idx):
+                    new_v = update_vertex(curr_p, v_idx, s)
+                    return curr_p.at[v_idx].set(new_v), None
+
+                new_full, _ = jax.lax.scan(sweep_body, full_path, v_indices)
+
             new_inner = new_full[1:-1]
 
             # B. Dual Updates (ALM)
