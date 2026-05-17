@@ -22,6 +22,11 @@ class RandomFourierFeatures(eqx.Module):
     where B ∈ R^{M×D} is sampled from N(0, scale²I). This approximates a 
     shift-invariant kernel and mitigates spectral bias in coordinate-based 
     MLPs, allowing them to learn high-frequency spatial variation.
+
+    The frequency matrix B is frozen (non-trainable) via stop_gradient.
+
+    See also:
+        ham.models.learned.NeuralRanders for typical usage.
     """
     B: jnp.ndarray
     
@@ -62,6 +67,15 @@ class VectorField(eqx.Module):
     
     Uses tanh activation for C^∞ smoothness, which is critical for higher-order 
     autodiff through the spray and Berwald connection.
+
+    Note:
+        use_fourier=True by default because wind fields typically exhibit
+        high-frequency spatial variation. For smoother fields, use
+        use_fourier=False.
+
+    See also:
+        PSDMatrixField — counterpart for the Riemannian base metric.
+        ham.models.learned.NeuralRanders — primary consumer.
     """
     embedding: Optional[RandomFourierFeatures]
     mlp: eqx.nn.MLP
@@ -119,9 +133,22 @@ class PSDMatrixField(eqx.Module):
     
     Reconstructs G(x) via a Cholesky-like factor A:
         G(x) = A(x) A(x)^T + ε I
-    guaranteeing eigenvalues ≥ ε (default 1e-4). 
+    guaranteeing eigenvalues ≥ ε = PSD_EPS = 1e-4. The network outputs a
+    flat vector of D² elements, reshaped to a D×D factor matrix A.
     
-    Used to parameterize the Riemannian base metric h_{ij}(x) in Zermelo data.
+    Used to parameterize the Riemannian base metric h_{ij}(x) in Zermelo data
+    (see MATH_SPEC § 5, ARCH_SPEC § 3.1).
+
+    Note:
+        The regularization constant ε = 1e-4 (PSD_EPS) is not configurable
+        via constructor arguments. To use a different value, subclass and
+        override __call__.
+        use_fourier=False by default because metric fields are typically
+        smoother than wind fields and benefit from direct coordinate input.
+
+    See also:
+        VectorField — counterpart for the wind field W^i(x).
+        ham.utils.math.PSD_EPS — canonical epsilon constant.
     """
     embedding: Optional[RandomFourierFeatures]
     mlp: eqx.nn.MLP
