@@ -55,10 +55,13 @@ class TestRiemannian(unittest.TestCase):
         self.manifold = FlatPlane()
         
     def test_riemannian_scaling(self):
-        def g_net(x): return 4.0 * jnp.eye(2)
+        # g_net returns the metric tensor G directly (not a Cholesky factor).
+        # PSDMatrixField handles the A @ A.T + PSD_EPS*I construction internally;
+        # here we simulate a PSDMatrixField-like output for the closed-form check.
+        def g_net(x): return 4.0 * jnp.eye(2) @ (4.0 * jnp.eye(2)).T + PSD_EPS * jnp.eye(2)
         metric = Riemannian(self.manifold, g_net)
         cost = metric.metric_fn(jnp.zeros(2), jnp.array([1.0, 0.0]))
-        # sqrt((4*4 + PSD_EPS)*1) = sqrt(16 + PSD_EPS)
+        # v^T G v = 1 * (16 + PSD_EPS) * 1 = 16 + PSD_EPS
         expected = jnp.sqrt(16.0 + PSD_EPS)
         np.testing.assert_allclose(float(cost), float(expected), atol=1e-10)
 
@@ -74,6 +77,11 @@ class TestRanders(unittest.TestCase):
         self.key = jax.random.PRNGKey(0)
 
     def test_randers_analytical_match(self):
+        # h_net returns the metric tensor H directly; Randers uses it as-is.
+        # With H = I, W = [-0.1, 0], v = [1, 0]:
+        #   w_norm_sq = 0.01, lambda = 1 - 0.01 = 0.99
+        #   disc = 0.99 * 1 + 0.01 = 1.0
+        #   cost = (sqrt(1.0) - (-0.1)) / 0.99 = 1.1 / 0.99
         def h_net(x): return jnp.eye(2)
         def w_net(x): return jnp.array([-0.1, 0.0])
         metric = Randers(self.manifold, h_net, w_net)
@@ -82,10 +90,10 @@ class TestRanders(unittest.TestCase):
         
         cost_east = metric.metric_fn(x, v_east)
         
-        h_val = 1.0 + PSD_EPS
-        wv_h = -0.1 * h_val
-        lam = 1.0 - 0.01 * h_val
-        # Disc = lam * ||v||_h^2 + <w,v>_h^2 = lam * h_val + wv_h^2 = (1 - 0.01h)*h + 0.01h^2 = h
+        h_val = 1.0  # H = I, so v^T H v = 1.0
+        wv_h = -0.1 * h_val   # W^T H v = -0.1
+        lam = 1.0 - 0.01 * h_val  # 1 - w_norm_sq = 0.99
+        # Disc = lam * ||v||_h^2 + <w,v>_h^2 = 0.99 + 0.01 = 1.0 = h_val
         expected = (jnp.sqrt(h_val) - wv_h) / lam
         
         np.testing.assert_allclose(float(cost_east), float(expected), atol=1e-10)
