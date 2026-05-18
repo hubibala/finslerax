@@ -593,10 +593,12 @@ class ArrivalTimeLoss(eqx.Module):
             traj = self.solver.solve(metric, source, x_target,
                                      n_steps=self.solver_steps)
             path = traj.xs  # (T+1, D)
-            # Discrete arc length: sum of F(x_k, x_{k+1} - x_k)
+            # Discrete arc length using midpoint quadrature:
+            # F evaluated at segment midpoints for O(h^2) accuracy
+            # instead of left-point O(h) accuracy.
             segments = jnp.diff(path, axis=0)  # (T, D)
-            positions = path[:-1]  # (T, D)
-            step_costs = jax.vmap(metric.metric_fn)(positions, segments)
+            midpoints = (path[:-1] + path[1:]) / 2.0  # (T, D)
+            step_costs = jax.vmap(metric.metric_fn)(midpoints, segments)
             return jnp.sum(step_costs)
 
         t_pred = jax.vmap(single_arrival_time)(x_obs)
