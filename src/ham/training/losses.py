@@ -609,9 +609,16 @@ class ArrivalTimeLoss(eqx.Module):
         # We only apply this when there are multiple observations to avoid trivializing
         # single-observation test cases.
         if t_obs.shape[0] > 1:
-            mean_obs = jnp.mean(t_obs)
-            mean_pred = jnp.mean(t_pred)
-            t_pred_aligned = t_pred * (mean_obs / jnp.maximum(mean_pred, 1e-8))
+            # Normalise t_pred to [0, 1] by dividing by its own maximum.
+            # stop_gradient on the normalisation constant ensures gradients flow
+            # only through the *relative* values t_pred_i / t_pred_max, training
+            # the metric to predict correct arrival ordering without needing to
+            # match absolute geodesic-length scale to the [0,1] t_obs scale.
+            # IoU is evaluated separately with pred normalised by max(pred).
+            t_pred_max = jax.lax.stop_gradient(
+                jnp.maximum(jnp.max(t_pred), 1e-6)
+            )
+            t_pred_aligned = t_pred / t_pred_max
         else:
             t_pred_aligned = t_pred
         

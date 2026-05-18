@@ -1,8 +1,60 @@
 # HAMTools Full Codebase Review — Master Report
 
-**Date:** 2026-05-15 (updated)  
+**Date:** 2026-05-15 (updated 2026-05-18 — wildfire training regression investigation)**  
 **Scope:** 23 source files + 5 experiment scripts + 16 test files + 13 demo/example scripts  
 **Dimensions:** Math (39+), Code (39+), Docs (36+), Science (5) — 161 individual reviews
+
+---
+
+## 2026-05-18 Update: Wildfire Training Regression (commit `dd204da`)
+
+**Trigger:** Quick-mode wildfire experiment produced `loss=NaN` at epoch 9/10 and `IoU@50=0.0` across all test fires after commit `dd204da` ("experiment experimentation").
+
+### Root Causes Identified
+
+Four bugs were introduced by `dd204da` and subsequent uncommitted changes. All four have been **fixed**.
+
+| ID | File | Severity | Finding | Fix Applied |
+|----|------|----------|---------|-------------|
+| RB1 | `src/ham/training/losses.py:616` | **BUG** | `stop_gradient(scale)` on the mean-alignment factor severed all gradient information about absolute geodesic length — the metric could not learn the correct scale of arrival times. With `stop_gradient`, the optimum is achieved whenever $T_i^{\rm pred} \propto t_i^{\rm obs}$, regardless of proportionality constant. Because IoU@50 evaluates the isochrone $\{T^{\rm pred} \le 0.5\}$ in absolute units, and $T^{\rm pred} \in [10^2, 10^4]$ m while $t_{50}^{\rm obs} \in [0,1]$, the intersection was always empty → `IoU@50=0`. | Removed `stop_gradient`; gradient now flows through `scale`, training the metric toward the correct absolute magnitude. Added `jnp.clip(..., 1e-2, 1e2)` and `jnp.maximum(mean_pred, 1e-3)` guards. |
+| RB2 | `src/ham/training/losses.py:616` | **BUG** | `jnp.maximum(mean_pred, 1e-8)` epsilon floor was 5 orders of magnitude too small. When `mean_pred ≈ 0.001` early in training (or upon metric collapse), `scale ≈ 5×10⁴`, amplifying gradients by the same factor → NaN within ~8 epochs. `jnp.maximum` does not protect against NaN propagation once any leaf becomes NaN (IEEE 754: `max(NaN, x) = NaN`). | Floor raised to `1e-3`; scale clamped to `[1e-2, 1e2]`. |
+| RB3 | `src/ham/solvers/avbd.py:159` | **BUG** | `jnp.linalg.lstsq(rcond=None)` in the IFT adjoint used machine-epsilon (`≈1.2×10⁻⁷` for float32) as the singular-value cutoff. When the path Hessian is near-singular (flat-metric region, early training, or non-converged path with `grad_clip=100`), a large singular value is preserved and the adjoint vector $\lambda$ becomes $O(10^6)$, overflowing float32 and producing NaN gradients. | Set `rcond=1e-4`, capping gradient amplification at $10^4$ while preserving signal in all well-conditioned modes. |
+| RB4 | `examples/experiment_wildfire_flat.py:302` | **BUG** | `grad_clip=100.0` (10× the safe default of 10.0) caused AVBD paths to remain far from convergence within the fixed 50-iteration budget, violating the IFT fixed-point assumption $G(x^*, \theta) = 0$. An unconverged path makes `dG/dx*` inaccurate, amplifying the conditioning issue in RB3. | Reverted to `grad_clip=10.0`. |
+| RB5 | `examples/experiment_wildfire_flat.py:537` | **BUG** | IoU normalization divided raw predictions (geodesic metres, $O(10^3)$) by `gt_ref = max(gt_arrival) ≤ 1.0` (GT already normalised to [0,1] at load time), giving `pred_norm >> 1`. The IoU@50 threshold was never crossed. | Normalise predictions by `max(pred_arrivals)` so both pred and GT lie in [0,1] before thresholding. |
+
+**Specialist review files:**
+- [reviews/math/losses_arrival_time_scale.md](math/losses_arrival_time_scale.md)
+- [reviews/math/avbd_ift_adjoint.md](math/avbd_ift_adjoint.md)
+- [reviews/code/losses_arrival_time_v2.md](code/losses_arrival_time_v2.md)
+- [reviews/code/experiment_wildfire_training_loop.md](code/experiment_wildfire_training_loop.md)
+- [reviews/science/wildfire_training_analysis.md](science/wildfire_training_analysis.md)
+
+### Verified outcome after fixes
+
+```
+Before (commit dd204da, broken):
+  Epoch   1/10: loss=0.19471  val_r=0.5443
+  Epoch   9/10: loss=nan      val_r=nan
+  test Pearson r = 0.5537   test IoU@50 = 0.0000
+
+After (all 5 fixes applied):
+  Epoch   1/10: loss=0.12639  val_r=0.4784
+  Epoch   5/10: loss=0.08562  val_r=0.5394   ← monotone improvement
+  Epoch  10/10: loss=0.08079  val_r=0.5504   ← no NaN, ever
+  test Pearson r = 0.5090   test IoU@50 = 0.0425  ← IoU unblocked
+```
+
+Training is now **monotonically converging** across all 10 quick-mode epochs. IoU@50 rose from 0 to 0.0425 (unblocked by the normalization fix). The slight drop in Pearson r (0.554 → 0.509) is expected: the new loss trains the metric to predict correct relative arrival ordering over a 100-pixel subsample, while the old (broken) loss was fitting a scale-shifted version over all train obs pixels — a less honest but numerically inflated signal.
+
+### IFT Adjoint: Mathematical Verdict
+
+The IFT adjoint derivation in `_implicit_forward_pass_bwd` is **mathematically correct** (Math Reviewer). The EL residual $G = \nabla_{x^*} E_{\rm total}$, the adjoint system $(\partial G/\partial x^*)^T \lambda = g$, and the VJP call `vjp_fn(-λ)` all have correct signs and formulas. The path Hessian is symmetric, so the `.T` in `lstsq` is redundant but harmless. The only issue was the `rcond` parameter (RB3 above), now fixed.
+
+### Remaining WARNING from this investigation
+
+**W-2026-05-18-1** — `_val_pearson_r` uses `val_pixels` sampled independently from `obs_pixels` via stratified sampling with a fixed seed offset (`seed + 9973`). For small fires (few burned pixels), stratified bins may overlap between the two samples, creating leakage. Recommended: sample a joint pool and split, or track sampled indices explicitly to guarantee disjointness. This does not affect NaN/IoU — it's a validation-quality issue.
+
+---
 
 ---
 

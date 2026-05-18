@@ -156,7 +156,15 @@ def _implicit_forward_pass_bwd(res, g_inner, perturbed, vjp_args, n_steps, const
     )(inner).reshape(inner.size, inner.size)
 
     # Solve adjoint system: (dG/dx*)^T lam = g_inner.ravel()
-    lam, _, _, _ = jnp.linalg.lstsq(dG_dx.T, g_inner.ravel(), rcond=None)
+    # rcond=1e-4 truncates singular values below 0.01% of sigma_max, capping
+    # gradient amplification at 1e4 and preventing float32 overflow from
+    # near-singular Hessians (flat metric regions, early-training paths).
+    lam, _, _, _ = jnp.linalg.lstsq(dG_dx.T, g_inner.ravel(), rcond=1e-4)
+    # NaN guard: if any entry of lam is non-finite (singular or NaN Hessian),
+    # return zero gradients for this solve rather than propagating NaN into
+    # the metric parameters.  This can occur when path segments degenerate
+    # (zero-length segment → NaN in log_map Jacobian).
+    lam = jnp.where(jnp.isfinite(lam), lam, jnp.zeros_like(lam))
 
     # Partition metric into arrays and static fields using the differentiable mask to exclude large rasters
     mask = get_differentiable_mask(metric)
@@ -517,4 +525,4 @@ class AVBDSolver(eqx.Module):
             vs=full_vs,
             energy=final_state.curr_energy,
             constraint_violation=final_state.max_violation
-        )
+        )

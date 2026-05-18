@@ -26,7 +26,7 @@ from typing import Optional
 
 from ham.geometry.metric import FinslerMetric
 from ham.geometry.manifold import Manifold
-from ham.utils.math import GRAD_EPS, PSD_EPS
+from ham.utils.math import GRAD_EPS, NORM_EPS, PSD_EPS
 
 __all__ = [
     "project_spd",
@@ -111,7 +111,7 @@ def project_b_norm(b: jax.Array, G_mat: jax.Array, max_norm: float = 0.9) -> jax
                + b[1] ** 2 * g11) / det_G
     norm = jnp.sqrt(jnp.maximum(norm_sq, GRAD_EPS))
 
-    scale = jnp.minimum(1.0, max_norm / (norm + 1e-8))
+    scale = jnp.minimum(1.0, max_norm / (norm + NORM_EPS))
     return b * scale
 
 
@@ -482,7 +482,10 @@ class CovariateConditionedRanders(FinslerMetric):
         """
         v_sq_raw = jnp.sum(v ** 2)
         is_zero = v_sq_raw < GRAD_EPS
-        v_safe = jnp.where(is_zero, v + jnp.sqrt(GRAD_EPS), v)
+        # Use a neutral unit-norm direction (1/√2, 1/√2) scaled to √(GRAD_EPS/2) to
+        # avoid the diagonal bias that adding √GRAD_EPS to both components introduces.
+        v_zero_safe = jnp.array([jnp.sqrt(GRAD_EPS / 2.0), jnp.sqrt(GRAD_EPS / 2.0)])
+        v_safe = jnp.where(is_zero, v_zero_safe, v)
 
         G, b = self._get_params(x)
 

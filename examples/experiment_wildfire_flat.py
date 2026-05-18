@@ -73,7 +73,6 @@ from ham.data.wildfire import (
     SceneNormalizer,
     train_val_test_split,
     iou_at_50,
-    compute_slope_std,
     stratified_sample_observations,
 )
 from ham.solvers.avbd import AVBDSolver
@@ -84,9 +83,8 @@ from ham.training.losses import ArrivalTimeLoss
 # ---------------------------------------------------------------------------
 try:
     import sys as _sys
-    _GAHTAN_PATH = os.path.join(
-        os.path.dirname(__file__),
-        "../../../Gahtan-Eikonal-Wildfire/differentiable-eikonal-wildfire",
+    _GAHTAN_PATH = os.path.expanduser(
+        "~/Documents/Personal/randers-finsler-eikonal/differentiable-eikonal-wildfire"
     )
     if os.path.exists(_GAHTAN_PATH):
         _sys.path.insert(0, _GAHTAN_PATH)
@@ -114,14 +112,14 @@ def get_config(quick: bool = False) -> dict:
         quick=quick,
         hidden_dim=128,
         fuel_emb_dim=4,
-        n_epochs=5 if quick else 100,
+        n_epochs=10 if quick else 100,
         lr=1e-3,
         lr_schedule="cosine",
         early_stopping_patience=20,
         batch_size_fires=16,
         k_train_obs=50 if quick else 500,
         k_eval_all=True,
-        avbd_n_steps=15 if quick else 50,
+        avbd_n_steps=25 if quick else 50,
         avbd_iters=50,
         lambda_tv_G=0.005,
         lambda_tv_b=0.005,
@@ -301,7 +299,7 @@ def make_solver(cfg: dict) -> AVBDSolver:
     """
     return AVBDSolver(
         step_size=0.05,         # Mathematically stable step size to prevent path divergence
-        grad_clip=100.0,        # Large trust-region (max move 5m/step) for bending mobility
+        grad_clip=10.0,          # Consistent with IFT fixed-point assumption; 100x was too large
         iterations=cfg["avbd_iters"],
         energy_tol=1e-6,
         implicit_diff=True,
@@ -533,17 +531,19 @@ def evaluate_fire(
 
     r = pearson_r(pred_arrivals, gt_arrival)
 
-    # Normalise predictions to [0, 1] for IoU threshold comparison
-    p_finite = pred_arrivals[np.isfinite(pred_arrivals)]
-    if p_finite.size > 0 and float(p_finite.max()) > 1e-8:
-        pred_norm = pred_arrivals / float(p_finite.max())
-    else:
-        pred_norm = pred_arrivals
+    # Normalise predictions to [0, 1] by their own max so that the 0.5
+    # IoU threshold cuts the first half of the *predicted* arrival wave.
+    # GT is already normalised to [0,1] at load time; dividing pred by
+    # gt_ref (≤1) inflated pred >> 1 so the threshold was never crossed.
+    pred_finite = pred_arrivals[np.isfinite(pred_arrivals)]
+    pred_ref = float(pred_finite.max()) if pred_finite.size > 0 and pred_finite.max() > 1e-8 else 1.0
+    pred_norm = pred_arrivals / pred_ref
 
     pred_raster = np.ones_like(scenario.arrival_times)
     for (row, col), t in zip(eval_pixels, pred_norm):
         pred_raster[int(row), int(col)] = float(t)
 
+    # GT raster for iou_at_50 is already normalised to [0,1] by t_max at load time
     iou50 = iou_at_50(pred_raster, scenario.arrival_times, scenario.burned_mask)
 
     return dict(pearson_r=r, iou_50=iou50, n_eval_pixels=int(len(eval_pixels)))
@@ -559,7 +559,13 @@ def _val_pearson_r(
     scenario: WildfireScenario,
     cfg: dict,
 ) -> float:
-    """Fast validation: Pearson r over observation pixels only."""
+    """Fast validation: Pearson r over held-out validation pixels."""
+    val_pixels = scenario.val_pixels
+    val_gt = np.asarray(scenario.val_arrival_times, dtype=np.float64)
+
+    if len(val_pixels) == 0:
+        return 0.0
+
     bound_metric = bind_scenario_to_metric(metric, scenario)
     source = _ignition_to_world(scenario.ignition_pixel, scenario.pixel_spacing_m)
 
@@ -567,13 +573,12 @@ def _val_pearson_r(
         bound_metric,
         solver,
         source,
-        scenario.obs_pixels,
+        val_pixels,
         scenario.pixel_spacing_m,
         cfg["avbd_n_steps"],
         chunk_size=100,
     )
-    gt = np.asarray(scenario.obs_arrival_times, dtype=np.float64)
-    return pearson_r(pred, gt)
+    return pearson_r(pred, val_gt)
 
 
 # ===========================================================================
@@ -719,7 +724,10 @@ def train_scene(
     lr_schedule = optax.cosine_decay_schedule(
         init_value=cfg["lr"], decay_steps=total_steps
     )
-    optimizer = optax.adam(lr_schedule)
+    optimizer = optax.chain(
+        optax.clip_by_global_norm(1.0),  # guard against IFT gradient spikes
+        optax.adam(lr_schedule),
+    )
     # opt_state is (re-)initialised after binding terrain below
 
     # Training state
@@ -1093,7 +1101,10 @@ def run_synthetic(cfg: dict, output_dir: str, use_wind: bool = True) -> dict:
     lr_schedule = optax.cosine_decay_schedule(
         init_value=cfg["lr"], decay_steps=total_steps
     )
-    optimizer = optax.adam(lr_schedule)
+    optimizer = optax.chain(
+        optax.clip_by_global_norm(1.0),  # guard against IFT gradient spikes
+        optax.adam(lr_schedule),
+    )
     opt_state = optimizer.init(eqx.filter(metric, eqx.is_array))
     arrival_loss_obj = ArrivalTimeLoss(solver=solver, solver_steps=cfg["avbd_n_steps"])
 
@@ -1181,7 +1192,8 @@ def main() -> None:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "--data_root", type=str, default="data/sim2real_fire",
+        "--data_root", type=str,
+        default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "sim2real_fire"),
         help="Path to Sim2Real-Fire dataset root directory.",
     )
     parser.add_argument(

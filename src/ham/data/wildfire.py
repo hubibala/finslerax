@@ -31,6 +31,8 @@ class WildfireScenario:
         pixel_spacing_m: float,
         origin_xy: np.ndarray,
         burned_mask: np.ndarray,
+        val_pixels: np.ndarray | None = None,
+        val_arrival_times: np.ndarray | None = None,
     ):
         self.scene_id = scene_id
         self.event_id = event_id
@@ -49,6 +51,8 @@ class WildfireScenario:
         self.pixel_spacing_m = pixel_spacing_m
         self.origin_xy = origin_xy
         self.burned_mask = burned_mask
+        self.val_pixels = val_pixels if val_pixels is not None else np.zeros((0, 2), dtype=np.int64)
+        self.val_arrival_times = val_arrival_times if val_arrival_times is not None else np.zeros((0,), dtype=np.float64)
 
 
 def extract_arrival_times(masks: np.ndarray) -> np.ndarray:
@@ -390,12 +394,23 @@ def load_wildfire_scenario(
         dtype=np.float64,
     )
 
-    # Stratified observation sampling
+    # Stratified observation sampling (training targets)
     obs_pixels = stratified_sample_observations(arrival_times_hours, n_samples=k_train_obs, seed=seed)
     if len(obs_pixels) > 0:
         obs_arrival_times = arrival_times[obs_pixels[:, 0], obs_pixels[:, 1]]
     else:
         obs_arrival_times = np.zeros((0,), dtype=np.float64)
+
+    # Held-out validation pixels: draw a fresh stratified sample with a different
+    # seed so val_pixels are independent of the training observation set.
+    _val_seed = (seed + 9973) if seed is not None else 9973  # deterministic offset
+    val_pixels = stratified_sample_observations(
+        arrival_times_hours, n_samples=min(100, 2 * k_train_obs), seed=_val_seed
+    )
+    if len(val_pixels) > 0:
+        val_arrival_times = arrival_times[val_pixels[:, 0], val_pixels[:, 1]]
+    else:
+        val_arrival_times = np.zeros((0,), dtype=np.float64)
 
     # Standardize covariates
     elev_raster, slope_raster, canopy_raster = normalizer.normalize_spatial(
@@ -429,6 +444,8 @@ def load_wildfire_scenario(
         pixel_spacing_m=pixel_spacing_m,
         origin_xy=origin_xy,
         burned_mask=burned_mask,
+        val_pixels=val_pixels,
+        val_arrival_times=val_arrival_times,
     )
 
 
