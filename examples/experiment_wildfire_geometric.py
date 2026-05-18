@@ -48,6 +48,7 @@ from ham.geometry.manifolds import EuclideanSpace
 from ham.models.wildfire import CovariateConditionedRanders
 from ham.solvers.avbd import AVBDSolver
 from ham.geometry.curvature import flag_curvature_sample, scalar_curvature
+from ham.data.wildfire import WildfireScenario
 
 FIG_DIR = "results/phaseW3/figs"
 
@@ -287,7 +288,6 @@ def plot_curvature_field(kappa, grid_xy, domain_shape, output_dir, suffix=""):
 
 def _make_synthetic_scenario():
     """Build a 20x20 synthetic WildfireScenario for smoke-testing."""
-    from ham.data.wildfire import WildfireScenario
     H, W = 20, 20
     spacing = 30.0
     rng = np.random.default_rng(42)
