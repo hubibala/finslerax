@@ -68,6 +68,52 @@ SEED = 42
 FIG_DIR = os.path.join(os.path.dirname(__file__), "..", "figs")
 
 
+class GridMetricField(eqx.Module):
+    """Per-pixel isotropic metric field on a regular grid.
+
+    Matches Gahtan et al.'s parameterization: directly optimizable scalar
+    metric values g(x) on a regular grid, bilinearly interpolated to
+    arbitrary positions. Returns G(x) = g(x) * I_2.
+
+    This eliminates the spectral bias of neural network parameterizations,
+    allowing recovery of piecewise-constant metric fields.
+
+    Args:
+        grid_size: Number of grid points per axis.
+        margin: Boundary margin matching the observation grid.
+    """
+    grid_values: jax.Array  # (grid_size, grid_size) scalar metric values
+    grid_size: int = eqx.field(static=True)
+    margin: float = eqx.field(static=True)
+
+    def __init__(self, grid_size: int, margin: float = 0.05):
+        self.grid_size = grid_size
+        self.margin = margin
+        self.grid_values = jnp.ones((grid_size, grid_size))
+
+    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+        """Bilinearly interpolate grid values and return G(x) = g(x) * I."""
+        extent = 1.0 - 2 * self.margin
+        gx = (x[0] - self.margin) / extent * (self.grid_size - 1)
+        gy = (x[1] - self.margin) / extent * (self.grid_size - 1)
+        gx = jnp.clip(gx, 0.0, self.grid_size - 1.001)
+        gy = jnp.clip(gy, 0.0, self.grid_size - 1.001)
+        gx0 = jnp.floor(gx).astype(jnp.int32)
+        gy0 = jnp.floor(gy).astype(jnp.int32)
+        gx1 = jnp.minimum(gx0 + 1, self.grid_size - 1)
+        gy1 = jnp.minimum(gy0 + 1, self.grid_size - 1)
+        fx = gx - gx0
+        fy = gy - gy0
+        v00 = self.grid_values[gy0, gx0]
+        v01 = self.grid_values[gy0, gx1]
+        v10 = self.grid_values[gy1, gx0]
+        v11 = self.grid_values[gy1, gx1]
+        val = v00 * (1 - fx) * (1 - fy) + v01 * fx * (1 - fy) \
+            + v10 * (1 - fx) * fy + v11 * fx * fy
+        val = jnp.maximum(val, 0.1)
+        return val * jnp.eye(2)
+
+
 def get_config(quick: bool = False):
     """Return experiment configuration dict.
 
@@ -75,37 +121,43 @@ def get_config(quick: bool = False):
         quick: If True, use smaller grid and fewer iterations for smoke testing.
 
     All hyperparameters are documented here for reproducibility.
-    Full config matches experiment plan: solver_steps=20, solver_iters=100,
-    n_train_steps=500, hidden_dim=64, depth=3.
+    Uses grid-based (per-pixel) metric parameterization by default to match
+    Gahtan et al.'s approach, isolating the solver comparison from
+    parameterization effects. Set param_type='neural' for neural network
+    ablation.
     """
     if quick:
         return dict(
             grid_size=20,
-            n_train_steps=100,
-            solver_steps=10,
-            solver_iters=50,
+            n_train_steps=300,
+            solver_steps=20,
+            solver_iters=100,
             hidden_dim=32,
             depth=2,
-            lr=2e-3,
+            lr=0.05,
             seeds=[0],
             densities=[1.0, 0.25],
             reg_lambdas=[0.0, 1e-3],
-            obs_per_train_step=16,
-            n_reg_points=32,  # Fixed size for JIT stability
+            obs_per_train_step=64,
+            n_reg_points=32,
+            tv_lambda=0.001,
+            param_type='grid',  # 'grid' or 'neural'
         )
     return dict(
         grid_size=80,
-        n_train_steps=500,
-        solver_steps=20,
-        solver_iters=100,
+        n_train_steps=800,
+        solver_steps=30,
+        solver_iters=150,
         hidden_dim=64,
         depth=3,
-        lr=1e-3,
+        lr=0.05,
         seeds=[0, 1, 2, 3, 4],
         densities=[1.0, 0.50, 0.07, 0.03],
         reg_lambdas=[0.0, 1e-4, 1e-3, 1e-2, 1e-1],
-        obs_per_train_step=32,
-        n_reg_points=64,  # Fixed size for JIT stability
+        obs_per_train_step=64,
+        n_reg_points=64,
+        tv_lambda=0.001,
+        param_type='grid',  # 'grid' or 'neural'
     )
 
 
@@ -147,32 +199,39 @@ def make_true_metric(boundary: float = 0.5):
     return Riemannian(manifold, g_net)
 
 
-def compute_true_arrival_times(source, grid_points, boundary=0.5):
-    """Compute ground-truth arrival times using a high-fidelity AVBD solver.
+def compute_true_arrival_times(source, grid_points, cfg, boundary=0.5):
+    """Compute ground-truth arrival times using the SAME solver config as training.
 
-    Instead of an analytical approximation (which is only correct for
-    straight-line paths and ignores refraction), we use the AVBD solver
-    itself with the known ground-truth metric to compute geodesic distances.
-    This ensures training targets are self-consistent.
+    Uses the identical solver parameters (step_size, iterations, n_steps) and
+    quadrature method (midpoint) as ArrivalTimeLoss. This ensures training
+    targets are perfectly self-consistent with the predicted values, avoiding
+    systematic discretization bias.
 
     Args:
         source: Source point, shape (2,).
         grid_points: Observation points, shape (K, 2).
+        cfg: Configuration dict (provides solver_steps, solver_iters, etc.).
         boundary: x-coordinate of the metric transition.
 
     Returns:
         Arrival times, shape (K,).
     """
     true_metric = make_true_metric(boundary)
-    # Higher-fidelity solver than training for accurate ground truth
-    gt_solver = AVBDSolver(step_size=0.03, iterations=150, energy_tol=1e-7)
+    # Use the SAME solver config as training for self-consistency
+    gt_solver = AVBDSolver(
+        step_size=0.05,
+        iterations=cfg['solver_iters'],
+        energy_tol=1e-6,
+    )
+    n_steps = cfg['solver_steps']
 
     def single_distance(target):
-        traj = gt_solver.solve(true_metric, source, target, n_steps=25)
+        traj = gt_solver.solve(true_metric, source, target, n_steps=n_steps)
         path = traj.xs
+        # Midpoint quadrature for O(h^2) accuracy — matches ArrivalTimeLoss
         segments = jnp.diff(path, axis=0)
-        positions = path[:-1]
-        step_costs = jax.vmap(true_metric.metric_fn)(positions, segments)
+        midpoints = (path[:-1] + path[1:]) / 2.0
+        step_costs = jax.vmap(true_metric.metric_fn)(midpoints, segments)
         return jnp.sum(step_costs)
 
     print("  Computing ground-truth arrival times via AVBD...")
@@ -241,11 +300,35 @@ def jacobian_regularization(metric, sample_points):
     return jnp.mean(jacs ** 2)
 
 
+def tv_regularization(metric):
+    """Total Variation regularization on grid-based metric fields.
+
+    Computes L1 TV: sum of absolute differences between adjacent grid values.
+    Encourages piecewise-constant solutions, matching Gahtan et al.'s approach.
+
+    Args:
+        metric: Riemannian metric with GridMetricField g_net.
+
+    Returns:
+        Scalar TV penalty.
+    """
+    g = metric.g_net.grid_values
+    dx = jnp.abs(g[:, 1:] - g[:, :-1])
+    dy = jnp.abs(g[1:, :] - g[:-1, :])
+    return jnp.mean(dx) + jnp.mean(dy)
+
+
 def train_metric(
     key, grid_points, source, t_obs, cfg,
     reg_lambda=1e-3, density=1.0, use_wind=False,
 ):
     """Train a metric to recover arrival times.
+
+    Supports two parameterization modes (cfg['param_type']):
+      - 'grid': Per-pixel scalar metric field (matches Gahtan et al.).
+                Uses TV regularization. No wind (Riemannian only).
+      - 'neural': NeuralRanders with PSDMatrixField/VectorField.
+                  Uses L2 Jacobian regularization.
 
     Args:
         key: JAX PRNG key.
@@ -253,16 +336,18 @@ def train_metric(
         source: Source point, shape (2,).
         t_obs: Ground-truth arrival times for grid_points, shape (N,).
         cfg: Configuration dict.
-        reg_lambda: Jacobian regularization weight.
+        reg_lambda: Regularization weight (TV for grid, Jacobian for neural).
         density: Fraction of observations to use.
         use_wind: If True, learn both G and W (Randers). If False, W=0
             (Riemannian). For isotropic ground truth, W=0 is the correct
             control — Randers should not improve and may hurt.
+            Ignored for param_type='grid' (always Riemannian).
 
     Returns:
         Tuple of (trained_metric, loss_history).
     """
     k_init, k_train = jax.random.split(key)
+    param_type = cfg.get('param_type', 'grid')
 
     # Subsample observations
     n_total = grid_points.shape[0]
@@ -275,12 +360,23 @@ def train_metric(
     # Initialize metric
     manifold = EuclideanSpace(2)
     k_net, k_train = jax.random.split(k_train)
-    k1, k2 = jax.random.split(k_net)
-    h_net = PSDMatrixField(2, cfg['hidden_dim'], cfg['depth'], k1)
-    w_net = VectorField(2, cfg['hidden_dim'], cfg['depth'], k2,
-                        use_fourier=False)
-    metric = Randers(manifold, h_net, w_net, epsilon=1e-5,
-                     use_wind=use_wind)
+
+    if param_type == 'grid':
+        # Grid-based per-pixel metric (matches Gahtan's parameterization)
+        g_field = GridMetricField(cfg['grid_size'], margin=0.05)
+        metric = Riemannian(manifold, g_field)
+        use_tv = True
+        tv_lambda = cfg.get('tv_lambda', 0.001)
+    else:
+        # Neural network metric
+        k1, k2 = jax.random.split(k_net)
+        h_net = PSDMatrixField(2, cfg['hidden_dim'], cfg['depth'], k1)
+        w_net = VectorField(2, cfg['hidden_dim'], cfg['depth'], k2,
+                            use_fourier=False)
+        metric = Randers(manifold, h_net, w_net, epsilon=1e-5,
+                         use_wind=use_wind)
+        use_tv = False
+        tv_lambda = 0.0
 
     # Solver and loss
     solver = AVBDSolver(
@@ -298,36 +394,53 @@ def train_metric(
     optimizer = optax.adam(schedule)
     opt_state = optimizer.init(eqx.filter(metric, eqx.is_array))
 
-    # Fixed regularization sample points (constant size for JIT stability)
+    # Fixed regularization sample points for neural mode
     n_reg = cfg['n_reg_points']
-    k_reg, k_train = jax.random.split(k_train)
-    reg_idx = jax.random.choice(k_reg, n_obs,
-                                 shape=(min(n_reg, n_obs),), replace=False)
-    reg_points = x_train[reg_idx]
-    # Pad to fixed size if needed
-    if reg_points.shape[0] < n_reg:
-        pad = jnp.tile(reg_points[:1], (n_reg - reg_points.shape[0], 1))
-        reg_points = jnp.concatenate([reg_points, pad])
+    reg_points = None
+    if not use_tv and reg_lambda > 0:
+        k_reg, k_train = jax.random.split(k_train)
+        reg_idx = jax.random.choice(k_reg, n_obs,
+                                     shape=(min(n_reg, n_obs),), replace=False)
+        reg_points = x_train[reg_idx]
+        if reg_points.shape[0] < n_reg:
+            pad = jnp.tile(reg_points[:1], (n_reg - reg_points.shape[0], 1))
+            reg_points = jnp.concatenate([reg_points, pad])
 
-    @eqx.filter_jit
-    def train_step(metric, opt_state, batch_x, batch_t, reg_pts):
-        def loss_fn(m):
-            l_arrival = arrival_loss(m, source, batch_x, batch_t)
-            l_reg = jacobian_regularization(m, reg_pts) if reg_lambda > 0 else 0.0
-            return l_arrival + reg_lambda * l_reg, l_arrival
-        (total_loss, arrival_only), grads = eqx.filter_value_and_grad(
-            loss_fn, has_aux=True
-        )(metric)
-        updates, new_opt_state = optimizer.update(grads, opt_state, metric)
-        new_metric = eqx.apply_updates(metric, updates)
-        return new_metric, new_opt_state, total_loss, arrival_only
+    if use_tv:
+        @eqx.filter_jit
+        def train_step(metric, opt_state, batch_x, batch_t):
+            def loss_fn(m):
+                l_arrival = arrival_loss(m, source, batch_x, batch_t)
+                l_tv = tv_regularization(m) * tv_lambda if tv_lambda > 0 else 0.0
+                return l_arrival + l_tv, l_arrival
+            (total_loss, arrival_only), grads = eqx.filter_value_and_grad(
+                loss_fn, has_aux=True
+            )(metric)
+            updates, new_opt_state = optimizer.update(grads, opt_state, metric)
+            new_metric = eqx.apply_updates(metric, updates)
+            return new_metric, new_opt_state, total_loss, arrival_only
+    else:
+        @eqx.filter_jit
+        def train_step(metric, opt_state, batch_x, batch_t):
+            def loss_fn(m):
+                l_arrival = arrival_loss(m, source, batch_x, batch_t)
+                l_reg = jacobian_regularization(m, reg_points) if reg_lambda > 0 else 0.0
+                return l_arrival + reg_lambda * l_reg, l_arrival
+            (total_loss, arrival_only), grads = eqx.filter_value_and_grad(
+                loss_fn, has_aux=True
+            )(metric)
+            updates, new_opt_state = optimizer.update(grads, opt_state, metric)
+            new_metric = eqx.apply_updates(metric, updates)
+            return new_metric, new_opt_state, total_loss, arrival_only
 
     # Training loop
     loss_history = []
     batch_size = min(cfg['obs_per_train_step'], n_obs)
-    wind_str = "Randers" if use_wind else "Riemannian (W=0)"
-    print(f"  Training [{wind_str}]: {n_obs} obs ({density*100:.0f}%), "
-          f"reg λ={reg_lambda:.0e}, batch={batch_size}")
+    param_str = f"[{param_type}]"
+    wind_str = "Randers" if (use_wind and param_type != 'grid') else "Riemannian"
+    reg_str = f"TV λ={tv_lambda:.0e}" if use_tv else f"Jac λ={reg_lambda:.0e}"
+    print(f"  Training {param_str} [{wind_str}]: {n_obs} obs ({density*100:.0f}%), "
+          f"{reg_str}, batch={batch_size}")
 
     for step in range(cfg['n_train_steps']):
         k_train, k_batch = jax.random.split(k_train)
@@ -337,8 +450,14 @@ def train_metric(
         bt = t_train[batch_idx]
 
         metric, opt_state, loss, arrival_only = train_step(
-            metric, opt_state, bx, bt, reg_points
+            metric, opt_state, bx, bt
         )
+
+        # Project grid values to stay positive (grid mode only)
+        if use_tv and step % 50 == 0:
+            new_gv = jnp.maximum(metric.g_net.grid_values, 0.1)
+            metric = eqx.tree_at(lambda m: m.g_net.grid_values, metric, new_gv)
+
         loss_val = float(loss)
         loss_history.append(loss_val)
 
@@ -613,8 +732,8 @@ def plot_arrival_time_comparison(metric, source, grid_points, grid_size,
         traj = solver.solve(metric, source, x_target, n_steps=solver_steps)
         path = traj.xs
         segments = jnp.diff(path, axis=0)
-        positions = path[:-1]
-        step_costs = jax.vmap(metric.metric_fn)(positions, segments)
+        midpoints = (path[:-1] + path[1:]) / 2.0
+        step_costs = jax.vmap(metric.metric_fn)(midpoints, segments)
         return jnp.sum(step_costs)
 
     t_pred_sample = jax.vmap(single_dist)(grid_points[eval_idx])
@@ -728,7 +847,7 @@ def run_experiment(cfg):
     grid = make_grid(grid_size)
     # Source placed in the g=1 region, away from boundary at x=0.5
     source = jnp.array([0.35, 0.5])
-    t_true = compute_true_arrival_times(source, grid, boundary=0.5)
+    t_true = compute_true_arrival_times(source, grid, cfg, boundary=0.5)
     print(f"  Grid: {grid_size}x{grid_size} = {grid.shape[0]} points")
     print(f"  Source: {source} (in g=1 region, off boundary)")
     print(f"  Arrival time range: "
@@ -748,7 +867,7 @@ def run_experiment(cfg):
             t0 = time.time()
             metric, loss_hist = train_metric(
                 key, grid, source, t_true, cfg,
-                reg_lambda=1e-3, density=density, use_wind=False,
+                reg_lambda=0.0, density=density, use_wind=False,
             )
             dt_train = time.time() - t0
             print(f"  Training time: {dt_train:.1f}s")
@@ -778,43 +897,48 @@ def run_experiment(cfg):
     plot_density_sweep(dens_list, errs_mean, errs_std, FIG_DIR)
     plot_convergence(all_loss_histories, all_loss_labels, FIG_DIR)
 
-    # ----- Randers Ablation -----
-    print(f"\n[3] Randers ablation (W learned) at selected densities")
+    # ----- Randers Ablation (neural mode only) -----
     randers_results = {}
     ablation_densities = [cfg['densities'][0], cfg['densities'][-1]]
-    for density in ablation_densities:
-        errors_randers = []
-        for seed in cfg['seeds']:
-            key = jax.random.PRNGKey(seed)
-            metric_r, _ = train_metric(
-                key, grid, source, t_true, cfg,
-                reg_lambda=1e-3, density=density, use_wind=True,
-            )
-            result_r = evaluate_recovery(metric_r, grid, true_metric_scalar,
-                                          grid_size)
-            errors_randers.append(result_r['rel_error'])
-        errs_r = np.array(errors_randers)
-        randers_results[density] = {
-            'mean': float(errs_r.mean()),
-            'std': float(errs_r.std()),
-        }
-        print(f"  Randers at {density*100:.0f}%: "
-              f"{errs_r.mean()*100:.1f}% +/- {errs_r.std()*100:.1f}%")
+    if cfg.get('param_type', 'grid') == 'neural':
+        print(f"\n[3] Randers ablation (W learned) at selected densities")
+        for density in ablation_densities:
+            errors_randers = []
+            for seed in cfg['seeds']:
+                key = jax.random.PRNGKey(seed)
+                metric_r, _ = train_metric(
+                    key, grid, source, t_true, cfg,
+                    reg_lambda=1e-3, density=density, use_wind=True,
+                )
+                result_r = evaluate_recovery(metric_r, grid, true_metric_scalar,
+                                              grid_size)
+                errors_randers.append(result_r['rel_error'])
+            errs_r = np.array(errors_randers)
+            randers_results[density] = {
+                'mean': float(errs_r.mean()),
+                'std': float(errs_r.std()),
+            }
+            print(f"  Randers at {density*100:.0f}%: "
+                  f"{errs_r.mean()*100:.1f}% +/- {errs_r.std()*100:.1f}%")
 
-    riem_errs = [density_results[d]['mean'] for d in ablation_densities]
-    rand_errs = [randers_results[d]['mean'] for d in ablation_densities]
-    plot_riemannian_vs_randers(riem_errs, rand_errs, ablation_densities,
-                               FIG_DIR)
+        riem_errs = [density_results[d]['mean'] for d in ablation_densities]
+        rand_errs = [randers_results[d]['mean'] for d in ablation_densities]
+        plot_riemannian_vs_randers(riem_errs, rand_errs, ablation_densities,
+                                   FIG_DIR)
+    else:
+        print(f"\n[3] Randers ablation skipped (grid param_type)")
 
     # ----- Regularization Sweep -----
-    print(f"\n[4] Jacobian regularization sweep: {cfg['reg_lambdas']}")
+    print(f"\n[4] TV/Jacobian regularization sweep: {cfg['reg_lambdas']}")
     reg_results = {}
     for lam in cfg['reg_lambdas']:
         errors_for_lam = []
         for seed in cfg['seeds']:
             key = jax.random.PRNGKey(seed)
+            # For grid mode, reg_lambda controls TV; for neural, Jacobian
+            cfg_sweep = {**cfg, 'tv_lambda': lam}
             metric, _ = train_metric(
-                key, grid, source, t_true, cfg,
+                key, grid, source, t_true, cfg_sweep,
                 reg_lambda=lam, density=1.0, use_wind=False,
             )
             result = evaluate_recovery(metric, grid, true_metric_scalar,
@@ -864,7 +988,7 @@ def run_experiment(cfg):
     print("\n" + "=" * 70)
     print("RESULTS SUMMARY")
     print("=" * 70)
-    print(f"\n--- Density Sweep (Riemannian, W=0) ---")
+    print(f"\n--- Density Sweep ({cfg.get('param_type', 'grid')} param) ---")
     print(f"{'Density':>10} | {'Error (ours)':>20} | "
           f"{'Gahtan (single run)':>20}")
     print("-" * 58)
@@ -875,11 +999,12 @@ def run_experiment(cfg):
         gahtan_val = f"{gahtan[d]}%" if d in gahtan else "—"
         print(f"{d*100:>9.0f}% | {ours:>20} | {gahtan_val:>20}")
 
-    print(f"\n--- Riemannian vs. Randers Ablation ---")
-    for d in ablation_densities:
-        print(f"  {d*100:.0f}%: "
-              f"Riemannian={density_results[d]['mean']*100:.1f}%, "
-              f"Randers={randers_results[d]['mean']*100:.1f}%")
+    if randers_results:
+        print(f"\n--- Riemannian vs. Randers Ablation ---")
+        for d in ablation_densities:
+            print(f"  {d*100:.0f}%: "
+                  f"Riemannian={density_results[d]['mean']*100:.1f}%, "
+                  f"Randers={randers_results[d]['mean']*100:.1f}%")
 
     print(f"\n--- Regularization Sweep ---")
     print(f"{'lambda':>10} | {'Error':>20}")
