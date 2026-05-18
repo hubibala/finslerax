@@ -86,7 +86,7 @@ try:
     import sys as _sys
     _GAHTAN_PATH = os.path.join(
         os.path.dirname(__file__),
-        "../../../Documents/Personal/randers-finsler-eikonal/differentiable-eikonal-wildfire",
+        "../../../Gahtan-Eikonal-Wildfire/differentiable-eikonal-wildfire",
     )
     if os.path.exists(_GAHTAN_PATH):
         _sys.path.insert(0, _GAHTAN_PATH)
@@ -111,6 +111,7 @@ def get_config(quick: bool = False) -> dict:
         dict with all hyperparameters.
     """
     return dict(
+        quick=quick,
         hidden_dim=128,
         fuel_emb_dim=4,
         n_epochs=5 if quick else 100,
@@ -221,13 +222,11 @@ def make_batched_train_step(
     loss_fn: ArrivalTimeLoss,
     optimizer,
 ):
-    """Return a JIT-compiled training step that vmaps over a fire batch.
+    """Return a training step using Python-level gradient accumulation.
 
-    All fires in the batch share the *terrain_metric* (rasters already baked
-    in).  Only ``weather_vec``, ``source``, ``obs_world``, and ``obs_times``
-    vary per fire.  A single ``filter_vmap`` call compiles the full forward +
-    backward pass for the entire batch into one XLA kernel, maximally
-    utilising SIMD / GPU parallelism.
+    Computes one JIT-compiled gradient per fire, accumulates them at the
+    Python level, then applies a single optimizer update.  This avoids
+    materialising B x K solver graphs simultaneously in XLA memory.
 
     Args:
         terrain_metric: Scene-terrain-bound metric (weather not set).
@@ -236,7 +235,7 @@ def make_batched_train_step(
 
     Returns:
         ``batched_step(metric, opt_state, weather_batch, source_batch,
-                       obs_world_batch, obs_times_batch) →
+                       obs_world_batch, obs_times_batch) ->
           (new_metric, new_opt_state, mean_loss)``
 
         All ``*_batch`` arrays have a leading batch dimension B.
@@ -244,39 +243,49 @@ def make_batched_train_step(
         ``obs_times_batch`` shape: ``(B, K)``.
     """
     @eqx.filter_jit
-    def _compute_grads(metric,
-                       weather_batch,     # (B, 4)
-                       source_batch,      # (B, 2)
-                       obs_world_batch,   # (B, K, 2)
-                       obs_times_batch):  # (B, K)
-        """JIT-compiled: forward + backward over B fires via vmap."""
-        def single_fire_loss(m, weather, source, obs_world, obs_times):
+    def _single_fire_grad(metric, weather, source, obs_world, obs_times):
+        """JIT-compiled forward + backward for ONE fire."""
+        def fire_loss(m):
             bound = m.bind_weather(weather)
             return loss_fn(bound, source, obs_world, obs_times)
-
-        def total_loss(m):
-            per_fire = jax.vmap(
-                lambda w, s, xo, to: single_fire_loss(m, w, s, xo, to)
-            )(weather_batch, source_batch, obs_world_batch, obs_times_batch)
-            return jnp.mean(per_fire)
-
-        return eqx.filter_value_and_grad(total_loss)(metric)
+        return eqx.filter_value_and_grad(fire_loss)(metric)
 
     def batched_step(metric, opt_state,
                      weather_batch, source_batch,
                      obs_world_batch, obs_times_batch):
-        """Full training step: grad via JIT, optimizer update outside JIT."""
-        loss_val, grads = _compute_grads(
-            metric, weather_batch, source_batch, obs_world_batch, obs_times_batch
+        """Accumulate gradients over B fires, then apply one optimizer step."""
+        B = weather_batch.shape[0]
+        accumulated_grads = None
+        total_loss_val = 0.0
+
+        for i in range(B):
+            loss_i, grads_i = _single_fire_grad(
+                metric,
+                weather_batch[i],
+                source_batch[i],
+                obs_world_batch[i],
+                obs_times_batch[i],
+            )
+            total_loss_val += float(loss_i)
+            if accumulated_grads is None:
+                accumulated_grads = grads_i
+            else:
+                accumulated_grads = jax.tree_util.tree_map(
+                    lambda a, b: a + b, accumulated_grads, grads_i
+                )
+
+        # Average gradients over the batch
+        accumulated_grads = jax.tree_util.tree_map(
+            lambda g: g / B, accumulated_grads
         )
-        # Pass only floating-point leaves to optimizer.update to avoid the
-        # optax cast_like error on int32 rasters in the metric pytree.
+        mean_loss = total_loss_val / B
+
         updates, new_opt_state = optimizer.update(
-            eqx.filter(grads, eqx.is_inexact_array),
+            eqx.filter(accumulated_grads, eqx.is_inexact_array),
             opt_state,
             eqx.filter(metric, eqx.is_inexact_array),
         )
-        return eqx.apply_updates(metric, updates), new_opt_state, loss_val
+        return eqx.apply_updates(metric, updates), new_opt_state, mean_loss
 
     return batched_step
 
@@ -291,9 +300,11 @@ def make_solver(cfg: dict) -> AVBDSolver:
         :class:`~ham.solvers.avbd.AVBDSolver`.
     """
     return AVBDSolver(
-        step_size=0.05,
+        step_size=0.05,         # Mathematically stable step size to prevent path divergence
+        grad_clip=100.0,        # Large trust-region (max move 5m/step) for bending mobility
         iterations=cfg["avbd_iters"],
         energy_tol=1e-6,
+        implicit_diff=True,
     )
 
 
@@ -494,6 +505,10 @@ def evaluate_fire(
     if eval_pixels is None:
         rows, cols = np.where(scenario.burned_mask)
         eval_pixels = np.stack([rows, cols], axis=1)
+        if cfg.get("quick", False) and len(eval_pixels) > 100:
+            rng = np.random.default_rng(42)
+            idx = rng.choice(len(eval_pixels), size=100, replace=False)
+            eval_pixels = eval_pixels[idx]
 
     if len(eval_pixels) == 0:
         return dict(pearson_r=0.0, iou_50=0.0, n_eval_pixels=0)
@@ -651,6 +666,10 @@ def train_scene(
         val_ratio=cfg["val_ratio"],
         seed=cfg["seed"],
     )
+    if cfg.get("quick", False):
+        train_list = train_list[:32]
+        val_list = val_list[:16]
+        test_list = test_list[:16]
     print(
         f"  Events: {len(scenarios_keys)} total | "
         f"{len(train_list)} train / {len(val_list)} val / {len(test_list)} test"

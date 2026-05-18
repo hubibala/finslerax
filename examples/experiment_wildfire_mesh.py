@@ -83,7 +83,7 @@ from ham.training.losses import ArrivalTimeLoss
 try:
     _GAHTAN_PATH = os.path.join(
         os.path.dirname(__file__),
-        "../../../Documents/Personal/randers-finsler-eikonal/differentiable-eikonal-wildfire",
+        "../../../Gahtan-Eikonal-Wildfire/differentiable-eikonal-wildfire",
     )
     if os.path.exists(_GAHTAN_PATH):
         sys.path.insert(0, _GAHTAN_PATH)
@@ -107,6 +107,7 @@ def get_config(quick: bool = False) -> dict:
         dict with all hyperparameters.
     """
     return dict(
+        quick=quick,
         hidden_dim=64,
         fuel_emb_dim=4,
         n_epochs=10 if quick else 100,
@@ -446,7 +447,8 @@ def make_solver(cfg: dict) -> AVBDSolver:
         :class:`~ham.solvers.avbd.AVBDSolver`.
     """
     return AVBDSolver(
-        step_size=0.05,
+        step_size=0.05,         # Mathematically stable step size to prevent path divergence
+        grad_clip=100.0,        # Large trust-region (max move 5m/step) for bending mobility
         iterations=cfg["avbd_iters"],
         energy_tol=1e-6,
     )
@@ -553,6 +555,10 @@ def train_scene_mesh(
         val_ratio=cfg["val_ratio"],
         seed=cfg["seed"],
     )
+    if cfg.get("quick", False):
+        train_list = train_list[:16]
+        val_list = val_list[:8]
+        test_list = test_list[:8]
     print(
         f"  Events: {len(scenarios_keys)} total | "
         f"{len(train_list)} train / {len(val_list)} val / {len(test_list)} test"
@@ -705,6 +711,10 @@ def train_scene_mesh(
         )
         rows, cols = np.where(sc.burned_mask)
         eval_pix = np.stack([rows, cols], axis=1)
+        if cfg.get("quick", False) and len(eval_pix) > 100:
+            rng = np.random.default_rng(42)
+            idx = rng.choice(len(eval_pix), size=100, replace=False)
+            eval_pix = eval_pix[idx]
 
         if len(eval_pix) == 0:
             continue

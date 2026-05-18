@@ -123,9 +123,9 @@ def stratified_sample_observations(arrival: np.ndarray, n_samples: int, seed=Non
     times = arrival[r, c]
 
     if total_candidates <= n_samples:
-        indices = np.arange(total_candidates)
-        rng.shuffle(indices)
-        return coords[indices]
+        # Sample with replacement to get exactly n_samples
+        idx = rng.choice(total_candidates, size=n_samples, replace=True)
+        return coords[idx]
 
     t_min, t_max = np.min(times), np.max(times)
     if np.abs(t_max - t_min) < 1e-9:
