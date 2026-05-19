@@ -374,7 +374,7 @@ def _make_and_train_synthetic_metric(scenario, n_epochs=5):
     j_wx     = jnp.asarray(scenario.weather_vec)
 
     optimizer = optax.adam(1e-3)
-    opt_state = optimizer.init(eqx.filter(metric, eqx.is_array))
+    opt_state = optimizer.init(eqx.filter(metric, eqx.is_inexact_array))
 
     @eqx.filter_jit
     def compute_grads(m, bx, bt):
@@ -382,6 +382,7 @@ def _make_and_train_synthetic_metric(scenario, n_epochs=5):
             bound = mm.bind_scene(j_elev, j_slope, j_aspect, j_canopy, j_fuel,
                                   j_wx, scenario.pixel_spacing_m,
                                   jnp.zeros(2))
+            bound = bound.precompute_metric_field()  # required after CNN refactor
             return loss_fn(bound, source_world, bx, bt)
         return eqx.filter_value_and_grad(_loss)(m)
 
@@ -389,11 +390,15 @@ def _make_and_train_synthetic_metric(scenario, n_epochs=5):
         key_e = jax.random.PRNGKey(epoch)
         idx = jax.random.choice(key_e, x_obs_world.shape[0], (32,), replace=False)
         loss_val, grads = compute_grads(metric, x_obs_world[idx], t_obs[idx])
-        updates, opt_state = optimizer.update(grads, opt_state, metric)
+        updates, opt_state = optimizer.update(
+            eqx.filter(grads, eqx.is_inexact_array),
+            opt_state,
+            eqx.filter(metric, eqx.is_inexact_array),
+        )
         metric = eqx.apply_updates(metric, updates)
         print(f"  Epoch {epoch+1}/{n_epochs}: loss={float(loss_val):.4f}")
 
-    # Bind once after training for geometric analysis
+    # Bind once after training and precompute the field for geometric analysis
     bound_metric = metric.bind_scene(
         elev=jnp.asarray(scenario.elev_raster),
         slope=jnp.asarray(scenario.slope_raster),
@@ -403,7 +408,7 @@ def _make_and_train_synthetic_metric(scenario, n_epochs=5):
         weather_vec=jnp.asarray(scenario.weather_vec),
         pixel_spacing_m=scenario.pixel_spacing_m,
         origin_xy=jnp.zeros(2),
-    )
+    ).precompute_metric_field()  # metric_fn requires this to be set
 
     return bound_metric, solver, source_world, (H, W)
 
