@@ -25,18 +25,24 @@ class TestArrivalTimeLoss:
     """Tests for the ArrivalTimeLoss class."""
 
     def test_identity_metric_distance(self):
-        """On flat R^2 with G=I, geodesic distance should equal Euclidean distance."""
+        """On flat R^2 with G=I, geodesic distance should equal Euclidean distance.
+
+        ArrivalTimeLoss normalises t_pred to [0,1] by dividing by its maximum
+        before computing MSE, matching the wildfire data pipeline where t_obs
+        is pre-normalised to [0,1].  We therefore also normalise t_obs here.
+        """
         metric = _identity_metric()
         solver = AVBDSolver(step_size=0.05, iterations=80)
         loss_fn = ArrivalTimeLoss(solver=solver, solver_steps=15)
 
         source = jnp.array([0.0, 0.0])
         x_obs = jnp.array([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
-        # True Euclidean distances
-        t_obs = jnp.array([1.0, 1.0, jnp.sqrt(2.0)])
+        # True Euclidean distances, normalised to [0, 1] to match ArrivalTimeLoss
+        t_raw = jnp.array([1.0, 1.0, jnp.sqrt(2.0)])
+        t_obs = t_raw / t_raw.max()   # [1/√2, 1/√2, 1.0]
 
         loss = loss_fn(metric, source, x_obs, t_obs)
-        # Loss should be near zero since predicted distances match
+        # Loss should be near zero since predicted distances match after normalisation
         assert loss < 0.01, f"Loss too high for identity metric: {loss}"
 
     def test_gradient_flows(self):

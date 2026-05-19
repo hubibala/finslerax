@@ -3,6 +3,8 @@
 Covers:
   - project_spd: eigenvalue clamping correctness
   - project_b_norm: G^{-1}-norm bound after projection
+  - LocalTerrainCNN: output shape, dtype, differentiability
+  - precompute_metric_field: field shape, grad flow through CNN weights
   - metric_fn: positivity, 1-homogeneity, Riemannian limit, JIT/vmap, gradients
 """
 
@@ -17,6 +19,7 @@ config.update("jax_enable_x64", True)
 from ham.geometry.manifolds import EuclideanSpace
 from ham.models.wildfire import (
     CovariateConditionedRanders,
+    LocalTerrainCNN,
     project_spd,
     project_b_norm,
 )
@@ -48,20 +51,25 @@ def _make_scene(key=None):
 
 
 def _make_model(use_wind=True, key=None):
-    """Return a freshly initialised CovariateConditionedRanders."""
+    """Return a freshly initialised CovariateConditionedRanders.
+
+    Uses small ``cnn_channels=8`` so each test runs in seconds rather than
+    waiting for 64-channel conv layers.
+    """
     k = _KEY if key is None else key
     manifold = EuclideanSpace(2)
     return CovariateConditionedRanders(
-        manifold, k, hidden_dim=16, fuel_emb_dim=4,
+        manifold, k, hidden_dim=16, fuel_emb_dim=4, cnn_channels=8,
         eps_G=0.1, max_G=10.0, max_b_norm=0.9, use_wind=use_wind,
     )
 
 
 def _bound_model(use_wind=True):
-    """Return a model with scene data attached."""
+    """Return a model with scene data attached and metric_field precomputed."""
     model = _make_model(use_wind=use_wind)
     scene = _make_scene()
-    return model.bind_scene(**scene)
+    bound = model.bind_scene(**scene)
+    return bound.precompute_metric_field()
 
 
 # ---------------------------------------------------------------------------
@@ -89,10 +97,10 @@ class TestProjectSPD:
             assert np.all(eigs <= eps_max + 1e-9), f"max eigenvalue {eigs.max()} > {eps_max}"
 
     def test_already_spd_unchanged(self):
-        """Identity-like matrix should be unchanged up to eps clamping."""
+        """Identity-like matrix should be unchanged up to the discriminant epsilon (~1e-8)."""
         mat = jnp.array([[2.0, 0.0], [0.0, 3.0]], dtype=jnp.float64)
         out = project_spd(mat, 0.1, 10.0)
-        np.testing.assert_allclose(np.array(out), np.array(mat), atol=1e-10)
+        np.testing.assert_allclose(np.array(out), np.array(mat), atol=1e-7)
 
     def test_vmap_compatible(self):
         """project_spd must run under vmap without errors."""
@@ -291,23 +299,174 @@ def test_gradients_near_zero_v(bound_model):
 def test_fuel_embedding_gradient():
     """Gradient of metric_fn w.r.t. fuel_embedding must be finite (no NaN/Inf).
 
-    Note: the gradient magnitude may be zero when terrain features (e.g., large
-    elevation) saturate tanh activations — this is numerically correct, not a
-    bug. The test only asserts that the gradient operation does not crash or
-    produce NaN/Inf values, i.e., the gather/scatter through integer indexing
-    is correctly wired into the JAX autodiff graph.
+    The fuel embedding flows through precompute_metric_field → metric_field →
+    bilinear interpolation → metric_fn.  We include the recomputation in the
+    loss so that gradients actually reach fuel_embedding.
     """
     import equinox as eqx
 
+    # Start from a bound model with metric_field precomputed
     model = _bound_model(use_wind=True)
     x = jnp.array([150.0, 150.0], dtype=jnp.float64)
     v = jnp.array([1.0, 0.5], dtype=jnp.float64)
 
     def loss(emb):
+        # Update embedding then recompute the metric field so gradients flow
         m2 = eqx.tree_at(lambda m: m.fuel_embedding, model, emb)
+        m2 = m2.precompute_metric_field()
         return m2.metric_fn(x, v)
 
     grad_emb = jax.grad(loss)(model.fuel_embedding)
     assert not jnp.any(jnp.isnan(grad_emb)), "NaN in fuel_embedding gradient"
     assert not jnp.any(jnp.isinf(grad_emb)), "Inf in fuel_embedding gradient"
     assert grad_emb.shape == model.fuel_embedding.shape
+
+
+# ---------------------------------------------------------------------------
+# LocalTerrainCNN and precompute_metric_field
+# ---------------------------------------------------------------------------
+
+class TestLocalTerrainCNN:
+    """Basic shape, dtype, and differentiability tests for LocalTerrainCNN."""
+
+    def _make_cnn(self):
+        return LocalTerrainCNN(fuel_emb_dim=4, n_channels=8, key=jax.random.PRNGKey(0))
+
+    def test_output_shape(self):
+        cnn = self._make_cnn()
+        raster = jnp.ones((5, 10, 10), dtype=jnp.float64)
+        fuel = jnp.ones((4, 10, 10), dtype=jnp.float64)
+        weather = jnp.zeros(4, dtype=jnp.float64)
+        out = cnn(raster, fuel, weather)
+        assert out.shape == (10, 10, 5), f"Expected (10,10,5), got {out.shape}"
+
+    def test_output_dtype(self):
+        cnn = self._make_cnn()
+        raster = jnp.ones((5, 10, 10), dtype=jnp.float64)
+        fuel = jnp.ones((4, 10, 10), dtype=jnp.float64)
+        weather = jnp.zeros(4, dtype=jnp.float64)
+        out = cnn(raster, fuel, weather)
+        assert out.dtype == jnp.float64, f"Expected float64, got {out.dtype}"
+
+    def test_output_finite(self):
+        cnn = self._make_cnn()
+        raster = jnp.ones((5, 10, 10), dtype=jnp.float64)
+        fuel = jnp.zeros((4, 10, 10), dtype=jnp.float64)
+        weather = jnp.zeros(4, dtype=jnp.float64)
+        out = cnn(raster, fuel, weather)
+        assert jnp.all(jnp.isfinite(out)), "CNN output contains non-finite values"
+
+    def test_grad_through_weights(self):
+        cnn = self._make_cnn()
+        raster = jnp.ones((5, 10, 10), dtype=jnp.float64)
+        fuel = jnp.ones((4, 10, 10), dtype=jnp.float64)
+        weather = jnp.array([20.0, 0.4, 0.5, 0.866], dtype=jnp.float64)
+
+        import equinox as eqx
+        def loss_fn(c):
+            return jnp.sum(c(raster, fuel, weather))
+
+        grads = eqx.filter_grad(loss_fn)(cnn)
+        # At least conv1 weight should have a nonzero gradient
+        assert not jnp.any(jnp.isnan(grads.conv1.weight)), "NaN grad in conv1"
+        assert not jnp.all(grads.conv1.weight == 0), "All-zero grad in conv1 (unexpected)"
+
+
+class TestPrecomputeMetricField:
+    """Tests for precompute_metric_field()."""
+
+    def test_field_shape(self):
+        model = _make_model()
+        scene = _make_scene()
+        bound = model.bind_scene(**scene)
+        precomputed = bound.precompute_metric_field()
+        assert precomputed.metric_field is not None
+        assert precomputed.metric_field.shape == (_H, _W, 5), (
+            f"Expected ({_H},{_W},5), got {precomputed.metric_field.shape}"
+        )
+
+    def test_field_dtype(self):
+        model = _make_model()
+        scene = _make_scene()
+        bound = model.bind_scene(**scene).precompute_metric_field()
+        assert bound.metric_field.dtype == jnp.float64
+
+    def test_field_finite(self):
+        model = _make_model()
+        scene = _make_scene()
+        bound = model.bind_scene(**scene).precompute_metric_field()
+        assert jnp.all(jnp.isfinite(bound.metric_field)), "metric_field has non-finite values"
+
+    def test_grad_flows_to_cnn_weights(self):
+        """Gradient of metric_fn w.r.t. CNN weights must be nonzero."""
+        import equinox as eqx
+
+        x = jnp.array([150.0, 150.0], dtype=jnp.float64)
+        v = jnp.array([1.0, 0.5], dtype=jnp.float64)
+        scene = _make_scene()
+
+        def loss_fn(m):
+            bound = m.bind_scene(**scene).precompute_metric_field()
+            return bound.metric_fn(x, v)
+
+        model = _make_model()
+        grads = eqx.filter_grad(loss_fn)(model)
+
+        # CNN weights should receive gradients
+        assert not jnp.any(jnp.isnan(grads.local_cnn.conv1.weight)), "NaN grad in local_cnn.conv1"
+        # At random init the gradient should be nonzero
+        assert not jnp.all(grads.local_cnn.conv1.weight == 0), "Zero grad in local_cnn.conv1"
+
+    def test_bind_scene_resets_field(self):
+        """bind_scene must set metric_field to None (stale field invalidated)."""
+        model = _make_model()
+        scene = _make_scene()
+        bound = model.bind_scene(**scene).precompute_metric_field()
+        assert bound.metric_field is not None
+
+        # Re-binding should invalidate the field
+        rebound = bound.bind_scene(**scene)
+        assert rebound.metric_field is None
+
+
+class TestRasterStopGradient:
+    """Regression test: rasters must not receive gradient updates via the CNN.
+
+    When the model is terrain-bound and eqx.filter_value_and_grad is called,
+    gradients for float64 raster leaves would be computed and applied by
+    eqx.apply_updates unless stop_gradient guards are in place inside
+    precompute_metric_field.  This test verifies those guards are active.
+    """
+
+    def test_raster_grad_is_zero(self):
+        """d(loss)/d(elev_raster) must be zero after precompute_metric_field."""
+        import equinox as eqx
+
+        model = _make_model()
+        scene = _make_scene()
+
+        def loss_fn(m):
+            bound = m.bind_scene(**scene).precompute_metric_field()
+            x = jnp.array([150.0, 150.0], dtype=jnp.float64)
+            v = jnp.array([1.0, 0.5], dtype=jnp.float64)
+            return bound.metric_fn(x, v)
+
+        # Differentiating w.r.t. the unbound model: rasters are NOT leaves here.
+        # Bind them explicitly to mimic the terrain-bound training scenario.
+        terrain_bound = model.bind_scene(**scene)
+
+        def loss_terrain(m):
+            m2 = m.precompute_metric_field()
+            x = jnp.array([150.0, 150.0], dtype=jnp.float64)
+            v = jnp.array([1.0, 0.5], dtype=jnp.float64)
+            return m2.metric_fn(x, v)
+
+        grads = eqx.filter_grad(loss_terrain)(terrain_bound)
+
+        # All raster gradients must be exactly zero (stop_gradient enforced)
+        for attr in ("elev_raster", "slope_raster", "aspect_raster", "canopy_raster"):
+            g = getattr(grads, attr)
+            if g is not None:
+                assert jnp.all(g == 0), (
+                    f"{attr} received non-zero gradient: max|g|={float(jnp.max(jnp.abs(g)))}"
+                )

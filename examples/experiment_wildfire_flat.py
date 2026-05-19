@@ -112,14 +112,15 @@ def get_config(quick: bool = False) -> dict:
         quick=quick,
         hidden_dim=128,
         fuel_emb_dim=4,
-        n_epochs=10 if quick else 100,
+        cnn_channels=64 if quick else 64,
+        n_epochs=50 if quick else 100,
         lr=1e-3,
         lr_schedule="cosine",
         early_stopping_patience=20,
         batch_size_fires=16,
-        k_train_obs=50 if quick else 500,
+        k_train_obs=100 if quick else 500,
         k_eval_all=True,
-        avbd_n_steps=25 if quick else 50,
+        avbd_n_steps=50,
         avbd_iters=50,
         lambda_tv_G=0.005,
         lambda_tv_b=0.005,
@@ -156,6 +157,7 @@ def make_metric(
         key,
         hidden_dim=cfg["hidden_dim"],
         fuel_emb_dim=cfg["fuel_emb_dim"],
+        cnn_channels=cfg["cnn_channels"],
         use_wind=use_wind,
     )
 
@@ -245,6 +247,7 @@ def make_batched_train_step(
         """JIT-compiled forward + backward for ONE fire."""
         def fire_loss(m):
             bound = m.bind_weather(weather)
+            bound = bound.precompute_metric_field()  # run CNN on rasters; inside grad tape
             return loss_fn(bound, source, obs_world, obs_times)
         return eqx.filter_value_and_grad(fire_loss)(metric)
 
@@ -468,6 +471,7 @@ def train_one_fire(
 
     def _loss(m: CovariateConditionedRanders) -> jax.Array:
         bound = bind_scenario_to_metric(m, scenario)
+        bound = bound.precompute_metric_field()
         return arrival_loss(bound, source, obs_world, t_obs)
 
     loss_val, grads = eqx.filter_value_and_grad(_loss)(metric)
@@ -503,7 +507,7 @@ def evaluate_fire(
     if eval_pixels is None:
         rows, cols = np.where(scenario.burned_mask)
         eval_pixels = np.stack([rows, cols], axis=1)
-        if cfg.get("quick", False) and len(eval_pixels) > 100:
+        if cfg.get("quick", True) and len(eval_pixels) > 100:
             rng = np.random.default_rng(42)
             idx = rng.choice(len(eval_pixels), size=100, replace=False)
             eval_pixels = eval_pixels[idx]
@@ -512,6 +516,7 @@ def evaluate_fire(
         return dict(pearson_r=0.0, iou_50=0.0, n_eval_pixels=0)
 
     bound_metric = bind_scenario_to_metric(metric, scenario)
+    bound_metric = bound_metric.precompute_metric_field()
     source = _ignition_to_world(scenario.ignition_pixel, scenario.pixel_spacing_m)
 
     pred_arrivals = _predict_arrivals_chunked(
@@ -567,6 +572,7 @@ def _val_pearson_r(
         return 0.0
 
     bound_metric = bind_scenario_to_metric(metric, scenario)
+    bound_metric = bound_metric.precompute_metric_field()
     source = _ignition_to_world(scenario.ignition_pixel, scenario.pixel_spacing_m)
 
     pred = _predict_arrivals_chunked(
@@ -672,9 +678,9 @@ def train_scene(
         seed=cfg["seed"],
     )
     if cfg.get("quick", False):
-        train_list = train_list[:32]
-        val_list = val_list[:16]
-        test_list = test_list[:16]
+        train_list = train_list[:96]
+        val_list = val_list[:32]
+        test_list = test_list[:32]
     print(
         f"  Events: {len(scenarios_keys)} total | "
         f"{len(train_list)} train / {len(val_list)} val / {len(test_list)} test"
@@ -1123,6 +1129,7 @@ def run_synthetic(cfg: dict, output_dir: str, use_wind: bool = True) -> dict:
     for epoch in range(n_epochs):
         def _loss(m):
             bound = bind_scenario_to_metric(m, scenario)
+            bound = bound.precompute_metric_field()
             return arrival_loss_obj(bound, source, obs_world, t_obs)
 
         loss_val, grads = eqx.filter_value_and_grad(_loss)(metric)
