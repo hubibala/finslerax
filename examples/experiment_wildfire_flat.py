@@ -79,16 +79,10 @@ from ham.solvers.avbd import AVBDSolver
 from ham.training.losses import ArrivalTimeLoss
 
 # ---------------------------------------------------------------------------
-# Optional Gahtan loader
+# Sim2Real-Fire loader (bundled in ham.data.sim2real_loader)
 # ---------------------------------------------------------------------------
 try:
-    import sys as _sys
-    _GAHTAN_PATH = os.path.expanduser(
-        "~/Documents/Personal/randers-finsler-eikonal/differentiable-eikonal-wildfire"
-    )
-    if os.path.exists(_GAHTAN_PATH):
-        _sys.path.insert(0, _GAHTAN_PATH)
-    from experiments.wildfire.sim2real_loader import Sim2RealFireLoader  # type: ignore
+    from ham.data.sim2real_loader import Sim2RealFireLoader
     HAS_GAHTAN_LOADER = True
 except ImportError:
     HAS_GAHTAN_LOADER = False

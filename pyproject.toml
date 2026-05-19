@@ -37,6 +37,10 @@ dev = [
     "matplotlib",
     "jupyter",
 ]
+wildfire = [
+    "Pillow>=9.0",
+    "rasterio>=1.3",
+]
 
 [project.urls]
 Homepage = "https://github.com/hubibala/ham"

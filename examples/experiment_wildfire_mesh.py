@@ -81,13 +81,7 @@ from ham.training.losses import ArrivalTimeLoss
 # Optional Gahtan loader
 # ---------------------------------------------------------------------------
 try:
-    _GAHTAN_PATH = os.path.join(
-        os.path.dirname(__file__),
-        "../../../Gahtan-Eikonal-Wildfire/differentiable-eikonal-wildfire",
-    )
-    if os.path.exists(_GAHTAN_PATH):
-        sys.path.insert(0, _GAHTAN_PATH)
-    from experiments.wildfire.sim2real_loader import Sim2RealFireLoader  # type: ignore
+    from ham.data.sim2real_loader import Sim2RealFireLoader
     HAS_GAHTAN_LOADER = True
 except ImportError:
     HAS_GAHTAN_LOADER = False
