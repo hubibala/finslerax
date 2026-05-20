@@ -104,14 +104,14 @@ def get_config(quick: bool = False) -> dict:
         quick=quick,
         hidden_dim=64,
         fuel_emb_dim=4,
-        n_epochs=10 if quick else 100,
+        n_epochs=20 if quick else 100,
         lr=1e-3,
         lr_schedule="cosine",
         early_stopping_patience=20,
-        batch_size_fires=8,
-        k_train_obs=50 if quick else 500,
-        avbd_n_steps=20 if quick else 40,
-        avbd_iters=40 if quick else 50,
+        batch_size_fires=6 if quick else 8,
+        k_train_obs=80 if quick else 500,
+        avbd_n_steps=15 if quick else 30,
+        avbd_iters=30 if quick else 50,
         train_ratio=0.70,
         val_ratio=0.15,
         seed=42,
@@ -442,9 +442,10 @@ def make_solver(cfg: dict) -> AVBDSolver:
     """
     return AVBDSolver(
         step_size=0.05,         # Mathematically stable step size to prevent path divergence
-        grad_clip=100.0,        # Large trust-region (max move 5m/step) for bending mobility
+        grad_clip=10.0,
         iterations=cfg["avbd_iters"],
         energy_tol=1e-6,
+        implicit_diff=True,     # IFT adjoint: O(n_steps*D^2) backward vs O(iters*n_steps) unrolling
     )
 
 
@@ -525,18 +526,31 @@ def train_scene_mesh(
 
     loader = Sim2RealFireLoader(data_root)
 
+    event_ids = None
     try:
-        event_ids = loader.list_events(scene_id)
-    except AttributeError:
+        event_ids = loader.scenes[scene_id]["events"]
+    except (AttributeError, KeyError):
+        pass
+
+    if not isinstance(event_ids, list):
         try:
-            event_ids = loader.get_event_ids(scene_id)
+            event_ids = loader.list_events(scene_id)
         except AttributeError:
-            scene_dir = os.path.join(data_root, scene_id)
-            event_ids = (
-                [d for d in sorted(os.listdir(scene_dir))
-                 if os.path.isdir(os.path.join(scene_dir, d))]
-                if os.path.isdir(scene_dir) else []
-            )
+            try:
+                event_ids = loader.get_event_ids(scene_id)
+            except AttributeError:
+                # Final fallback: scan Satellite_Images_Mask for event folders
+                # that have a matching weather file — mirrors W1 logic exactly.
+                mask_dir   = os.path.join(data_root, scene_id, "Satellite_Images_Mask")
+                weather_dir = os.path.join(data_root, scene_id, "Weather_Data")
+                if os.path.isdir(mask_dir):
+                    event_ids = [
+                        d for d in sorted(os.listdir(mask_dir))
+                        if os.path.isdir(os.path.join(mask_dir, d))
+                        and os.path.exists(os.path.join(weather_dir, f"{d}.txt"))
+                    ]
+                else:
+                    event_ids = []
 
     if not event_ids:
         print(f"  WARNING: No events for scene {scene_id}, skipping.")
@@ -550,9 +564,9 @@ def train_scene_mesh(
         seed=cfg["seed"],
     )
     if cfg.get("quick", False):
-        train_list = train_list[:16]
-        val_list = val_list[:8]
-        test_list = test_list[:8]
+        train_list = train_list[:32]
+        val_list = val_list[:12]
+        test_list = test_list[:12]
     print(
         f"  Events: {len(scenarios_keys)} total | "
         f"{len(train_list)} train / {len(val_list)} val / {len(test_list)} test"
@@ -593,10 +607,19 @@ def train_scene_mesh(
 
     n_batches_per_epoch = max(1, len(train_scens) // cfg["batch_size_fires"])
     total_steps = cfg["n_epochs"] * n_batches_per_epoch
-    lr_schedule = optax.cosine_decay_schedule(
-        init_value=cfg["lr"], decay_steps=total_steps
+    warmup_steps = min(5 * n_batches_per_epoch, max(1, total_steps // 10))
+    lr_schedule = optax.join_schedules([
+        optax.linear_schedule(
+            init_value=1e-5, end_value=cfg["lr"], transition_steps=warmup_steps
+        ),
+        optax.cosine_decay_schedule(
+            init_value=cfg["lr"], decay_steps=max(1, total_steps - warmup_steps)
+        ),
+    ], boundaries=[warmup_steps])
+    optimizer = optax.chain(
+        optax.clip_by_global_norm(1.0),
+        optax.adam(lr_schedule),
     )
-    optimizer = optax.adam(lr_schedule)
     opt_state = optimizer.init(eqx.filter(metric, eqx.is_inexact_array))
 
     arrival_loss_obj = ArrivalTimeLoss(
@@ -658,8 +681,9 @@ def train_scene_mesh(
                 lambda g: g / n_batch, accumulated_grads
             )
             updates, opt_state = optimizer.update(
-                accumulated_grads, opt_state,
-                eqx.filter(metric, eqx.is_inexact_array)
+                eqx.filter(accumulated_grads, eqx.is_inexact_array),
+                opt_state,
+                eqx.filter(metric, eqx.is_inexact_array),
             )
             metric = eqx.apply_updates(metric, updates)
             epoch_losses.extend(batch_losses)
@@ -1203,8 +1227,8 @@ def main() -> None:
     parser.add_argument(
         "--quick", action="store_true",
         help=(
-            "Reduced config (10 epochs, 10 AVBD steps, half mesh resolution) "
-            "to verify the pipeline quickly."
+            "Reduced config (20 epochs, 15 AVBD steps, half mesh resolution, "
+            "32/12/12 train/val/test fires) to verify the pipeline in ~15 min on CPU."
         ),
     )
     parser.add_argument(
