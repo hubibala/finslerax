@@ -541,11 +541,14 @@ class FinslerianFlowMatchingLoss(LossComponent):
 # =====================================================================
 
 class ArrivalTimeLoss(eqx.Module):
-    """MSE between predicted geodesic arc length and observed arrival time.
+    """Scale-invariant arrival-time loss for metric recovery (Pearson-r).
 
     Solves a boundary-value geodesic from source to each observation point
     using the AVBD solver, computes the discrete arc length along the path,
-    and penalizes the squared difference to the observed arrival time.
+    and minimises 1 - Pearson_r(T_pred, T_obs).  The Pearson-r formulation
+    is naturally scale and shift invariant: no normalisation of T_pred is
+    needed, so gradients flow correctly through all predicted arc lengths
+    without any stop_gradient approximation.
 
     This loss operates directly on spatial coordinates (no VAE encoder).
     It is designed for metric recovery experiments where the metric acts
@@ -554,8 +557,8 @@ class ArrivalTimeLoss(eqx.Module):
     (model, batch, key).
 
     Mathematical formulation (uses 1-homogeneity of F):
-        T_pred = sum_{k=0}^{N-1} F(x_k, x_{k+1} - x_k)
-        L = (1/K) sum_{i=1}^{K} (T_pred_i - T_obs_i)^2
+        T_pred_i = sum_{k=0}^{N-1} F(x_k, x_{k+1} - x_k)   (arc length to obs i)
+        L = 1 - Pearson_r(T_pred, T_obs)   (single obs: scale-normalised L1)
 
     Args:
         solver: AVBDSolver instance for computing geodesics.
@@ -602,25 +605,26 @@ class ArrivalTimeLoss(eqx.Module):
             return jnp.sum(step_costs)
 
         t_pred = jax.vmap(single_arrival_time)(x_obs)
-        
-        # Align scale: t_pred is geodesic length in meters (hundreds/thousands),
-        # while t_obs is normalized to [0, 1]. Aligning the means maps them to the
-        # same relative scale so the MSE measures only shape/arrival wave alignment.
-        # We only apply this when there are multiple observations to avoid trivializing
-        # single-observation test cases.
+
         if t_obs.shape[0] > 1:
-            # Normalise t_pred to [0, 1] by dividing by its own maximum.
-            # stop_gradient on the normalisation constant ensures gradients flow
-            # only through the *relative* values t_pred_i / t_pred_max, training
-            # the metric to predict correct arrival ordering without needing to
-            # match absolute geodesic-length scale to the [0,1] t_obs scale.
-            # IoU is evaluated separately with pred normalised by max(pred).
-            t_pred_max = jax.lax.stop_gradient(
-                jnp.maximum(jnp.max(t_pred), 1e-6)
-            )
-            t_pred_aligned = t_pred / t_pred_max
+            # Pearson-r loss: 1 - r(t_pred, t_obs).
+            # Fully differentiable; scale and shift invariant, so the metric
+            # learns the correct arrival-time *ordering* without needing to
+            # match the absolute geodesic-length scale to t_obs.  No
+            # stop_gradient is required, and gradients flow correctly through
+            # all K predicted arc lengths simultaneously.
+            mu_p = jnp.mean(t_pred)
+            mu_o = jnp.mean(t_obs)
+            dp = t_pred - mu_p
+            do = t_obs - mu_o
+            num = jnp.sum(dp * do)
+            denom = jnp.sqrt(jnp.sum(dp ** 2) * jnp.sum(do ** 2) + 1e-8)
+            loss = 1.0 - num / denom
         else:
-            t_pred_aligned = t_pred
-        
-        mse = jnp.mean((t_pred_aligned - t_obs) ** 2)
-        return mse * self.weight
+            # Single observation: Pearson-r is undefined; use a relative MSE
+            # normalised by t_obs so gradients are non-zero whenever
+            # t_pred ≠ t_obs (t_obs treated as the reference scale).
+            t_obs_ref = jnp.maximum(jnp.abs(t_obs[0]), 1e-6)
+            loss = jnp.mean((t_pred / t_obs_ref - 1.0) ** 2)
+
+        return loss * self.weight

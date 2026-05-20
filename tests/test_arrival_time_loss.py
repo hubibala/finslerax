@@ -55,7 +55,9 @@ class TestArrivalTimeLoss:
 
         source = jnp.array([0.0, 0.0])
         x_obs = jnp.array([[0.5, 0.0], [0.0, 0.5]])
-        t_obs = jnp.array([0.5, 0.5])
+        # Distinct arrival times required: Pearson-r is undefined (zero gradient)
+        # when t_obs is constant — use values that differ to give a learning signal.
+        t_obs = jnp.array([0.3, 0.7])
 
         @eqx.filter_jit
         def compute_loss(m):

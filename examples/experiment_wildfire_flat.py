@@ -114,7 +114,7 @@ def get_config(quick: bool = False) -> dict:
         batch_size_fires=16,
         k_train_obs=100 if quick else 500,
         k_eval_all=True,
-        avbd_n_steps=50,
+        avbd_n_steps=20,
         avbd_iters=50,
         lambda_tv_G=0.005,
         lambda_tv_b=0.005,
@@ -721,9 +721,15 @@ def train_scene(
 
     n_batches_per_epoch = max(1, len(train_scenarios) // cfg["batch_size_fires"])
     total_steps = cfg["n_epochs"] * n_batches_per_epoch
-    lr_schedule = optax.cosine_decay_schedule(
-        init_value=cfg["lr"], decay_steps=total_steps
-    )
+    warmup_steps = min(10 * n_batches_per_epoch, max(1, total_steps // 10))
+    lr_schedule = optax.join_schedules([
+        optax.linear_schedule(
+            init_value=1e-5, end_value=cfg["lr"], transition_steps=warmup_steps
+        ),
+        optax.cosine_decay_schedule(
+            init_value=cfg["lr"], decay_steps=max(1, total_steps - warmup_steps)
+        ),
+    ], boundaries=[warmup_steps])
     optimizer = optax.chain(
         optax.clip_by_global_norm(1.0),  # guard against IFT gradient spikes
         optax.adam(lr_schedule),
@@ -1098,9 +1104,15 @@ def run_synthetic(cfg: dict, output_dir: str, use_wind: bool = True) -> dict:
 
     n_epochs = cfg["n_epochs"]
     total_steps = max(n_epochs, 1)
-    lr_schedule = optax.cosine_decay_schedule(
-        init_value=cfg["lr"], decay_steps=total_steps
-    )
+    warmup_steps = min(10, max(1, total_steps // 10))
+    lr_schedule = optax.join_schedules([
+        optax.linear_schedule(
+            init_value=1e-5, end_value=cfg["lr"], transition_steps=warmup_steps
+        ),
+        optax.cosine_decay_schedule(
+            init_value=cfg["lr"], decay_steps=max(1, total_steps - warmup_steps)
+        ),
+    ], boundaries=[warmup_steps])
     optimizer = optax.chain(
         optax.clip_by_global_norm(1.0),  # guard against IFT gradient spikes
         optax.adam(lr_schedule),
