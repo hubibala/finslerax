@@ -1222,8 +1222,14 @@ def main() -> None:
             "no real dataset required.  Combine with --quick for fast CI."
         ),
     )
+    parser.add_argument(
+        "--device", default="cpu", choices=["cpu", "gpu", "tpu"],
+        help="JAX device to use (default: cpu).",
+    )
 
     args = parser.parse_args()
+    from ham.utils import configure_device
+    configure_device(args.device)
     cfg = get_config(quick=args.quick)
     use_wind = not args.no_wind
 

@@ -1,4 +1,5 @@
 import os
+import argparse
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -10,6 +11,13 @@ import equinox as eqx
 import anndata
 
 def main():
+    parser = argparse.ArgumentParser(description="H1: Geometric Topology Experiment")
+    parser.add_argument('--device', default='cpu', choices=['cpu', 'gpu', 'tpu'],
+                        help='JAX device to use (default: cpu).')
+    args = parser.parse_args()
+    from ham.utils import configure_device
+    configure_device(args.device)
+
     CHECKPOINT   = "data/weinreb_vae_phase1.eqx"
     PREPROCESSED = "data/weinreb_preprocessed.h5ad"
     LATENT_DIM   = 8

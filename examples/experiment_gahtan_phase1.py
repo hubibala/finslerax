@@ -1028,7 +1028,12 @@ def main():
     )
     parser.add_argument('--quick', action='store_true',
                         help='Run with reduced grid/iterations for smoke testing')
+    parser.add_argument('--device', default='cpu', choices=['cpu', 'gpu', 'tpu'],
+                        help='JAX device to use (default: cpu).')
     args = parser.parse_args()
+
+    from ham.utils import configure_device
+    configure_device(args.device)
 
     cfg = get_config(quick=args.quick)
     run_experiment(cfg)

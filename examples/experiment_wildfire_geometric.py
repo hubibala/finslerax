@@ -505,7 +505,12 @@ def main():
                         help="Training epochs for synthetic mode (default 5)")
     parser.add_argument("--no_curvature", action="store_true",
                         help="Skip curvature computation (slow)")
+    parser.add_argument("--device", default="cpu", choices=["cpu", "gpu", "tpu"],
+                        help="JAX device to use (default: cpu).")
     args = parser.parse_args()
+
+    from ham.utils import configure_device
+    configure_device(args.device)
 
     fig_dir = os.path.join(args.output_dir, "figs")
     os.makedirs(fig_dir, exist_ok=True)

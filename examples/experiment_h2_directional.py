@@ -9,6 +9,7 @@ For each clonal triple (day2 → day4 → day6):
 """
 
 import os
+import argparse
 import numpy as np
 from scipy import stats
 import jax
@@ -75,18 +76,14 @@ def arc_length_forward_backward(metric, z_start, z_end, solver, steps=25):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="H2: Directional Asymmetry Experiment")
+    parser.add_argument('--device', default='cpu', choices=['cpu', 'gpu', 'tpu'],
+                        help='JAX device to use (default: cpu).')
+    args = parser.parse_args()
+    from ham.utils import configure_device
+    configure_device(args.device)
+
     CHECKPOINT   = "data/weinreb_vae_phase1.eqx"
-    PREPROCESSED = "data/weinreb_preprocessed.h5ad"
-    TEST_TRIPLES = "data/weinreb_test_triples.npy"
-    LATENT_DIM   = 8
-    MAX_PAIRS    = 800
-
-    SIGMAS = [0.2, 0.4, 0.6]
-    SEEDS  = [42, 101, 256, 1024, 2048]
-
-    print("=" * 80)
-    print("H2 - DIRECTIONAL ASYMMETRY (Short Observed Segments)")
-    print("Forward vs Backward length on the SAME geodesic for day2→day4 and day4→day6")
     print("=" * 80)
 
     if not all(os.path.exists(p) for p in [CHECKPOINT, PREPROCESSED, TEST_TRIPLES]):

@@ -80,7 +80,7 @@ class HAMPipeline:
         self.model = model
 
     def fit(self, dataset, phases: List[TrainingPhase], batch_size: int = 256,
-            seed: int = 2025, lineage_triples: Any = None):
+            seed: int = 2025, lineage_triples: Any = None, device: str = "cpu"):
         """Execute the training pipeline.
 
         Runs each TrainingPhase in sequence with mini-batch gradient descent.
@@ -97,6 +97,11 @@ class HAMPipeline:
                 (i, j, k) into dataset.X for lineage-aware losses. When provided
                 and a phase has requires_pairs=True, triples take precedence over
                 dataset.lineage_pairs.
+            device: Target device for training data. ``"cpu"`` (default) or
+                ``"gpu"``. Whole-dataset arrays are moved to the chosen device
+                once before the phase loop begins. Use
+                ``ham.utils.configure_device()`` at script startup for a
+                global alternative.
 
         Returns:
             The trained eqx.Module. Same object as self.model (mutated in-place).
@@ -112,7 +117,10 @@ class HAMPipeline:
             >>> trained = pipeline.fit(dataset, [phase1, phase2], batch_size=128)
         """
         key = jax.random.PRNGKey(seed)
-        
+
+        from ham.utils.device import get_device
+        target_device = get_device(device)
+
         for phase in phases:
             print(f"=== Phase: {phase.name} ({phase.epochs} epochs) ===")
             
@@ -157,9 +165,19 @@ class HAMPipeline:
                 print("Skipping phase: requires lineage pairs/triples but none found.")
                 continue
 
-            data_x, data_v = dataset.X, dataset.V
-            data_labels = dataset.labels if dataset.labels is not None \
-                        else jnp.zeros(dataset.X.shape[0])  # fallback if no labels
+            data_x = jax.device_put(dataset.X, target_device)
+            data_v = jax.device_put(dataset.V, target_device)
+            data_labels = jax.device_put(
+                dataset.labels if dataset.labels is not None
+                else jnp.zeros(dataset.X.shape[0]),
+                target_device,
+            )
+            if lineage_triples is not None:
+                lineage_triples = jax.device_put(lineage_triples, target_device)
+            if hasattr(dataset, "lineage_pairs") and dataset.lineage_pairs is not None:
+                dataset_lineage_pairs = jax.device_put(dataset.lineage_pairs, target_device)
+            else:
+                dataset_lineage_pairs = None
             num_samples = data_x.shape[0]
                 
             for epoch in range(phase.epochs):
@@ -171,7 +189,7 @@ class HAMPipeline:
                     if lineage_triples is not None:
                         num_items = lineage_triples.shape[0]
                     else:
-                        num_items = dataset.lineage_pairs.shape[0]
+                        num_items = dataset_lineage_pairs.shape[0]
                     perm = jax.random.permutation(subkey, num_items)
                 else:
                     num_items = num_samples
@@ -191,7 +209,7 @@ class HAMPipeline:
                             i6 = triple_idx[:, 2]
                             batch_data = (data_x[i2], data_v[i2], data_labels[i2], data_x[i4], data_x[i6])
                         else:
-                            pair_indices = dataset.lineage_pairs[idx]
+                            pair_indices = dataset_lineage_pairs[idx]
                             batch_data = (data_x[pair_indices[:, 0]], data_x[pair_indices[:, 1]])
                             # If the dataset has long trajectories, pass them as the third element
                             if hasattr(dataset, "Traj_long"):
