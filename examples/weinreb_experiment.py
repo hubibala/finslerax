@@ -43,7 +43,7 @@ import anndata
 
 from ham.bio.data import BioDataset
 from ham.bio.vae import GeometricVAE
-from ham.geometry.surfaces import EuclideanSpace
+from ham.geometry import EuclideanSpace
 from ham.models.learned import PullbackRanders, PullbackRiemannian
 from ham.training.losses import LossComponent
 from ham.solvers.avbd import AVBDSolver
@@ -425,7 +425,7 @@ def run_validation(
 
 
 def build_riemannian_baseline(vae: GeometricVAE, key: jax.Array) -> GeometricVAE:
-    metric = PullbackRiemannian(vae.manifold, decoder=vae.decoder_net, key=key)
+    metric = PullbackRiemannian(vae.manifold, decoder=vae.decoder_net)
     return eqx.tree_at(lambda m: m.metric, vae, metric)
 
 

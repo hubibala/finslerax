@@ -47,6 +47,19 @@ class Manifold(ABC):
     def random_sample(self, key: jax.random.PRNGKey, shape: tuple) -> jnp.ndarray:
         """Returns random points on the manifold."""
         pass
+        
+    def retract(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+        """Retracts a tangent vector to a point on the manifold (first-order approx to exp)."""
+        return self.project(x + v)
+
+    def exp_map(self, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+        """Computes the exact exponential map. Defaults to retract if un-overridden."""
+        return self.retract(x, v)
+
+    def log_map(self, x: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
+        """Computes the inverse of the exponential map (tangent secant)."""
+        # Implementation via tangent projection and norm scaling
+        pass
 ```
 
 ### 2.2. The Finsler Metric (Geometry)
@@ -76,7 +89,7 @@ class FinslerMetric(ABC):
         """
         Computes the Geodesic Spray G^i(x, v).
         Solves the linear system induced by Euler-Lagrange.
-        Returns: Acceleration vector.
+        Returns: Spray coefficients G^i.
         """
         # Implementation via jax.grad and linear solve (see MATH_SPEC)
         pass
@@ -139,15 +152,16 @@ The Augmented Vertex Block Descent solver.
 Implemented as an integrator on top of the metric.
 
 ```python
-def berwald_transport(metric: FinslerMetric, path: jnp.ndarray, v0: jnp.ndarray) -> jnp.ndarray:
-    """
-    Transports vector v0 along 'path' using the Berwald connection.
-    Differentiation: 
-        Gamma = Hessian_v(metric.spray)
-    Integration:
-        dv/dt = -Gamma(x, dx/dt) * v * dx/dt
-    """
-    pass
+class BerwaldConnection(Connection):
+    def parallel_transport(self, path_x: jax.Array, path_v: jax.Array, vec_start: jax.Array) -> jax.Array:
+        """
+        Transports vector vec_start along a trajectory using the Berwald connection.
+        Differentiation: 
+            Gamma = Hessian_v(metric.spray)
+        Integration:
+            dX/dt = -Gamma(x, v) * v * X
+        """
+        pass
 ```
 
 ### 4.4. Initial Value Solver (Exponential Map)

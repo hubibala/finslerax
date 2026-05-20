@@ -7,9 +7,8 @@ from jax import config
 # Enable 64-bit precision for robust gradient checks
 config.update("jax_enable_x64", True)
 
-from ham.geometry.surfaces import Hyperboloid
+from ham.geometry import Hyperboloid, Riemannian
 from ham.bio.vae import GeometricVAE, WrappedNormal
-from ham.geometry.zoo import Riemannian
 from ham.training.losses import ReconstructionLoss, KLDivergenceLoss, ZermeloAlignmentLoss
 
 class MockMetric(Riemannian):

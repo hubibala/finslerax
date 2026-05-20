@@ -6,7 +6,7 @@ from jax import config
 config.update("jax_enable_x64", True)
 
 from ham.geometry import Sphere
-from ham.geometry.zoo import Randers, Euclidean
+from ham.geometry import Randers, Euclidean
 from ham.solvers import AVBDSolver
 from ham.vis import setup_3d_plot, plot_sphere, plot_vector_field, plot_trajectory, generate_icosphere
 

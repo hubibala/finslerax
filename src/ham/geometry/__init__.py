@@ -1,10 +1,10 @@
 from .manifold import Manifold
 from .metric import FinslerMetric
 from .zoo import Euclidean, Riemannian, Randers, DiscreteRanders
-from .transport import berwald_transport, BerwaldConnection
+from .transport import BerwaldConnection
 from .mesh import TriangularMesh  
-from .surfaces import Sphere, Hyperboloid, Torus, Paraboloid, EuclideanSpace
-from .curvature import sectional_curvature, scalar_curvature
+from .manifolds import Sphere, Hyperboloid, Torus, Paraboloid, EuclideanSpace
+from .curvature import sectional_curvature, scalar_curvature, flag_curvature_sample, riemann_curvature_tensor
 
 __all__ = [
     "Manifold",
@@ -13,7 +13,6 @@ __all__ = [
     "EuclideanSpace",
     "Riemannian",
     "Randers",
-    "berwald_transport",
     "BerwaldConnection",
     "TriangularMesh",
     "DiscreteRanders",
@@ -22,5 +21,7 @@ __all__ = [
     "Torus",
     "Paraboloid",
     "sectional_curvature",
-    "scalar_curvature",
+    "flag_curvature_sample",
+    "riemann_curvature_tensor",
+    "scalar_curvature",  # backward-compat alias
 ]

@@ -7,7 +7,7 @@ transport built on JAX and Equinox.
 
 Subpackages
 -----------
-geometry : Manifolds, metrics (Euclidean/Riemannian/Randers), surfaces, transport
+geometry : Manifolds, metrics (Euclidean/Riemannian/Randers), transport
 models   : Neural and pullback metric implementations
 solvers  : Geodesic BVP (AVBD) and IVP (ExponentialMap) solvers
 training : Multi-phase training pipeline and modular losses
@@ -20,9 +20,9 @@ __version__ = "1.1.0"
 # Core geometry
 from ham.geometry.manifold import Manifold
 from ham.geometry.metric import FinslerMetric
-from ham.geometry.zoo import Euclidean, Riemannian, Randers, DiscreteRanders
-from ham.geometry.surfaces import Sphere, Hyperboloid, Torus, Paraboloid, EuclideanSpace
-from ham.geometry.transport import BerwaldConnection, berwald_transport
+from ham.geometry import Euclidean, Riemannian, Randers, DiscreteRanders
+from ham.geometry import Sphere, Hyperboloid, Torus, Paraboloid, EuclideanSpace
+from ham.geometry.transport import BerwaldConnection
 
 # Solvers
 from ham.solvers.avbd import AVBDSolver, Trajectory
@@ -34,7 +34,7 @@ __all__ = [
     "Manifold", "FinslerMetric",
     "Euclidean", "Riemannian", "Randers", "DiscreteRanders",
     "Sphere", "Hyperboloid", "Torus", "Paraboloid", "EuclideanSpace",
-    "BerwaldConnection", "berwald_transport",
+    "BerwaldConnection",
     # Solvers
     "AVBDSolver", "Trajectory", "ExponentialMap",
 ]

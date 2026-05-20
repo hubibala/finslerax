@@ -59,10 +59,10 @@ import optax
 import anndata
 
 from ham.bio.data import BioDataset
-from ham.geometry.surfaces import EuclideanSpace
+from ham.geometry import EuclideanSpace
 from ham.models.learned import PullbackRiemannian
 from ham.training.losses import LossComponent
-from ham.geometry.zoo import Euclidean
+from ham.geometry import Euclidean
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -408,7 +408,7 @@ def attach_pullback_metric(vae, key: jax.Array):
     decoder's Jacobian defines the metric for evaluation and geodesics.
     """
     manifold = vae.manifold
-    metric   = PullbackRiemannian(manifold, decoder=vae.decoder_net, key=key)
+    metric   = PullbackRiemannian(manifold, decoder=vae.decoder_net)
     return eqx.tree_at(lambda m: m.metric, vae, metric)
 
 

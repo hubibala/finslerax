@@ -1,4 +1,5 @@
 import os
+import argparse
 import numpy as np
 from scipy import stats
 from sklearn.preprocessing import StandardScaler
@@ -91,16 +92,14 @@ def build_fate_attractors(vae, dataset, lineage_triples, cell_type_labels, fate_
     return attractors
 
 def main():
-    CHECKPOINT   = "data/weinreb_vae_phase1.eqx"
-    PREPROCESSED = "data/weinreb_preprocessed.h5ad"
-    TEST_TRIPLES = "data/weinreb_test_triples.npy"
-    LATENT_DIM   = 8
+    parser = argparse.ArgumentParser(description="H3: Discriminative Geometry Experiment")
+    parser.add_argument('--device', default='cpu', choices=['cpu', 'gpu', 'tpu'],
+                        help='JAX device to use (default: cpu).')
+    args = parser.parse_args()
+    from ham.utils import configure_device
+    configure_device(args.device)
 
-    print("="*60)
-    print("H3 - DISCRIMINATIVE GEOMETRY EXPERIMENT")
-    print("Hypothesis: Does Randers metric assign lower cost to correct paths than wrong paths?")
-    print("Test: E_cf / E_obs > 1 for trajectory energy, controlled for euclidean distance.")
-    print("="*60)
+    CHECKPOINT   = "data/weinreb_vae_phase1.eqx"
 
     if not os.path.exists(TEST_TRIPLES) or not os.path.exists(CHECKPOINT):
         print("Data/Checkpoint not found. Run preprocessing and Phase 1 training.")

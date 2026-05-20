@@ -8,6 +8,7 @@ Much more stable than SDE for initial testing.
 """
 
 import os
+import argparse
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
@@ -30,6 +31,13 @@ from experiment_h3_discriminative import build_riemannian_fallback
 
 
 def main():
+    parser = argparse.ArgumentParser(description="H4: Forward Simulation Experiment")
+    parser.add_argument('--device', default='cpu', choices=['cpu', 'gpu', 'tpu'],
+                        help='JAX device to use (default: cpu).')
+    args = parser.parse_args()
+    from ham.utils import configure_device
+    configure_device(args.device)
+
     CHECKPOINT   = "data/weinreb_vae_phase1.eqx"
     PREPROCESSED = "data/weinreb_preprocessed.h5ad"
     TEST_TRIPLES = "data/weinreb_test_triples.npy"

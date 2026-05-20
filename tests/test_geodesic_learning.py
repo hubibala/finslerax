@@ -26,7 +26,7 @@ import numpy as np
 import equinox as eqx
 import optax
 
-from ham.geometry.surfaces import EuclideanSpace, Hyperboloid, Sphere
+from ham.geometry import EuclideanSpace, Hyperboloid, Sphere
 from ham.geometry.metric import FinslerMetric
 from ham.models.learned import NeuralRanders
 from ham.training.losses import LossComponent

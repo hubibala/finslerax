@@ -48,13 +48,13 @@ $$
 
 Where $G^i$ are the **Spray Coefficients**. They are given by:
 $$
-G^i(x, v) = \frac{1}{4} g^{il}(x, v) \left( 2 \frac{\partial^2 E}{\partial v^l \partial x^k} v^k - \frac{\partial E}{\partial x^l} \right)
+G^i(x, v) = \frac{1}{2} g^{il}(x, v) \left( \frac{\partial^2 E}{\partial x^k \partial v^l} v^k - \frac{\partial E}{\partial x^l} \right)
 $$
 
 ### 2.2. JAX Implementation (Implicit Solve)
 We avoid inverting $g_{ij}$ explicitly. Instead, we compute $G^i$ by solving the linear system:
 $$
-\text{Hess}_v(E) \cdot (2G) = \nabla_x E - \text{Jac}_x(\nabla_v E) \cdot v
+\text{Hess}_v(E) \cdot (-2G) = \nabla_x E - \text{Jac}_x(\nabla_v E) \cdot v
 $$
 
 ---
@@ -83,6 +83,24 @@ $$
 $$
 
 In JAX, this is simply an ODE integration where the `force` term uses the Hessian of the `spray` function.
+
+### 3.3. Holonomy and Projection-Based Transport
+
+**Remark (Ambient vs. Intrinsic Convention):**
+When the metric is defined in ambient coordinates as $g(x) = I_n$ (the identity), the Berwald connection satisfies $\Gamma^i_{jk} = 0$ everywhere. In this case, the parallel transport reduces to a pure tangent-space projection at each discrete step:
+
+$$X_{k+1} = \Pi_{T_{\gamma_{k+1}}\mathcal{M}} \left( X_k - \Gamma^i_{jk} \dot\gamma^j X^k \Delta t \right) = \Pi_{T_{\gamma_{k+1}}\mathcal{M}}(X_k)$$
+
+This is a valid approximation of the Levi-Civita connection via the Gauss equation ($\nabla^M_X Y = \Pi_{TM}(\bar\nabla_X Y)$), but it produces a holonomy angle that is the complement of the standard solid-angle formula:
+
+| Mechanism | Holonomy angle for latitude $\theta$ on $S^2$ |
+|---|---|
+| Projection-based ($\Gamma = 0$, ambient coords) | $2\pi\cos\theta$ |
+| Intrinsic Levi-Civita ($\Gamma \neq 0$, chart coords) | $2\pi(1 - \cos\theta)$ |
+
+Both are equivalent modulo $2\pi$ (since $\cos(2\pi\cos\theta) = \cos(2\pi(1-\cos\theta))$). The implementation uses the projection-based approach when the metric is position-independent in ambient coordinates.
+
+For metrics defined in intrinsic coordinates where $g(x)$ is position-dependent (e.g., the Poincaré half-plane $ds^2 = (dx^2+dy^2)/y^2$), the Berwald connection is non-trivially non-zero and the ODE integration genuinely drives the transport.
 
 ---
 
@@ -138,3 +156,10 @@ $$
 F_{net}(x, v) = \|v\| \cdot \text{NN}(x, v / \|v\|)
 $$
 This ensures the Berwald coefficients (which depend on homogeneity) remain well-defined.
+
+### 6.3. Secant Scaling for Logarithmic Maps
+The projected secant $\Pi_{T_xM}(y - x)$ can have a shorter ambient length than the chord $y - x$ on highly curved manifolds, which can cause topological shortcuts. To correct this, we rescale the tangent projection by the chord length:
+$$
+\log_x(y) \approx \frac{\|y - x\|}{\|\Pi_{T_xM}(y - x)\|} \cdot \Pi_{T_xM}(y - x)
+$$
+This preserves the direction but scales the magnitude correctly to avoid optimizer exploitation of the manifold's interior.

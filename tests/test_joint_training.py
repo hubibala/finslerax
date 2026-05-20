@@ -10,7 +10,7 @@ config.update("jax_enable_x64", True)
 from ham.bio.data import BioDataset
 from ham.bio.vae import GeometricVAE
 from ham.geometry.zoo import Riemannian
-from ham.geometry.surfaces import Hyperboloid
+from ham.geometry import Hyperboloid
 from ham.training.pipeline import TrainingPhase, HAMPipeline
 from ham.training.losses import (
     ReconstructionLoss,
