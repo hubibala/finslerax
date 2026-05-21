@@ -4,6 +4,7 @@ import jax.numpy as jnp
 from ham.geometry.metric import FinslerMetric
 from ham.utils.math import safe_norm, GRAD_EPS
 
+
 class Euclidean(FinslerMetric):
     """Standard Euclidean metric: F(x, v) = ||v||.
 
@@ -25,3 +26,9 @@ class Euclidean(FinslerMetric):
         v_sq = jnp.sum(v**2, axis=-1)
         is_zero = v_sq < GRAD_EPS
         return jnp.where(is_zero, 0.0, safe_norm(v))
+
+    def inner_product(
+        self, x: jax.Array, v: jax.Array, w1: jax.Array, w2: jax.Array
+    ) -> jax.Array:
+        """Euclidean inner product: g_ij = delta_ij, independent of (x, v)."""
+        return jnp.dot(w1, w2)
