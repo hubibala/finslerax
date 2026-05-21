@@ -92,11 +92,16 @@ class Sphere(Manifold):
         return self.project(self.exp_map(x, delta))
 
     def log_map(self, x: jax.Array, y: jax.Array) -> jax.Array:
-        """Inverse exponential map on S^n(r)."""
+        """Inverse exponential map on S^n(r).
+
+        The ``jnp.clip`` on the cosine argument is intentionally absent here:
+        ``_safe_arccos`` already provides a stable custom JVP at x=±1 via
+        an epsilon-clamped denominator, so double-regularising would skew
+        the gradients for nearly-identical or antipodal point pairs.
+        """
         u = jnp.sum(x * y, axis=-1, keepdims=True) / (self.radius ** 2)
-        u_clipped = jnp.clip(u, -1.0 + GRAD_EPS, 1.0 - GRAD_EPS)
-        dist = _safe_arccos(u_clipped)
-        diff = y - u_clipped * x
+        dist = _safe_arccos(u)
+        diff = y - u * x
         norm_diff = safe_norm(diff, axis=-1, keepdims=True)
         scale = jnp.where(
             dist < TAYLOR_EPS,
