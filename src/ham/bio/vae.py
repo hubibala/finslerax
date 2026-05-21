@@ -3,7 +3,7 @@ import jax.numpy as jnp
 import equinox as eqx
 from typing import Tuple, Any, Optional
 
-from ham.geometry.metric import FinslerMetric
+from ham.geometry.metric import AsymmetricMetric, FinslerMetric
 from ham.geometry import Hyperboloid
 
 class WrappedNormal(eqx.Module):
@@ -126,8 +126,8 @@ class GeometricVAE(eqx.Module):
         
         z_mean, u_lat = self.project_control(x, v_rna)
         
-        if hasattr(self.metric, '_get_zermelo_data'):
-            _, W, _ = self.metric._get_zermelo_data(z_mean)
+        if isinstance(self.metric, AsymmetricMetric):
+            _, W, _ = self.metric.zermelo_data(z_mean)
         else:
             W = jnp.zeros_like(u_lat)
             

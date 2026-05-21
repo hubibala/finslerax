@@ -46,7 +46,7 @@ class TestNeuralRanders(unittest.TestCase):
         )
         broken_metric = eqx.tree_at(lambda m: m.w_net, self.metric, huge_w_net)
         
-        H, W, lam = broken_metric._get_zermelo_data(x)
+        H, W, lam = broken_metric.zermelo_data(x)
         w_norm = jnp.sqrt(jnp.dot(W, jnp.dot(H, W)))
         
         self.assertLess(float(w_norm), 1.0, "Wind vector violated convexity constraint!")

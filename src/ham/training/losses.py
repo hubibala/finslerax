@@ -4,6 +4,7 @@ import equinox as eqx
 from typing import Tuple, Any
 from ham.utils.math import safe_norm, NORM_EPS
 from ham.solvers.geodesic import ExponentialMap
+from ham.geometry.metric import AsymmetricMetric
 
 class LossComponent(eqx.Module):
     """Base class for modular loss components.
@@ -67,8 +68,8 @@ class ZermeloAlignmentLoss(LossComponent):
         x, v_rna = batch[0], batch[1]
         z_mean, u_lat = model.project_control(x, v_rna)
         
-        if hasattr(model.metric, '_get_zermelo_data'):
-            _, W, _ = model.metric._get_zermelo_data(z_mean)
+        if isinstance(model.metric, AsymmetricMetric):
+            _, W, _ = model.metric.zermelo_data(z_mean)
         else:
             W = jnp.zeros_like(u_lat)
 
@@ -89,8 +90,8 @@ class GeodesicSprayLoss(LossComponent):
         x, v_rna = batch[0], batch[1]
         z_mean, u_lat = model.project_control(x, v_rna)
         
-        if hasattr(model.metric, '_get_zermelo_data'):
-            _, W, _ = model.metric._get_zermelo_data(z_mean)
+        if isinstance(model.metric, AsymmetricMetric):
+            _, W, _ = model.metric.zermelo_data(z_mean)
         else:
             W = jnp.zeros_like(u_lat)
 
@@ -116,8 +117,8 @@ class VelocityDirectionAlignmentLoss(LossComponent):
         z_start, v_lat = model.project_control(x_start, v_true)
         
         # Get metric drift (Wind vector W)
-        if hasattr(model.metric, '_get_zermelo_data'):
-            _, W, _ = model.metric._get_zermelo_data(z_start)
+        if isinstance(model.metric, AsymmetricMetric):
+            _, W, _ = model.metric.zermelo_data(z_start)
         else:
             W = jnp.zeros_like(v_lat)
             
@@ -144,8 +145,8 @@ class ContrastiveAlignmentLoss(LossComponent):
         parent_z = model.encode(parent_x, k1)
         child_z = model.encode(child_x, k2)
         
-        if hasattr(model.metric, '_get_zermelo_data'):
-            _, W_out, _ = model.metric._get_zermelo_data(parent_z)
+        if isinstance(model.metric, AsymmetricMetric):
+            _, W_out, _ = model.metric.zermelo_data(parent_z)
         else:
             W_out = jnp.zeros_like(parent_z)
         v_tan = model.manifold.log_map(parent_z, child_z)
@@ -162,8 +163,8 @@ class MetricAnchorLoss(LossComponent):
         parent_x = batch[0]
         parent_z = model.encode(parent_x, key)
         
-        if hasattr(model.metric, '_get_zermelo_data'):
-            H_out, _, _ = model.metric._get_zermelo_data(parent_z)
+        if isinstance(model.metric, AsymmetricMetric):
+            H_out, _, _ = model.metric.zermelo_data(parent_z)
         elif hasattr(model.metric, 'g_net'):
             H_out = model.metric.g_net(parent_z)
             H_out = 0.5 * (H_out + H_out.T)
@@ -183,9 +184,12 @@ class MetricSmoothnessLoss(LossComponent):
     def __call__(self, model, batch, key):
         parent_x = batch[0]
         parent_z = model.encode(parent_x, key)
-        
+
+        if not isinstance(model.metric, AsymmetricMetric):
+            return jnp.array(0.0)
+
         def get_w_single(pt):
-            _, W_out, _ = model.metric._get_zermelo_data(pt)
+            _, W_out, _ = model.metric.zermelo_data(pt)
             return W_out
         
         jac = jax.jacfwd(get_w_single)(parent_z)
@@ -286,8 +290,8 @@ class EulerLagrangeResidualLoss(LossComponent):
             # Define smoothed Lagrangian L(z, v) = 1/2 * F_eps(z, v)^2
             def L_smooth(z_pt, v_pt):
                 # Retrieve Riemannian metric H and Wind W from the Randers metric
-                if hasattr(model.metric, '_get_zermelo_data'):
-                    H_pt, W_pt, _ = model.metric._get_zermelo_data(z_pt)
+                if isinstance(model.metric, AsymmetricMetric):
+                    H_pt, W_pt, _ = model.metric.zermelo_data(z_pt)
                 else:
                     # Identity fallback for non-Randers/Base metrics
                     H_pt = jnp.eye(z_pt.shape[0])
@@ -320,8 +324,8 @@ class EulerLagrangeResidualLoss(LossComponent):
             
             # Evaluate norm using the 'frozen' Riemannian metric tensor H
             # Evaluation magnitude is geometrically consistent with the manifold's curvature
-            if hasattr(model.metric, '_get_zermelo_data'):
-                H_frozen, _, _ = model.metric._get_zermelo_data(z)
+            if isinstance(model.metric, AsymmetricMetric):
+                H_frozen, _, _ = model.metric.zermelo_data(z)
             else:
                 H_frozen = jnp.eye(z.shape[0])
             H_frozen = jax.lax.stop_gradient(H_frozen)
@@ -373,8 +377,8 @@ class WindThermodynamicLoss(LossComponent):
     def __call__(self, model, batch, key):
         x = batch[0]
         z = model.encode(x, key)
-        if hasattr(model.metric, '_get_zermelo_data'):
-            H_matrix, W, _ = model.metric._get_zermelo_data(z)
+        if isinstance(model.metric, AsymmetricMetric):
+            H_matrix, W, _ = model.metric.zermelo_data(z)
             wind_cost = jnp.dot(W, jnp.dot(H_matrix, W))
         else:
             wind_cost = jnp.float32(0.0)
@@ -511,8 +515,8 @@ class FinslerianFlowMatchingLoss(LossComponent):
         
         # 3. Retrieve Randers data (Riemannian H and Wind W)
         def get_randers_data(z):
-            if hasattr(model.metric, '_get_zermelo_data'):
-                H, W, _ = model.metric._get_zermelo_data(z)
+            if isinstance(model.metric, AsymmetricMetric):
+                H, W, _ = model.metric.zermelo_data(z)
                 return H, W
             return jnp.eye(z.shape[0]), jnp.zeros_like(z)
             

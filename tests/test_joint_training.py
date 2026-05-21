@@ -11,6 +11,7 @@ from ham.bio.data import BioDataset
 from ham.bio.vae import GeometricVAE
 from ham.geometry.zoo import Riemannian
 from ham.geometry import Hyperboloid
+from ham.geometry.metric import AsymmetricMetric
 from ham.training.pipeline import TrainingPhase, HAMPipeline
 from ham.training.losses import (
     ReconstructionLoss,
@@ -39,7 +40,7 @@ def get_filter_fn(selector):
     return filter_spec
 
 
-class MockMetric(Riemannian, eqx.Module):
+class MockMetric(Riemannian, AsymmetricMetric):
     def __init__(self, manifold):
         self.g_net = eqx.nn.Linear(1, 1, key=jax.random.PRNGKey(0))
         self.manifold = manifold
@@ -51,7 +52,7 @@ class MockMetric(Riemannian, eqx.Module):
     def spray(self, x, v):
         return jnp.zeros_like(v)
         
-    def _get_zermelo_data(self, x):
+    def zermelo_data(self, x):
         dim = x.shape[-1]
         W = jnp.ones(dim) * 0.1
         return jnp.eye(dim), W, jnp.eye(dim)

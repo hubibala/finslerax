@@ -8,10 +8,11 @@ from jax import config
 config.update("jax_enable_x64", True)
 
 from ham.geometry import Hyperboloid, Riemannian
+from ham.geometry.metric import AsymmetricMetric
 from ham.bio.vae import GeometricVAE, WrappedNormal
 from ham.training.losses import ReconstructionLoss, KLDivergenceLoss, ZermeloAlignmentLoss
 
-class MockMetric(Riemannian):
+class MockMetric(Riemannian, AsymmetricMetric):
     """Simple Euclidean-like metric for testing VAE integration."""
     
     # We override __init__ to make it easier to instantiate in tests
@@ -29,11 +30,10 @@ class MockMetric(Riemannian):
         # Zero spray = Geodesics are straight lines (in chart/ambient)
         return jnp.zeros_like(v)
         
-    def _get_zermelo_data(self, x):
-        # Mock wind field for Zermelo navigation check
+    def zermelo_data(self, x):
+        # Mock wind field: returns (H=Identity, W=zeros, lambda=1.0)
         dim = x.shape[-1]
-        # F=1, W=0, D=Identity
-        return 1.0, jnp.zeros(dim), jnp.eye(dim)
+        return jnp.eye(dim), jnp.zeros(dim), 1.0
 
 class TestHyperbolicVAE(unittest.TestCase):
     

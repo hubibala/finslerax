@@ -288,8 +288,8 @@ def jacobian_regularization(metric, sample_points):
         Scalar penalty.
     """
     def get_metric_value(x):
-        if hasattr(metric, '_get_zermelo_data'):
-            H, _, _ = metric._get_zermelo_data(x)
+        if isinstance(metric, AsymmetricMetric):
+            H, _, _ = metric.zermelo_data(x)
             return H.ravel()
         elif hasattr(metric, 'g_net'):
             return metric.g_net(x).ravel()
@@ -483,8 +483,8 @@ def evaluate_recovery(metric, grid_points, true_metric_fn, grid_size):
     g_true = jax.vmap(true_metric_fn)(grid_points)
 
     def learned_scalar(x):
-        if hasattr(metric, '_get_zermelo_data'):
-            H, _, _ = metric._get_zermelo_data(x)
+        if isinstance(metric, AsymmetricMetric):
+            H, _, _ = metric.zermelo_data(x)
         elif hasattr(metric, 'g_net'):
             H = metric.g_net(x)
         else:

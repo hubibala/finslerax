@@ -24,7 +24,7 @@ import jax.numpy as jnp
 import equinox as eqx
 from typing import Optional
 
-from ham.geometry.metric import FinslerMetric
+from ham.geometry.metric import FinslerMetric, AsymmetricMetric
 from ham.geometry.manifold import Manifold
 from ham.utils.math import GRAD_EPS, NORM_EPS, PSD_EPS
 
@@ -193,7 +193,7 @@ class LocalTerrainCNN(eqx.Module):
 # CovariateConditionedRanders
 # ---------------------------------------------------------------------------
 
-class CovariateConditionedRanders(FinslerMetric):
+class CovariateConditionedRanders(AsymmetricMetric):
     """Randers-type Finsler metric conditioned on terrain and weather covariates.
 
     The metric tensor ``G(x)`` and drift ``b(x)`` are produced by two pathways:
@@ -609,6 +609,33 @@ class CovariateConditionedRanders(FinslerMetric):
         else:
             b = jnp.zeros(2, dtype=G.dtype)
         return G, b
+
+    def zermelo_data(
+        self, x: jax.Array
+    ) -> tuple[jax.Array, jax.Array, jax.Array]:
+        """Return the Zermelo navigation triple ``(H, W, lambda)`` at position x.
+
+        Implements the :class:`~ham.geometry.metric.AsymmetricMetric` interface
+        so that downstream consumers (losses, VAE) can use
+        ``isinstance(metric, AsymmetricMetric)`` instead of fragile
+        ``hasattr`` duck-typing.
+
+        Args:
+            x: (2,) world-coordinate position.
+
+        Returns:
+            G:      (2, 2) SPD metric tensor (the Riemannian sea).
+            b:      (2,) drift vector (the wind).
+            lambda: Causality scalar ``1 - ||b||²_{G^{-1}}``.
+        """
+        G, b = self._get_params(x)
+        det_G = G[0, 0] * G[1, 1] - G[0, 1] ** 2
+        det_G = jnp.maximum(det_G, 1e-8)
+        b_Ginv_b = (b[0] ** 2 * G[1, 1]
+                    - 2.0 * b[0] * b[1] * G[0, 1]
+                    + b[1] ** 2 * G[0, 0]) / det_G
+        lam = jnp.maximum(1.0 - b_Ginv_b, 1e-6)
+        return G, b, lam
 
     def metric_fn(self, x: jax.Array, v: jax.Array) -> jax.Array:
         """Randers-Zermelo cost F(x, v).

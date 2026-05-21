@@ -157,11 +157,11 @@ def check_project_control(vae: GeometricVAE, dataset: BioDataset):
 def check_zermelo_data(vae: GeometricVAE, dataset: BioDataset):
     x = dataset.X[0]
     z = encode_mean(vae, x)
-    if hasattr(vae.metric, '_get_zermelo_data'):
-        H, W, lam = vae.metric._get_zermelo_data(z)
+    if isinstance(vae.metric, AsymmetricMetric):
+        H, W, lam = vae.metric.zermelo_data(z)
         assert H.shape == (vae.latent_dim, vae.latent_dim)
         assert W.shape == (vae.latent_dim,)
-    print("  ✓ _get_zermelo_data OK")
+    print("  ✓ zermelo_data OK")
 
 def check_two_segment_energy(vae: GeometricVAE, dataset: BioDataset):
     z_s = encode_mean(vae, dataset.X[0])

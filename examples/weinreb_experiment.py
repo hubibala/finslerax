@@ -88,10 +88,10 @@ class RNAVelocityWindLoss(LossComponent):
         # Deterministic push-forward of velocity into latent space
         z_mean, v_lat = model.project_control(x, u)
 
-        if not hasattr(model.metric, '_get_zermelo_data'):
+        if not isinstance(model.metric, AsymmetricMetric):
             return 0.0
 
-        H, W, _ = model.metric._get_zermelo_data(z_mean)
+        H, W, _ = model.metric.zermelo_data(z_mean)
 
         def h_norm(v):
             return jnp.sqrt(jnp.dot(v, jnp.dot(H, v)) + 1e-8)
@@ -121,11 +121,11 @@ class WindSmoothnessLoss(LossComponent):
     def __call__(self, model, batch, key):
         x = batch[0]
         z = model._get_dist(x).mean
-        if not hasattr(model.metric, '_get_zermelo_data'):
+        if not isinstance(model.metric, AsymmetricMetric):
             return 0.0
 
         def get_w(z_pt):
-            _, W, _ = model.metric._get_zermelo_data(z_pt)
+            _, W, _ = model.metric.zermelo_data(z_pt)
             return W
 
         jac = jax.jacfwd(get_w)(z)
@@ -459,7 +459,7 @@ def save_wind_visualization(vae: GeometricVAE, dataset: BioDataset, save_path: s
     # Compute Wind on grid in full latent space
     try:
         W_full = np.array(jax.vmap(
-            lambda z: vae.metric._get_zermelo_data(z)[1]
+            lambda z: vae.metric.zermelo_data(z)[1]
         )(jnp.array(grid_full)))
         
         # Project Wind back to 2D PCA space
@@ -519,7 +519,7 @@ def plot_results(
 
     try:
         W_full = np.array(jax.vmap(
-            lambda z: vae.metric._get_zermelo_data(z)[1]
+            lambda z: vae.metric.zermelo_data(z)[1]
         )(jnp.array(grid_full)))
         # Transform wind vectors to PCA space via dot product with components
         W_2d = np.dot(W_full, pca2.components_.T)
@@ -690,7 +690,7 @@ def main():
     # Verify |W|_H before validation
     sample_z = jax.vmap(lambda x: encode_mean(vae_randers, x))(dataset.X[:200])
     def wn_at(z):
-        H, W, _ = vae_randers.metric._get_zermelo_data(z)
+        H, W, _ = vae_randers.metric.zermelo_data(z)
         return jnp.sqrt(jnp.dot(W, jnp.dot(H, W)))
     final_wn = float(np.mean(np.array(jax.vmap(wn_at)(sample_z))))
     print(f"  Mean |W|_H = {final_wn:.4f}  (must be < 0.95)")

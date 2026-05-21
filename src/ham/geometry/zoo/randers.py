@@ -4,11 +4,11 @@ import jax.numpy as jnp
 import equinox as eqx
 from typing import Callable, Any
 
-from ham.geometry.metric import FinslerMetric
+from ham.geometry.metric import AsymmetricMetric
 from ham.geometry.manifold import Manifold
 from ham.utils import PSD_EPS, GRAD_EPS
 
-class Randers(FinslerMetric):
+class Randers(AsymmetricMetric):
     """Rigorous Randers Metric using Zermelo Navigation.
     
     A Randers metric is an asymmetric Finsler metric defined by a Riemannian 
@@ -36,7 +36,7 @@ class Randers(FinslerMetric):
     def __repr__(self) -> str:
         return f"Randers(manifold={self.manifold}, epsilon={self.epsilon})"
 
-    def _get_zermelo_data(self, x: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array]:
+    def zermelo_data(self, x: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array]:
         """Returns the Riemannian tensor H, the Wind vector W, and the Lambda scalar."""
         # Get the sea metric H(x)
         H = self.h_net(x)
@@ -67,7 +67,7 @@ class Randers(FinslerMetric):
         is_zero = v_sq_raw < GRAD_EPS
         v_safe = jnp.where(is_zero[..., None], v + jnp.sqrt(GRAD_EPS), v)
         
-        H, W, lam = self._get_zermelo_data(x)
+        H, W, lam = self.zermelo_data(x)
         
         Hv = jnp.matmul(H, v_safe)
         HW = jnp.matmul(H, W)

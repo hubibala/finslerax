@@ -46,7 +46,7 @@ def step_metric(model: GeometricVAE,
         # We access the internal metric (NeuralRanders)
         # We need H(x) and W(x)
         def get_fields(pt):
-            H, W, _ = m.metric._get_zermelo_data(pt)
+            H, W, _ = m.metric.zermelo_data(pt)
             return H, W
 
         get_fields_vmap = jax.vmap(get_fields)
@@ -70,7 +70,7 @@ def step_metric(model: GeometricVAE,
         # B. Smoothness (Jacobian Penalty)
         # Penalize dW/dx to prevent chaotic vector fields
         def get_w_single(pt):
-            _, W, _ = m.metric._get_zermelo_data(pt)
+            _, W, _ = m.metric.zermelo_data(pt)
             return W
         
         # Jacobian of W w.r.t x (Forward mode is efficient here)
