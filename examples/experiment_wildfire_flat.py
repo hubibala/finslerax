@@ -249,7 +249,7 @@ def make_batched_train_step(
     def batched_step(metric, opt_state,
                      weather_batch, source_batch,
                      obs_world_batch, obs_times_batch,
-                     alpha: float = 0.0):
+                     alpha: jax.Array):
         """Accumulate gradients over B fires, then apply one optimizer step."""
         B = weather_batch.shape[0]
         accumulated_grads = None
@@ -860,12 +860,13 @@ def train_scene(
         t_epoch = time.time()
 
         # Curriculum blend coefficient: 0 = Pearson-r only → 1 = Relative MSE only
-        alpha = curriculum_alpha(
+        alpha_val = curriculum_alpha(
             epoch,
             warmup_epochs=cfg["curriculum_warmup_epochs"],
             ramp_epochs=cfg["curriculum_ramp_epochs"],
         )
 
+        alpha = jnp.asarray(alpha_val, dtype=jnp.float64)
         # Shuffle training fires
         perm = rng.permutation(len(train_scenarios))
         epoch_losses: list = []
@@ -1225,6 +1226,7 @@ def run_synthetic(cfg: dict, output_dir: str, use_wind: bool = True) -> dict:
             warmup_epochs=cfg["curriculum_warmup_epochs"],
             ramp_epochs=cfg["curriculum_ramp_epochs"],
         )
+        alpha = jnp.asarray(alpha, dtype=jnp.float64)
 
         def _loss(m):
             bound = bind_scenario_to_metric(m, scenario)

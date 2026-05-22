@@ -584,7 +584,7 @@ class ArrivalTimeLoss(eqx.Module):
         self.weight = weight
         self.name = "ArrivalTime"
 
-    def __call__(self, metric, source, x_obs, t_obs, alpha: float = 0.0):
+    def __call__(self, metric, source, x_obs, t_obs, alpha: jax.Array):
         """Compute curriculum arrival-time loss for a batch of observations.
 
         Blends Pearson-r (shape-only, stable at any scale) with Relative MSE
