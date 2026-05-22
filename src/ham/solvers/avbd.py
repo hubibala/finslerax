@@ -110,7 +110,7 @@ def _el_residual(inner_path, metric, p_start, p_end, constraints, lambdas, stiff
     """Discrete Euler-Lagrange residual of the Lagrangian for inner nodes.
 
     Calculates the Euclidean gradient of the total path Lagrangian (energy + constraints) 
-    and projects it onto the Riemannian tangent space to satisfy $G(x^*) = 0$.
+    and projects it onto the manifold tangent space to satisfy $G(x^*) = 0$.
 
     Returns flat array of shape (n_inner * D,).
     """

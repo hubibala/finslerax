@@ -584,17 +584,29 @@ class ArrivalTimeLoss(eqx.Module):
         self.weight = weight
         self.name = "ArrivalTime"
 
-    def __call__(self, metric, source, x_obs, t_obs):
-        """Compute arrival time MSE for a batch of observations.
+    def __call__(self, metric, source, x_obs, t_obs, alpha: float = 0.0):
+        """Compute curriculum arrival-time loss for a batch of observations.
+
+        Blends Pearson-r (shape-only, stable at any scale) with Relative MSE
+        (scale-aware, needed for IoU accuracy) according to a curriculum
+        coefficient *alpha*:
+
+            L = (1 - alpha) * L_pearson  +  alpha * L_relmse
+
+        At alpha=0 the loss is pure Pearson-r (ordering only).
+        At alpha=1 the loss is pure Relative MSE (ordering + absolute timing).
+        Ramp alpha from 0 to 1 over training using :func:`curriculum_alpha`.
 
         Args:
             metric: FinslerMetric defining the geometry.
             source: Source point, shape (D,).
             x_obs: Observation points, shape (K, D).
             t_obs: Observed arrival times, shape (K,).
+            alpha: Blend coefficient in [0, 1].  0 = Pearson-r only;
+                1 = Relative MSE only.  Default: 0.0.
 
         Returns:
-            Scalar MSE loss, already multiplied by self.weight.
+            Scalar loss value, already multiplied by self.weight.
         """
         def single_arrival_time(x_target):
             traj = self.solver.solve(metric, source, x_target,
@@ -611,24 +623,55 @@ class ArrivalTimeLoss(eqx.Module):
         t_pred = jax.vmap(single_arrival_time)(x_obs)
 
         if t_obs.shape[0] > 1:
-            # Pearson-r loss: 1 - r(t_pred, t_obs).
-            # Fully differentiable; scale and shift invariant, so the metric
-            # learns the correct arrival-time *ordering* without needing to
-            # match the absolute geodesic-length scale to t_obs.  No
-            # stop_gradient is required, and gradients flow correctly through
-            # all K predicted arc lengths simultaneously.
+            # --- Pearson-r component (scale & shift invariant) ---
             mu_p = jnp.mean(t_pred)
             mu_o = jnp.mean(t_obs)
             dp = t_pred - mu_p
             do = t_obs - mu_o
             num = jnp.sum(dp * do)
             denom = jnp.sqrt(jnp.sum(dp ** 2) * jnp.sum(do ** 2) + 1e-8)
-            loss = 1.0 - num / denom
+            l_pearson = 1.0 - num / denom
+
+            # --- Relative MSE component (scale-aware, IoU-aligned) ---
+            # Normalise t_pred to [0,1] by its own max.  stop_gradient on
+            # the normalizer prevents all-to-all gradient coupling: gradients
+            # flow only through the relative shape of the predictions, not
+            # through the scale-correction term itself.
+            t_max = jax.lax.stop_gradient(jnp.maximum(jnp.max(t_pred), 1e-6))
+            t_pred_norm = t_pred / t_max
+            l_relmse = jnp.mean((t_pred_norm - t_obs) ** 2)
+
+            loss = (1.0 - alpha) * l_pearson + alpha * l_relmse
         else:
-            # Single observation: Pearson-r is undefined; use a relative MSE
-            # normalised by t_obs so gradients are non-zero whenever
-            # t_pred ≠ t_obs (t_obs treated as the reference scale).
+            # Single observation: use relative MSE regardless of alpha.
             t_obs_ref = jnp.maximum(jnp.abs(t_obs[0]), 1e-6)
             loss = jnp.mean((t_pred / t_obs_ref - 1.0) ** 2)
 
         return loss * self.weight
+
+
+def curriculum_alpha(epoch: int, warmup_epochs: int, ramp_epochs: int) -> float:
+    """Compute the curriculum blend coefficient alpha for :class:`ArrivalTimeLoss`.
+
+    Returns 0.0 during the warmup phase (pure Pearson-r), then linearly ramps
+    to 1.0 over *ramp_epochs* epochs, and stays at 1.0 thereafter (pure
+    Relative MSE).
+
+    Args:
+        epoch:        Current epoch index (0-based).
+        warmup_epochs: Number of epochs to keep alpha=0 (Pearson-r only).
+        ramp_epochs:  Number of epochs over which alpha ramps from 0 to 1.
+
+    Returns:
+        Float in [0, 1].
+
+    Example::
+
+        for epoch in range(n_epochs):
+            alpha = curriculum_alpha(epoch, warmup_epochs=5, ramp_epochs=15)
+            # pass alpha to ArrivalTimeLoss.__call__ or make_batched_train_step
+    """
+    if epoch < warmup_epochs:
+        return 0.0
+    progress = (epoch - warmup_epochs) / max(ramp_epochs, 1)
+    return float(min(progress, 1.0))

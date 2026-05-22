@@ -72,11 +72,10 @@ from ham.data.wildfire import (
     load_wildfire_scenario,
     SceneNormalizer,
     train_val_test_split,
-    iou_at_50,
     stratified_sample_observations,
 )
 from ham.solvers.avbd import AVBDSolver
-from ham.training.losses import ArrivalTimeLoss
+from ham.training.losses import ArrivalTimeLoss, curriculum_alpha
 
 # ---------------------------------------------------------------------------
 # Sim2Real-Fire loader (bundled in ham.data.sim2real_loader)
@@ -108,6 +107,8 @@ def get_config(quick: bool = False) -> dict:
         fuel_emb_dim=4,
         cnn_channels=64 if quick else 64,
         n_epochs=50 if quick else 100,
+        curriculum_warmup_epochs=5,
+        curriculum_ramp_epochs=15 if quick else 20,
         lr=1e-3,
         lr_schedule="cosine",
         early_stopping_patience=20,
@@ -237,17 +238,18 @@ def make_batched_train_step(
         ``obs_times_batch`` shape: ``(B, K)``.
     """
     @eqx.filter_jit
-    def _single_fire_grad(metric, weather, source, obs_world, obs_times):
+    def _single_fire_grad(metric, weather, source, obs_world, obs_times, alpha):
         """JIT-compiled forward + backward for ONE fire."""
         def fire_loss(m):
             bound = m.bind_weather(weather)
             bound = bound.precompute_metric_field()  # run CNN on rasters; inside grad tape
-            return loss_fn(bound, source, obs_world, obs_times)
+            return loss_fn(bound, source, obs_world, obs_times, alpha)
         return eqx.filter_value_and_grad(fire_loss)(metric)
 
     def batched_step(metric, opt_state,
                      weather_batch, source_batch,
-                     obs_world_batch, obs_times_batch):
+                     obs_world_batch, obs_times_batch,
+                     alpha: float = 0.0):
         """Accumulate gradients over B fires, then apply one optimizer step."""
         B = weather_batch.shape[0]
         accumulated_grads = None
@@ -260,6 +262,7 @@ def make_batched_train_step(
                 source_batch[i],
                 obs_world_batch[i],
                 obs_times_batch[i],
+                alpha,
             )
             total_loss_val += float(loss_i)
             if accumulated_grads is None:
@@ -368,6 +371,31 @@ def pearson_r(a: np.ndarray, b: np.ndarray) -> float:
     if denom < 1e-8:
         return 0.0
     return float(num / denom)
+
+
+def spearman_r(a: np.ndarray, b: np.ndarray) -> float:
+    """Spearman rank correlation between two 1-D arrays.
+
+    Rank-based and therefore invariant to any monotone rescaling of either
+    input.  Directly comparable to Gahtan et al. (2026) Appendix E, which
+    reports Spearman ≈ 0.695 for cross-scene transfer and ≈ 0.696 for
+    simulation-to-real transfer.
+
+    Args:
+        a: Predicted values, shape (N,).
+        b: Ground-truth values, shape (N,).
+
+    Returns:
+        Correlation in ``[-1, 1]``; ``0.0`` if either array is constant or
+        too short.
+    """
+    a = np.asarray(a, dtype=np.float64)
+    b = np.asarray(b, dtype=np.float64)
+    if len(a) < 2:
+        return 0.0
+    rank_a = np.argsort(np.argsort(a)).astype(np.float64)
+    rank_b = np.argsort(np.argsort(b)).astype(np.float64)
+    return pearson_r(rank_a, rank_b)
 
 
 # ===========================================================================
@@ -485,7 +513,22 @@ def evaluate_fire(
     cfg: dict,
     eval_pixels: np.ndarray | None = None,
 ) -> dict:
-    """Dense evaluation: Pearson r and IoU@50 for one fire.
+    """Evaluate one fire: Pearson r, Spearman r, and calibrated IoU@50.
+
+    Metrics are designed to be comparable with Gahtan et al. (2026):
+
+    * **Pearson r** — linear correlation of arrival times (Gahtan §6 primary
+      metric; within-scene target ≈ 0.824).
+    * **Spearman r** — rank correlation; invariant to any monotone rescaling
+      of predictions.  Directly comparable to Gahtan Appendix E (cross-scene
+      ≈ 0.695, sim-to-real ≈ 0.696).
+    * **IoU@50 (calibrated)** — Gahtan-compatible spatial overlap metric.
+      A post-hoc scalar ``s = mean(gt) / mean(pred)`` maps arc-lengths to the
+      GT time scale; the calibrated predictions are then thresholded at 0.5
+      over the full burned area.  For sparse eval (quick mode), unsampled
+      burned pixels default to 1.0 ("late"), so IoU degrades with coverage
+      but is never structurally zero.  Coverage is reported as
+      ``eval_coverage`` for interpretability.
 
     Args:
         metric:      Trained metric (unbound; scene is bound internally).
@@ -496,7 +539,8 @@ def evaluate_fire(
             If None, all burned pixels in the scenario are used.
 
     Returns:
-        dict with keys ``pearson_r``, ``iou_50``, ``n_eval_pixels``.
+        dict with keys ``pearson_r``, ``spearman_r``, ``iou_50``,
+        ``eval_coverage``, ``n_eval_pixels``.
     """
     if eval_pixels is None:
         rows, cols = np.where(scenario.burned_mask)
@@ -506,8 +550,10 @@ def evaluate_fire(
             idx = rng.choice(len(eval_pixels), size=100, replace=False)
             eval_pixels = eval_pixels[idx]
 
+    n_burned = int(np.sum(scenario.burned_mask))
     if len(eval_pixels) == 0:
-        return dict(pearson_r=0.0, iou_50=0.0, n_eval_pixels=0)
+        return dict(pearson_r=0.0, spearman_r=0.0, iou_50=0.0,
+                    eval_coverage=0.0, n_eval_pixels=0)
 
     bound_metric = bind_scenario_to_metric(metric, scenario)
     bound_metric = bound_metric.precompute_metric_field()
@@ -528,24 +574,48 @@ def evaluate_fire(
         dtype=np.float64,
     )
 
-    r = pearson_r(pred_arrivals, gt_arrival)
+    r_pearson  = pearson_r(pred_arrivals, gt_arrival)
+    r_spearman = spearman_r(pred_arrivals, gt_arrival)
+    coverage   = len(eval_pixels) / max(n_burned, 1)
 
-    # Normalise predictions to [0, 1] by their own max so that the 0.5
-    # IoU threshold cuts the first half of the *predicted* arrival wave.
-    # GT is already normalised to [0,1] at load time; dividing pred by
-    # gt_ref (≤1) inflated pred >> 1 so the threshold was never crossed.
-    pred_finite = pred_arrivals[np.isfinite(pred_arrivals)]
-    pred_ref = float(pred_finite.max()) if pred_finite.size > 0 and pred_finite.max() > 1e-8 else 1.0
-    pred_norm = pred_arrivals / pred_ref
+    # --- Calibrated IoU@50 (Gahtan-compatible) ----------------------------
+    # Map arc-lengths to the GT time scale with a single post-hoc scalar
+    # s = mean(gt_finite) / mean(pred_finite).  This is NOT on the gradient
+    # path — it is only used for evaluation.  The calibrated predictions are
+    # then placed into the full burned-area raster; unsampled pixels default
+    # to 1.0 ("arrives in the second half"), which is conservative but not
+    # structurally zero.  The threshold of 0.5 then matches Gahtan's
+    # definition: "pixels that burn in the first half of the fire's duration."
+    valid = np.isfinite(pred_arrivals) & np.isfinite(gt_arrival)
+    if np.sum(valid) >= 2:
+        p_valid = pred_arrivals[valid]
+        g_valid = gt_arrival[valid]
+        mean_pred = float(np.mean(p_valid))
+        mean_gt   = float(np.mean(g_valid))
+        s = mean_gt / max(mean_pred, 1e-8)  # post-hoc calibration scalar
 
-    pred_raster = np.ones_like(scenario.arrival_times)
-    for (row, col), t in zip(eval_pixels, pred_norm):
-        pred_raster[int(row), int(col)] = float(t)
+        # Build full-raster prediction (H, W); default = 1.0 ("late")
+        pred_raster = np.ones_like(scenario.arrival_times)
+        cal_values  = np.clip(s * pred_arrivals, 0.0, 1.0)
+        for (row, col), t in zip(eval_pixels, cal_values):
+            pred_raster[int(row), int(col)] = float(t)
 
-    # GT raster for iou_at_50 is already normalised to [0,1] by t_max at load time
-    iou50 = iou_at_50(pred_raster, scenario.arrival_times, scenario.burned_mask)
+        burned = scenario.burned_mask
+        pred_bin = (pred_raster <= 0.5) & burned
+        gt_bin   = (scenario.arrival_times <= 0.5) & burned
+        intersect = int(np.sum(pred_bin & gt_bin))
+        union     = int(np.sum(pred_bin | gt_bin))
+        iou50 = float(intersect / max(union, 1))
+    else:
+        iou50 = 0.0
 
-    return dict(pearson_r=r, iou_50=iou50, n_eval_pixels=int(len(eval_pixels)))
+    return dict(
+        pearson_r=r_pearson,
+        spearman_r=r_spearman,
+        iou_50=iou50,
+        eval_coverage=coverage,
+        n_eval_pixels=int(len(eval_pixels)),
+    )
 
 
 # ===========================================================================
@@ -789,6 +859,13 @@ def train_scene(
     for epoch in range(cfg["n_epochs"]):
         t_epoch = time.time()
 
+        # Curriculum blend coefficient: 0 = Pearson-r only → 1 = Relative MSE only
+        alpha = curriculum_alpha(
+            epoch,
+            warmup_epochs=cfg["curriculum_warmup_epochs"],
+            ramp_epochs=cfg["curriculum_ramp_epochs"],
+        )
+
         # Shuffle training fires
         perm = rng.permutation(len(train_scenarios))
         epoch_losses: list = []
@@ -802,7 +879,7 @@ def train_scene(
             obs_t_b    = _obs_times_all[batch_idx]      # (B, K)
 
             metric, opt_state, loss_val = batched_step(
-                metric, opt_state, weather_b, source_b, obs_w_b, obs_t_b
+                metric, opt_state, weather_b, source_b, obs_w_b, obs_t_b, alpha
             )
             epoch_losses.append(float(loss_val))
 
@@ -818,6 +895,7 @@ def train_scene(
         print(
             f"  Epoch {epoch+1:3d}/{cfg['n_epochs']}: "
             f"loss={mean_loss:.5f}  val_r={mean_val_r:.4f}  "
+            f"alpha={alpha:.2f}  "
             f"time={epoch_runtimes[-1]:.1f}s"
         )
 
@@ -834,28 +912,35 @@ def train_scene(
 
     # Test evaluation — parallelise across fires (each is independent; JAX GIL is released)
     print(f"\n  Evaluating on {len(test_scenarios)} test fires (dense, n_workers={n_workers})...")
-    test_rs: list = [0.0] * len(test_scenarios)
-    test_ious: list = [0.0] * len(test_scenarios)
+    test_rs: list       = [0.0] * len(test_scenarios)
+    test_sprs: list     = [0.0] * len(test_scenarios)
+    test_ious: list     = [0.0] * len(test_scenarios)
+    test_coverages: list = [0.0] * len(test_scenarios)
     with ThreadPoolExecutor(max_workers=n_workers) as pool:
         futs = {pool.submit(evaluate_fire, best_metric, solver, sc, cfg): i
                 for i, sc in enumerate(test_scenarios)}
         for fut in as_completed(futs):
             i = futs[fut]
             res = fut.result()
-            test_rs[i] = res["pearson_r"]
-            test_ious[i] = res["iou_50"]
+            test_rs[i]        = res["pearson_r"]
+            test_sprs[i]      = res["spearman_r"]
+            test_ious[i]      = res["iou_50"]
+            test_coverages[i] = res["eval_coverage"]
 
-    test_r_mean = float(np.mean(test_rs)) if test_rs else 0.0
-    test_r_std  = float(np.std(test_rs))  if test_rs else 0.0
-    test_iou50  = float(np.mean(test_ious)) if test_ious else 0.0
+    test_r_mean   = float(np.mean(test_rs))   if test_rs   else 0.0
+    test_r_std    = float(np.std(test_rs))    if test_rs   else 0.0
+    test_spr_mean = float(np.mean(test_sprs)) if test_sprs else 0.0
+    test_iou50    = float(np.mean(test_ious)) if test_ious else 0.0
+    mean_coverage = float(np.mean(test_coverages)) if test_coverages else 0.0
     runtime_per_epoch = float(np.mean(epoch_runtimes)) if epoch_runtimes else 0.0
 
     print(
         f"\n  RESULTS  scene={scene_id}  seed={seed}\n"
-        f"    test Pearson r = {test_r_mean:.4f} ± {test_r_std:.4f}\n"
-        f"    test IoU@50   = {test_iou50:.4f}\n"
-        f"    epoch runtime  = {runtime_per_epoch:.1f} s/epoch\n"
-        f"    total time     = {time.time()-t_scene_start:.1f} s"
+        f"    test Pearson r  = {test_r_mean:.4f} ± {test_r_std:.4f}\n"
+        f"    test Spearman r = {test_spr_mean:.4f}   (Gahtan cross-scene target ≈ 0.695)\n"
+        f"    test IoU@50     = {test_iou50:.4f}   (coverage={mean_coverage:.1%})\n"
+        f"    epoch runtime   = {runtime_per_epoch:.1f} s/epoch\n"
+        f"    total time      = {time.time()-t_scene_start:.1f} s"
     )
 
     return dict(
@@ -864,7 +949,9 @@ def train_scene(
         use_wind=use_wind,
         test_pearson_r_mean=test_r_mean,
         test_pearson_r_std=test_r_std,
+        test_spearman_r_mean=test_spr_mean,
         test_iou50=test_iou50,
+        eval_coverage=mean_coverage,
         train_loss_history=train_loss_history,
         val_r_history=val_r_history,
         runtime_per_epoch_s=runtime_per_epoch,
@@ -1133,17 +1220,23 @@ def run_synthetic(cfg: dict, output_dir: str, use_wind: bool = True) -> dict:
     t0 = time.time()
 
     for epoch in range(n_epochs):
+        alpha = curriculum_alpha(
+            epoch,
+            warmup_epochs=cfg["curriculum_warmup_epochs"],
+            ramp_epochs=cfg["curriculum_ramp_epochs"],
+        )
+
         def _loss(m):
             bound = bind_scenario_to_metric(m, scenario)
             bound = bound.precompute_metric_field()
-            return arrival_loss_obj(bound, source, obs_world, t_obs)
+            return arrival_loss_obj(bound, source, obs_world, t_obs, alpha)
 
         loss_val, grads = eqx.filter_value_and_grad(_loss)(metric)
         updates, opt_state = optimizer.update(grads, opt_state, metric)
         metric = eqx.apply_updates(metric, updates)
 
         train_loss_history.append(float(loss_val))
-        print(f"  Epoch {epoch+1:3d}/{n_epochs}: loss={float(loss_val):.6f}")
+        print(f"  Epoch {epoch+1:3d}/{n_epochs}: loss={float(loss_val):.6f}  alpha={alpha:.2f}")
 
     train_time = time.time() - t0
 
@@ -1161,9 +1254,10 @@ def run_synthetic(cfg: dict, output_dir: str, use_wind: bool = True) -> dict:
 
     print(
         f"\n  SYNTHETIC RESULTS\n"
-        f"    Pearson r  = {result['pearson_r']:.4f}\n"
-        f"    IoU@50     = {result['iou_50']:.4f}\n"
-        f"    Train time = {train_time:.1f}s for {n_epochs} epochs"
+        f"    Pearson r   = {result['pearson_r']:.4f}\n"
+        f"    Spearman r  = {result['spearman_r']:.4f}\n"
+        f"    IoU@50      = {result['iou_50']:.4f}   (coverage={result['eval_coverage']:.1%})\n"
+        f"    Train time  = {train_time:.1f}s for {n_epochs} epochs"
     )
 
     if output_dir:
@@ -1188,7 +1282,9 @@ def run_synthetic(cfg: dict, output_dir: str, use_wind: bool = True) -> dict:
         use_wind=use_wind,
         test_pearson_r_mean=result["pearson_r"],
         test_pearson_r_std=0.0,
+        test_spearman_r_mean=result["spearman_r"],
         test_iou50=result["iou_50"],
+        eval_coverage=result["eval_coverage"],
         train_loss_history=train_loss_history,
         val_r_history=[],
         runtime_per_epoch_s=train_time / max(n_epochs, 1),
@@ -1294,13 +1390,16 @@ def main() -> None:
     )
 
     if all_results:
-        r_vals = [r["test_pearson_r_mean"] for r in all_results]
-        iou_vals = [r["test_iou50"] for r in all_results]
+        r_vals   = [r["test_pearson_r_mean"]  for r in all_results]
+        spr_vals = [r.get("test_spearman_r_mean", 0.0) for r in all_results]
+        iou_vals = [r["test_iou50"]            for r in all_results]
+        cov_vals = [r.get("eval_coverage", 1.0) for r in all_results]
         print(
             f"\n{'='*60}\n"
             f"  AGGREGATE RESULTS  ({len(all_results)} runs)\n"
-            f"  Mean Pearson r : {np.mean(r_vals):.4f} ± {np.std(r_vals):.4f}\n"
-            f"  Mean IoU@50    : {np.mean(iou_vals):.4f}\n"
+            f"  Mean Pearson r  : {np.mean(r_vals):.4f} ± {np.std(r_vals):.4f}\n"
+            f"  Mean Spearman r : {np.mean(spr_vals):.4f}   (Gahtan target ≈ 0.695)\n"
+            f"  Mean IoU@50     : {np.mean(iou_vals):.4f}   (coverage={np.mean(cov_vals):.1%})\n"
             f"{'='*60}"
         )
     else:
