@@ -217,11 +217,14 @@ def make_batched_train_step(
     loss_fn: ArrivalTimeLoss,
     optimizer,
 ):
-    """Return a training step using Python-level gradient accumulation.
+    """Return a JIT-compiled vmapped training step over a batch of fires.
 
-    Computes one JIT-compiled gradient per fire, accumulates them at the
-    Python level, then applies a single optimizer update.  This avoids
-    materialising B x K solver graphs simultaneously in XLA memory.
+    All B fires are processed inside a single ``filter_jit`` call:
+    ``jax.vmap`` maps the per-fire loss over the batch axis and
+    ``eqx.filter_value_and_grad`` differentiates the mean.  This replaces the
+    previous Python loop (B sequential TPU dispatches) with a single dispatch,
+    eliminating the host↔device round-trip overhead that caused 15–20 min
+    epochs on TPU.
 
     Args:
         terrain_metric: Scene-terrain-bound metric (weather not set).
@@ -230,7 +233,7 @@ def make_batched_train_step(
 
     Returns:
         ``batched_step(metric, opt_state, weather_batch, source_batch,
-                       obs_world_batch, obs_times_batch) ->
+                       obs_world_batch, obs_times_batch, alpha) ->
           (new_metric, new_opt_state, mean_loss)``
 
         All ``*_batch`` arrays have a leading batch dimension B.
@@ -238,52 +241,32 @@ def make_batched_train_step(
         ``obs_times_batch`` shape: ``(B, K)``.
     """
     @eqx.filter_jit
-    def _single_fire_grad(metric, weather, source, obs_world, obs_times, alpha):
-        """JIT-compiled forward + backward for ONE fire."""
-        def fire_loss(m):
-            bound = m.bind_weather(weather)
-            bound = bound.precompute_metric_field()  # run CNN on rasters; inside grad tape
-            return loss_fn(bound, source, obs_world, obs_times, alpha)
-        return eqx.filter_value_and_grad(fire_loss)(metric)
-
     def batched_step(metric, opt_state,
                      weather_batch, source_batch,
                      obs_world_batch, obs_times_batch,
                      alpha: jax.Array):
-        """Accumulate gradients over B fires, then apply one optimizer step."""
-        B = weather_batch.shape[0]
-        accumulated_grads = None
-        total_loss_val = 0.0
+        """Single JIT dispatch: vmap over B fires, then one optimizer update."""
+        def fire_loss_single(weather, source, obs_world, obs_times):
+            bound = metric.bind_weather(weather)
+            bound = bound.precompute_metric_field()
+            return loss_fn(bound, source, obs_world, obs_times, alpha)
 
-        for i in range(B):
-            loss_i, grads_i = _single_fire_grad(
-                metric,
-                weather_batch[i],
-                source_batch[i],
-                obs_world_batch[i],
-                obs_times_batch[i],
-                alpha,
-            )
-            total_loss_val += float(loss_i)
-            if accumulated_grads is None:
-                accumulated_grads = grads_i
-            else:
-                accumulated_grads = jax.tree_util.tree_map(
-                    lambda a, b: a + b, accumulated_grads, grads_i
-                )
+        def total_loss(m):
+            # vmap over the leading batch axis of all per-fire arrays
+            per_fire_losses = jax.vmap(
+                lambda w, s, ow, ot: (
+                    lambda bound: loss_fn(bound, s, ow, ot, alpha)
+                )(m.bind_weather(w).precompute_metric_field())
+            )(weather_batch, source_batch, obs_world_batch, obs_times_batch)
+            return jnp.mean(per_fire_losses)
 
-        # Average gradients over the batch
-        accumulated_grads = jax.tree_util.tree_map(
-            lambda g: g / B, accumulated_grads
-        )
-        mean_loss = total_loss_val / B
-
+        loss_val, grads = eqx.filter_value_and_grad(total_loss)(metric)
         updates, new_opt_state = optimizer.update(
-            eqx.filter(accumulated_grads, eqx.is_inexact_array),
+            eqx.filter(grads, eqx.is_inexact_array),
             opt_state,
             eqx.filter(metric, eqx.is_inexact_array),
         )
-        return eqx.apply_updates(metric, updates), new_opt_state, mean_loss
+        return eqx.apply_updates(metric, updates), new_opt_state, loss_val
 
     return batched_step
 
@@ -402,6 +385,42 @@ def spearman_r(a: np.ndarray, b: np.ndarray) -> float:
 # Chunked arrival-time prediction
 # ===========================================================================
 
+@eqx.filter_jit
+def _predict_chunk_jit(
+    bound_metric: CovariateConditionedRanders,
+    solver: AVBDSolver,
+    source_world: jax.Array,
+    chunk_world: jax.Array,
+    n_steps: int,
+) -> jax.Array:
+    """JIT-compiled vmapped arc-length prediction for one pixel chunk.
+
+    Lifted to module scope so the pytree structure is fixed across calls and
+    XLA compiles the program exactly once per unique (metric-architecture,
+    n_steps) pair.  A closure-based version inside _predict_arrivals_chunked
+    creates a new Python function object on every call, defeating the JIT
+    trace cache.
+
+    Args:
+        bound_metric: Fully bound metric (rasters + weather baked in).
+        solver:       AVBD solver.
+        source_world: Ignition point, shape (2,).
+        chunk_world:  Pixel world coords, shape (C, 2).
+        n_steps:      AVBD path discretisation steps.
+
+    Returns:
+        Shape (C,) float64 arc lengths.
+    """
+    def _single(x_world: jax.Array) -> jax.Array:
+        traj = solver.solve(bound_metric, source_world, x_world, n_steps=n_steps)
+        path = traj.xs
+        segs = jnp.diff(path, axis=0)
+        mids = (path[:-1] + path[1:]) * 0.5
+        return jnp.sum(jax.vmap(bound_metric.metric_fn)(mids, segs))
+
+    return jax.vmap(_single)(chunk_world)
+
+
 def _predict_arrivals_chunked(
     bound_metric: CovariateConditionedRanders,
     solver: AVBDSolver,
@@ -414,7 +433,9 @@ def _predict_arrivals_chunked(
     """Predict geodesic arc lengths for *eval_pixels* in batches of *chunk_size*.
 
     Uses ``jax.vmap`` within each chunk to parallelise AVBD solves without
-    OOMing on large eval sets.
+    OOMing on large eval sets.  Each chunk is dispatched via
+    :func:`_predict_chunk_jit`, which is JIT-compiled once and reused across
+    all calls (val, test, eval).
 
     Args:
         bound_metric:    Fully bound metric (rasters + weather baked in).
@@ -429,23 +450,16 @@ def _predict_arrivals_chunked(
         Shape (N,) float64 — predicted arrival arc lengths.
     """
     spacing = float(pixel_spacing_m)
-
-    def _single_arrival(x_world: jax.Array) -> jax.Array:
-        traj = solver.solve(bound_metric, source_world, x_world, n_steps=n_steps)
-        path = traj.xs                                  # (n_steps+1, 2)
-        segs = jnp.diff(path, axis=0)                  # (n_steps, 2)
-        mids = (path[:-1] + path[1:]) * 0.5            # (n_steps, 2)
-        step_costs = jax.vmap(bound_metric.metric_fn)(mids, segs)
-        return jnp.sum(step_costs)
-
     all_pred: list = []
     n = len(eval_pixels)
     for i in range(0, n, chunk_size):
-        chunk_pix = eval_pixels[i : i + chunk_size]  # (C, 2) int
+        chunk_pix = eval_pixels[i : i + chunk_size]
         chunk_world = jnp.asarray(
             _pixels_to_world(chunk_pix, spacing), dtype=jnp.float64
-        )                                              # (C, 2)
-        chunk_pred = jax.vmap(_single_arrival)(chunk_world)
+        )
+        chunk_pred = _predict_chunk_jit(
+            bound_metric, solver, source_world, chunk_world, n_steps
+        )
         all_pred.extend(np.asarray(chunk_pred).tolist())
 
     return np.array(all_pred, dtype=np.float64)
@@ -490,11 +504,14 @@ def train_one_fire(
     )                                           # (K, 2)
     t_obs = jnp.asarray(scenario.obs_arrival_times, dtype=jnp.float64)  # (K,)
     source = _ignition_to_world(scenario.ignition_pixel, scenario.pixel_spacing_m)
+    # alpha=0 (pure Pearson-r) is the safe default for one-off calls
+    alpha = jnp.asarray(0.0, dtype=jnp.float64)
 
+    @eqx.filter_jit
     def _loss(m: CovariateConditionedRanders) -> jax.Array:
         bound = bind_scenario_to_metric(m, scenario)
         bound = bound.precompute_metric_field()
-        return arrival_loss(bound, source, obs_world, t_obs)
+        return arrival_loss(bound, source, obs_world, t_obs, alpha)
 
     loss_val, grads = eqx.filter_value_and_grad(_loss)(metric)
     updates, new_opt_state = optimizer.update(grads, opt_state, metric)
@@ -888,9 +905,13 @@ def train_scene(
         train_loss_history.append(mean_loss)
         epoch_runtimes.append(time.time() - t_epoch)
 
-        # Validation pass (obs pixels only for speed)
-        val_rs = [_val_pearson_r(metric, solver, sc, cfg) for sc in val_scenarios]
-        mean_val_r = float(np.mean(val_rs)) if val_rs else 0.0
+        # Validation pass: run every epoch in full mode, every 5 epochs in quick
+        # mode to avoid N_val sequential JIT dispatches dominating runtime.
+        val_interval = 5 if cfg.get("quick", False) else 1
+        if (epoch + 1) % val_interval == 0 or epoch == 0:
+            val_rs = [_val_pearson_r(metric, solver, sc, cfg) for sc in val_scenarios]
+            mean_val_r = float(np.mean(val_rs)) if val_rs else 0.0
+        # else: reuse previous val_r so early-stopping logic is unaffected
         val_r_history.append(mean_val_r)
 
         print(
