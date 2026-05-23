@@ -1,10 +1,11 @@
+from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import unittest
 import jax
 import jax.numpy as jnp
 from jax import config
 import numpy as np
 
-config.update("jax_enable_x64", True)
+# config.update("jax_enable_x64", True)
 
 from ham.solvers.coloring import chain_coloring, greedy_coloring, mesh_vertex_coloring
 from ham.solvers.avbd import AVBDSolver

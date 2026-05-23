@@ -1,18 +1,9 @@
-"""
-experiment_h4_simulation_exp_map.py
-===================================
-H4 — Forward Predictive Simulation using Exponential Map
-
-Uses deterministic geodesic shooting with learned wind as initial velocity.
-Much more stable than SDE for initial testing.
-"""
-
 import os
 import argparse
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
-from sklearn.preprocessing import StandardScaler
+import joblib
 from sklearn.decomposition import PCA
 import matplotlib.pyplot as plt
 
@@ -24,11 +15,49 @@ import anndata
 from ham.bio.data import BioDataset
 from ham.solvers.geodesic import ExponentialMap
 
-# Reuse helpers
 from weinreb_vae import build_diagnostic_vae, encode_all, TARGET_FATES
 from weinreb_experiment import attach_datadriven_randers_metric, load_phase1_vae
 from experiment_h3_discriminative import build_riemannian_fallback
 
+# Extended fates for H4 as requested by reviewer
+EXTENDED_FATES = ["Monocyte", "Neutrophil", "Erythroid", "Megakaryocyte"]
+
+def bootstrap_ci(data, n_boot=1000, ci=95):
+    data = np.array(data)
+    boot_means = np.array([np.mean(np.random.choice(data, size=len(data), replace=True)) for _ in range(n_boot)])
+    lower = np.percentile(boot_means, (100 - ci) / 2)
+    upper = np.percentile(boot_means, 100 - (100 - ci) / 2)
+    return lower, upper
+
+def get_leave_one_out_centroids(Z_day6, labels_day6, fate_names, test_idx_day6):
+    """Compute fate centroids excluding the specific day-6 cell from the test triple."""
+    # We precompute sum and count for each fate
+    fate_sums = {}
+    fate_counts = {}
+    for fname in EXTENDED_FATES:
+        if fname not in fate_names: continue
+        fidx = fate_names.index(fname)
+        mask = labels_day6 == fidx
+        if mask.sum() > 5:
+            fate_sums[fname] = Z_day6[mask].sum(axis=0)
+            fate_counts[fname] = mask.sum()
+            
+    # For each test cell, return its specific centroids
+    test_centroids = []
+    for test_idx in test_idx_day6:
+        test_fidx = labels_day6[test_idx]
+        test_fname = fate_names[test_fidx]
+        
+        centroids = {}
+        for fname, fsum in fate_sums.items():
+            fcount = fate_counts[fname]
+            if fname == test_fname:
+                # Leave one out
+                centroids[fname] = (fsum - Z_day6[test_idx]) / (fcount - 1 + 1e-8)
+            else:
+                centroids[fname] = fsum / fcount
+        test_centroids.append(centroids)
+    return test_centroids
 
 def main():
     parser = argparse.ArgumentParser(description="H4: Forward Simulation Experiment")
@@ -43,12 +72,14 @@ def main():
     TEST_TRIPLES = "data/weinreb_test_triples.npy"
     LATENT_DIM   = 8
     N_EVAL       = 600
-    N_TRAJ       = 1          # deterministic = 1 trajectory per start
 
-    print("=" * 70)
+    print("=" * 80)
     print("H4 — FORWARD SIMULATION (Exponential Map)")
-    print("Using learned wind as initial velocity for geodesic shooting")
-    print("=" * 70)
+    print("=" * 80)
+
+    if not os.path.exists(TEST_TRIPLES) or not os.path.exists(CHECKPOINT):
+        print("Required files not found.")
+        return
 
     # Load data
     adata = anndata.read_h5ad(PREPROCESSED)
@@ -57,12 +88,11 @@ def main():
     labels = adata.obs['Cell type annotation'].cat.codes.values.astype(np.int32)
     fate_names = list(adata.obs['Cell type annotation'].cat.categories)
 
-    scaler = StandardScaler()
-    X_norm = scaler.fit_transform(X_pca).astype(np.float32)
+    scaler = joblib.load("data/weinreb_pca_scaler.joblib")
+    X_norm = scaler.transform(X_pca).astype(np.float32)
     V_norm = (V_pca / (scaler.scale_ + 1e-8)).astype(np.float32)
 
     dataset = BioDataset(X=jnp.array(X_norm), V=jnp.array(V_norm), labels=jnp.array(labels), lineage_pairs=None)
-
     test_triples = np.load(TEST_TRIPLES)[:N_EVAL]
 
     # Load models
@@ -72,142 +102,146 @@ def main():
     vae_null = build_riemannian_fallback(vae_randers)
 
     Z_all = encode_all(vae_randers, jnp.array(X_norm))
-
-    # Fate centroids — use day-6 cells only (from ALL test triples, not just N_EVAL)
-    # This prevents progenitor cells from diluting the centroid
-    all_triples = np.load(TEST_TRIPLES)
-    day6_indices = np.unique(all_triples[:, 2])
-    day6_label_mask = np.zeros(len(labels), dtype=bool)
-    day6_label_mask[day6_indices] = True
     
-    fate_centroids = {}
-    for fname in TARGET_FATES:
-        if fname not in fate_names: continue
-        fidx = fate_names.index(fname)
-        mask = (labels == fidx) & day6_label_mask
-        if mask.sum() > 10:
-            fate_centroids[fname] = jnp.array(Z_all[mask].mean(axis=0))
-
-    # Prepare starts
     idx_day2 = test_triples[:, 0]
     idx_day6 = test_triples[:, 2]
     Z_start = Z_all[idx_day2]
-    true_fate_names = [fate_names[labels[i]] for i in idx_day6]
-
-    valid_mask = np.array([f in fate_centroids for f in true_fate_names])
-    Z_start_v = Z_start[valid_mask]
-    true_fates_v = [true_fate_names[i] for i in np.where(valid_mask)[0]]
-
-    print(f"Evaluating on {len(Z_start_v)} valid trajectories.")
-
-    # Exponential Map shooter
-    shooter = ExponentialMap(step_size=0.015, max_steps=120)
-
-    print("\n" + "="*60)
-    print("RESULTS — Predictive Accuracy (Exponential Map Shooting)")
-    print(f"{'Model':>12} {'Accuracy':>10} {'Delta':>8}")
-    print("-" * 40)
-
-    results = {}
-
-    for name, vae_model in [("Randers", vae_randers), ("Null", vae_null)]:
-        @eqx.filter_jit
-        def run_batch_simulation(model, zs):
-            def single_shoot(z):
-                # Use wind as velocity if available AND wind is enabled
-                has_wind = hasattr(model.metric, 'w_net') and getattr(model.metric, 'use_wind', False)
-                if has_wind:
-                    w = model.metric.w_net(z)
-                else:
-                    w = jnp.zeros_like(z)
-                
-                w_norm = jnp.linalg.norm(w) + 1e-8
-                v0 = w * (0.8 / w_norm)  
-                return shooter.shoot(model.metric, z, v0)
-
-            return jax.vmap(single_shoot)(zs)
-
-        print(f"  Computing {name} predictions...")
-        Z_final = run_batch_simulation(vae_model, Z_start_v)
-
-        hits = 0
-        for i, z_final in enumerate(Z_final):
-            true_fate = true_fates_v[i]
-            d_true = float(jnp.linalg.norm(z_final - fate_centroids[true_fate]))
-            d_cf = min(float(jnp.linalg.norm(z_final - c))
-                       for f, c in fate_centroids.items() if f != true_fate)
-
-            if d_true < d_cf:
-                hits += 1
-
-        acc = hits / len(Z_start_v)
-        print(f"  {name:10s} → {acc:.1%}")
-        results[name] = acc
-
-    delta = results["Randers"] - results["Null"]
-    print(f"  Delta = {delta:+.1%}")
-
-    if delta > 0.03:
-        print("\n✓ H4 SUPPORTED: Randers wind improves predictive shooting.")
-    else:
-        print("\n✗ H4 Not clearly supported in deterministic shooting.")
-
-    print("\nH4 (Exponential Map) completed.")
-
-    # ── Visualization ────────────────────────────────────────────────────────
-    print("\nGenerating trajectory visualization...")
-    # Clean Z_all for PCA
-    valid_idx = np.all(np.isfinite(Z_all), axis=1)
-    Z_clean = Z_all[valid_idx]
-    pca2 = PCA(n_components=2).fit(Z_clean)
-    z2d_all = pca2.transform(Z_all)
     
-    fig, ax = plt.subplots(figsize=(10, 8))
-    # Background latent dots
-    ax.scatter(z2d_all[:, 0], z2d_all[:, 1], s=1, alpha=0.1, color='lightgray', label='Latent Space')
-    
-    # Target centroids — only show fates that are actually tracked
-    _all_colors = {"Monocyte": "steelblue", "Neutrophil": "tomato", "Erythroid": "forestgreen", "Megakaryocyte": "darkorange"}
-    colors_fates = {f: _all_colors.get(f, "black") for f in TARGET_FATES if f in fate_centroids}
-    for fname, centroid in fate_centroids.items():
-        c2d = pca2.transform(np.array(centroid)[None])[0]
-        color = colors_fates.get(fname, "black")
-        ax.scatter(*c2d, s=150, marker='X', color=color, edgecolor='white', label=f"{fname} Target", zorder=10)
-
-    # Pick several samples for each target fate to show trajectory 'bundles'
-    N_VIZ = 4
-    print(f"  Tracing {N_VIZ} example paths per fate ...")
-    for fname, color in colors_fates.items():
-        # Check if we have this fate in our evaluation set
-        potential_indices = [i for i, f in enumerate(true_fates_v) if f == fname]
-        if not potential_indices: continue
+    @eqx.filter_jit
+    @eqx.filter_vmap(in_axes=(None, 0, 0))
+    def project_vel(v_mod, x, v):
+        return v_mod.project_control(x, v)
         
-        # Plot up to N_VIZ exemplars
-        for i, idx_v in enumerate(potential_indices[:N_VIZ]):
-            z0 = Z_start_v[idx_v]
-            
-            # Trace geodesic under Randers wind
-            w = vae_randers.metric.w_net(z0)
-            w_norm = jnp.linalg.norm(w) + 1e-8
-            v0 = w * (0.8 / w_norm)  
-            
-            # Trace full trajectory for plotting
-            traj_r, _ = shooter.trace(vae_randers.metric, z0, v0)
-            t2d = pca2.transform(np.array(traj_r))
-            
-            # Only label the first path to avoid legend clutter
-            lbl = f"{fname} Paths" if i == 0 else None
-            ax.plot(t2d[:, 0], t2d[:, 1], color=color, lw=1.8, alpha=0.5, zorder=5, label=lbl)
-            ax.scatter(t2d[0, 0], t2d[0, 1], color=color, s=20, marker='o', edgecolors='black', alpha=0.6, zorder=6)
-            ax.scatter(t2d[-1, 0], t2d[-1, 1], color=color, s=50, marker='*', edgecolors='black', alpha=0.8, zorder=7)
+    V0_start = project_vel(vae_randers, jnp.array(X_norm[idx_day2]), jnp.array(V_norm[idx_day2]))
+    V0_start = np.array(V0_start)
 
-    ax.set_title("H4 Forward Prediction: Day-2 Progenitors Shot Toward Day-6 Fates", fontsize=12)
-    ax.set_xlabel("PC1 (Latent)"); ax.set_ylabel("PC2 (Latent)")
-    ax.legend(fontsize=8, loc='upper right', frameon=True, framealpha=0.9)
+    true_fates = [fate_names[labels[i]] for i in idx_day6]
     
-    out_img = "h4_fate_trajectories.png"
-    plt.savefig(out_img, dpi=200, bbox_inches='tight')
-    print(f"Saved visualization → {out_img}")
+    # Filter to extended fates
+    valid_mask = np.array([f in EXTENDED_FATES for f in true_fates])
+    Z_start_v = Z_start[valid_mask]
+    V0_start_v = V0_start[valid_mask]
+    true_fates_v = [true_fates[i] for i in np.where(valid_mask)[0]]
+    idx_day6_v = idx_day6[valid_mask]
+    
+    print(f"Evaluating on {len(Z_start_v)} valid trajectories (Fates: {EXTENDED_FATES}).")
+    
+    # Precompute leave-one-out centroids
+    loo_centroids = get_leave_one_out_centroids(Z_all, labels, fate_names, idx_day6_v)
 
+    # 1. Deterministic Ablation (v0 magnitude)
+    print("\n--- Deterministic Initial Velocity (v0) Ablation ---")
+    v0_scales = [0.1, 0.5, 1.0, 1.5, 2.0]
+    shooter = ExponentialMap(step_size=0.015, max_steps=120)
+    
+    for scale in v0_scales:
+        v0_scaled = V0_start_v * (scale / (np.linalg.norm(V0_start_v, axis=1, keepdims=True) + 1e-8))
+        
+        accs = {}
+        for name, model in [("Null", vae_null), ("Randers", vae_randers)]:
+            @eqx.filter_jit
+            def run_batch_simulation(m, zs, vs):
+                def single_shoot(z, v):
+                    return shooter.shoot(m.metric, z, v)
+                return jax.vmap(single_shoot)(zs, vs)
+                
+            Z_final = run_batch_simulation(model, Z_start_v, v0_scaled)
+            
+            hits = 0
+            for i, zf in enumerate(Z_final):
+                tf = true_fates_v[i]
+                cents = loo_centroids[i]
+                if tf not in cents: continue
+                d_true = np.linalg.norm(zf - cents[tf])
+                d_cf = min([np.linalg.norm(zf - c) for f, c in cents.items() if f != tf])
+                if d_true < d_cf:
+                    hits += 1
+            accs[name] = hits / max(1, len(Z_start_v))
+            
+        print(f"  v0_scale = {scale:4.1f} | Null Acc: {accs['Null']:6.1%} | Randers Acc: {accs['Randers']:6.1%} | Delta: {accs['Randers']-accs['Null']:+6.1%}")
+
+    # 2. Stochastic Shooting
+    print("\n--- Stochastic Shooting Evaluation (K=20, v0_scale=1.0) ---")
+    K = 20
+    noise_sigma = 0.05
+    scale = 1.0
+    v0_base = V0_start_v * (scale / (np.linalg.norm(V0_start_v, axis=1, keepdims=True) + 1e-8))
+    
+    rng = np.random.default_rng(42)
+    
+    results = {"Null": [], "Randers": []}
+    
+    for name, model in [("Null", vae_null), ("Randers", vae_randers)]:
+        print(f"  Simulating {name}...")
+        
+        @eqx.filter_jit
+        def run_stochastic(m, zs, vs):
+            def single_shoot(z, v):
+                return shooter.shoot(m.metric, z, v)
+            return jax.vmap(single_shoot)(zs, vs)
+            
+        is_correct = []
+        
+        for i in range(len(Z_start_v)):
+            z0 = Z_start_v[i]
+            v0 = v0_base[i]
+            tf = true_fates_v[i]
+            cents = loo_centroids[i]
+            
+            if tf not in cents: 
+                is_correct.append(False)
+                continue
+            
+            # Generate K noisy v0s
+            v0s = v0 + rng.normal(0, noise_sigma * np.linalg.norm(v0), size=(K, LATENT_DIM))
+            z0s = jnp.tile(z0, (K, 1))
+            
+            zfs = run_stochastic(model, z0s, jnp.array(v0s))
+            zfs = np.array(zfs)
+            
+            # Compute hits among K trajectories
+            hits = 0
+            for zf in zfs:
+                d_true = np.linalg.norm(zf - cents[tf])
+                d_cf = min([np.linalg.norm(zf - c) for f, c in cents.items() if f != tf])
+                if d_true < d_cf:
+                    hits += 1
+            
+            # Soft assignment: if probability > 0.5, it's correct
+            prob = hits / K
+            is_correct.append(prob > 0.5)
+            
+        results[name] = np.array(is_correct)
+        acc = np.mean(is_correct)
+        print(f"  {name} Macro Accuracy: {acc:.1%}")
+
+    null_correct = results["Null"]
+    rand_correct = results["Randers"]
+    
+    acc_null = np.mean(null_correct)
+    acc_rand = np.mean(rand_correct)
+    ci_null = bootstrap_ci(null_correct)
+    ci_rand = bootstrap_ci(rand_correct)
+    
+    print("\n" + "="*60)
+    print("H4 ROBUSTNESS SUMMARY — Stochastic Predictive Shooting")
+    print("-" * 60)
+    print(f"  Randers:    {acc_rand:.1%}  95% CI: [{ci_rand[0]:.1%}, {ci_rand[1]:.1%}]")
+    print(f"  Riemannian: {acc_null:.1%}  95% CI: [{ci_null[0]:.1%}, {ci_null[1]:.1%}]")
+    print(f"  Delta:      {acc_rand - acc_null:+.1%}")
+    
+    # McNemar's Test
+    import statsmodels.stats.contingency_tables as smct
+    table = [[np.sum(null_correct & rand_correct), np.sum(null_correct & ~rand_correct)],
+             [np.sum(~null_correct & rand_correct), np.sum(~null_correct & ~rand_correct)]]
+    mcnemar = smct.mcnemar(table, exact=False, correction=True)
+    p_val = mcnemar.pvalue
+    print(f"  McNemar's p-value: {p_val:.2e}")
+    
+    if p_val < 0.05 and acc_rand > acc_null:
+        print("\n✓ H4 SUPPORTED: Randers geometry significantly improves predictive shooting.")
+    else:
+        print("\n✗ H4 NOT SUPPORTED: No significant improvement over Riemannian null.")
+        
 if __name__ == "__main__":
     main()

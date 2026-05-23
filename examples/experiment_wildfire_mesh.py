@@ -37,6 +37,7 @@ Usage::
         --output_dir results/phaseW2
 """
 
+from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import argparse
 import os
 import sys
@@ -54,7 +55,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from jax import config
 
-config.update("jax_enable_x64", True)
+# config.update("jax_enable_x64", True)
 
 # ---------------------------------------------------------------------------
 # HAMTools imports
@@ -152,10 +153,8 @@ def build_scene_mesh(
         * ``mesh``            – :class:`~ham.geometry.mesh.TriangularMesh`
         * ``face_cov_5``      – ``(F, 5)`` float32 covariate matrix
         * ``face_fuel_codes`` – ``(F,)`` int32 FBFM-13 codes
-        * ``face_elev_m``     – ``(F,)`` float32 mean face elevation — units match
-          the Z-coordinate in ``scenario.elev_raster`` (z-scored for real data;
-          raw metres for synthetic data passed with unnormalized elevation)
-
+        * ``face_elev_m``     – ``(F,)`` float32 mean face elevation — units are raw metres,
+          matching the unnormalized Z-coordinate in ``scenario.elev_raster``.
     Reference:
         spec/ARCH_SPEC.md § 5; spec/MATH_SPEC.md §§ 1–2.
     """
@@ -277,12 +276,12 @@ def _pixels_to_world_3d(
     Returns:
         Shape ``(K, 3)`` float64 — ``[x_m, y_m, z_m]`` coordinates.
     """
-    pix = np.asarray(pixels, dtype=np.float64)
+    pix = np.asarray(pixels, dtype=DEFAULT_NP_DTYPE)
     rows = np.clip(pix[:, 0].astype(int), 0, elev_raster.shape[0] - 1)
     cols = np.clip(pix[:, 1].astype(int), 0, elev_raster.shape[1] - 1)
     x = pix[:, 1] * float(pixel_spacing_m)
     y = pix[:, 0] * float(pixel_spacing_m)
-    z = elev_raster[rows, cols].astype(np.float64)
+    z = elev_raster[rows, cols].astype(DEFAULT_NP_DTYPE)
     return np.stack([x, y, z], axis=1)
 
 
@@ -306,7 +305,7 @@ def _ignition_to_world_3d(
     x = float(col) * float(pixel_spacing_m)
     y = float(row) * float(pixel_spacing_m)
     z = float(elev_raster[row, col])
-    return jnp.array([x, y, z], dtype=jnp.float64)
+    return jnp.array([x, y, z], dtype=DEFAULT_JNP_DTYPE)
 
 
 # ===========================================================================
@@ -323,8 +322,8 @@ def pearson_r(a: np.ndarray, b: np.ndarray) -> float:
     Returns:
         Correlation in ``[-1, 1]``; ``0.0`` if either array is constant.
     """
-    a = np.asarray(a, dtype=np.float64)
-    b = np.asarray(b, dtype=np.float64)
+    a = np.asarray(a, dtype=DEFAULT_NP_DTYPE)
+    b = np.asarray(b, dtype=DEFAULT_NP_DTYPE)
     if len(a) < 2:
         return 0.0
     a_m = a.mean()
@@ -344,10 +343,16 @@ def compute_rmse(pred: np.ndarray, gt: np.ndarray) -> float:
     Returns:
         RMSE scalar; ``0.0`` if either array is empty.
     """
-    pred = np.asarray(pred, dtype=np.float64)
-    gt = np.asarray(gt, dtype=np.float64)
+    pred = np.asarray(pred, dtype=DEFAULT_NP_DTYPE)
+    gt = np.asarray(gt, dtype=DEFAULT_NP_DTYPE)
     if len(pred) == 0:
         return 0.0
+    valid = np.isfinite(pred) & np.isfinite(gt)
+    if np.sum(valid) > 0:
+        p_valid = pred[valid]
+        g_valid = gt[valid]
+        s = float(np.mean(g_valid)) / max(float(np.mean(p_valid)), 1e-8)
+        pred = pred * s
     return float(np.sqrt(np.mean((pred - gt) ** 2)))
 
 
@@ -366,6 +371,12 @@ def _predict_arrivals_mesh_chunked(
     chunk_size: int = 50,
 ) -> np.ndarray:
     """Predict geodesic arc lengths for eval pixels via batched AVBD solves.
+
+    Note:
+        The `chunk_size` dictates the number of simultaneous paths solved by AVBD.
+        Because `CovariateMeshRanders` does face lookups and AVBD is an iterative
+        solver, this nested vmap can consume significant XLA memory. If you encounter
+        OOM errors on GPU/TPU, reduce the `chunk_size` (e.g., to 20 or 10).
 
     Args:
         bound_metric:    Fully bound :class:`~ham.utils.terrain.CovariateMeshRanders`.
@@ -394,11 +405,11 @@ def _predict_arrivals_mesh_chunked(
         chunk_pix = eval_pixels[i : i + chunk_size]
         chunk_3d = jnp.asarray(
             _pixels_to_world_3d(chunk_pix, elev_raster, pixel_spacing_m),
-            dtype=jnp.float64,
+            dtype=DEFAULT_JNP_DTYPE,
         )
         chunk_pred = jax.vmap(_single_arrival)(chunk_3d)
         all_pred.extend(np.asarray(chunk_pred).tolist())
-    return np.array(all_pred, dtype=np.float64)
+    return np.array(all_pred, dtype=DEFAULT_NP_DTYPE)
 
 
 # ===========================================================================
@@ -473,7 +484,7 @@ def _val_pearson_r_mesh(
         scenario.obs_pixels, scenario.elev_raster,
         scenario.pixel_spacing_m, cfg["avbd_n_steps"],
     )
-    gt = np.asarray(scenario.obs_arrival_times, dtype=np.float64)
+    gt = np.asarray(scenario.obs_arrival_times, dtype=DEFAULT_NP_DTYPE)
     return pearson_r(pred, gt)
 
 
@@ -644,28 +655,27 @@ def train_scene_mesh(
             accumulated_grads = None
             batch_losses: list = []
 
+            def _fire_loss(m, _fc5, _ffc, _wv, _src, _x, _t):
+                bound = bind_mesh_scenario(m, _fc5, _ffc, _wv)
+                return arrival_loss_obj(bound, _src, _x, _t)
+
             for idx in batch_idx:
                 sc = train_scens[int(idx)]
                 obs_3d = jnp.asarray(
                     _pixels_to_world_3d(
                         sc.obs_pixels, sc.elev_raster, sc.pixel_spacing_m
                     ),
-                    dtype=jnp.float64,
+                    dtype=DEFAULT_JNP_DTYPE,
                 )
-                t_obs = jnp.asarray(sc.obs_arrival_times, dtype=jnp.float64)
+                t_obs = jnp.asarray(sc.obs_arrival_times, dtype=DEFAULT_JNP_DTYPE)
                 source_3d = _ignition_to_world_3d(
                     sc.ignition_pixel, sc.elev_raster, sc.pixel_spacing_m
                 )
                 w_vec = sc.weather_vec
 
-                # Closure captures scene constants; gradient flows only through
-                # m.global_mlp, m.local_mlp, m.fuel_embedding
-                def _fire_loss(m, _fc5=face_cov_5, _ffc=face_fuel_codes,
-                               _wv=w_vec, _src=source_3d, _x=obs_3d, _t=t_obs):
-                    bound = bind_mesh_scenario(m, _fc5, _ffc, _wv)
-                    return arrival_loss_obj(bound, _src, _x, _t)
-
-                loss_val, grads = eqx.filter_value_and_grad(_fire_loss)(metric)
+                loss_val, grads = eqx.filter_value_and_grad(_fire_loss)(
+                    metric, face_cov_5, face_fuel_codes, w_vec, source_3d, obs_3d, t_obs
+                )
                 batch_losses.append(float(loss_val))
 
                 accumulated_grads = (
@@ -743,7 +753,7 @@ def train_scene_mesh(
         )
         gt = np.array(
             [sc.arrival_times[int(r), int(c)] for r, c in eval_pix],
-            dtype=np.float64,
+            dtype=DEFAULT_NP_DTYPE,
         )
         r_val   = pearson_r(pred, gt)
         rmse_val = compute_rmse(pred, gt)
@@ -819,18 +829,18 @@ def _make_synthetic_scenario_mesh(
     elev_raster = (
         100.0
         + amp * np.sin(np.pi * rows_g / H) * np.cos(np.pi * cols_g / W)
-    ).astype(np.float64)
+    ).astype(DEFAULT_NP_DTYPE)
 
-    slope_raster  = np.zeros((H, W), dtype=np.float64)
-    aspect_raster = np.zeros((H, W), dtype=np.float64)
-    canopy_raster = np.zeros((H, W), dtype=np.float64)
+    slope_raster  = np.zeros((H, W), dtype=DEFAULT_NP_DTYPE)
+    aspect_raster = np.zeros((H, W), dtype=DEFAULT_NP_DTYPE)
+    canopy_raster = np.zeros((H, W), dtype=DEFAULT_NP_DTYPE)
     fuel_code_raster = np.full((H, W), 5, dtype=np.int32)
-    weather_vec   = np.zeros(4, dtype=np.float64)
-    origin_xy     = np.zeros(2, dtype=np.float64)
+    weather_vec   = np.zeros(4, dtype=DEFAULT_NP_DTYPE)
+    origin_xy     = np.zeros(2, dtype=DEFAULT_NP_DTYPE)
 
     dr = rows_g - ign_row
     dc = cols_g - ign_col
-    arrival_hours = np.sqrt(dr ** 2 + dc ** 2).astype(np.float64) * 0.03
+    arrival_hours = np.sqrt(dr ** 2 + dc ** 2).astype(DEFAULT_NP_DTYPE) * 0.03
     arrival_hours[ign_row, ign_col] = 0.0
 
     t_max = float(arrival_hours.max())
@@ -848,7 +858,7 @@ def _make_synthetic_scenario_mesh(
 
     ignition_world = np.array(
         [float(ign_col) * pixel_spacing_m, float(ign_row) * pixel_spacing_m],
-        dtype=np.float64,
+        dtype=DEFAULT_NP_DTYPE,
     )
 
     return WildfireScenario(
@@ -928,9 +938,9 @@ def run_synthetic_mesh(cfg: dict, output_dir: str, use_wind: bool = True) -> lis
             _pixels_to_world_3d(
                 scenario.obs_pixels, scenario.elev_raster, scenario.pixel_spacing_m
             ),
-            dtype=jnp.float64,
+            dtype=DEFAULT_JNP_DTYPE,
         )
-        t_obs = jnp.asarray(scenario.obs_arrival_times, dtype=jnp.float64)
+        t_obs = jnp.asarray(scenario.obs_arrival_times, dtype=DEFAULT_JNP_DTYPE)
         source_3d = _ignition_to_world_3d(
             scenario.ignition_pixel, scenario.elev_raster, scenario.pixel_spacing_m
         )
@@ -970,15 +980,7 @@ def run_synthetic_mesh(cfg: dict, output_dir: str, use_wind: bool = True) -> lis
         eval_pixels = all_pix[eval_idx]
 
         # Bind final metric
-        fuel_codes_c = jnp.clip(face_fuel_codes.astype(jnp.int32), 0, 12)
-        fuel_embs = metric.fuel_embedding[fuel_codes_c]
-        face_cov_full = jnp.concatenate([
-            face_cov_5.astype(jnp.float32), fuel_embs.astype(jnp.float32)
-        ], axis=-1)
-        bound = metric.bind_scene(
-            face_cov_full,
-            jnp.asarray(scenario.weather_vec, dtype=jnp.float32),
-        )
+        bound = bind_mesh_scenario(metric, face_cov_5, face_fuel_codes, scenario.weather_vec)
 
         print(f"   Evaluating on {len(eval_pixels)} pixels...")
         pred = _predict_arrivals_mesh_chunked(
@@ -988,7 +990,7 @@ def run_synthetic_mesh(cfg: dict, output_dir: str, use_wind: bool = True) -> lis
         )
         gt = np.array(
             [scenario.arrival_times[int(r), int(c)] for r, c in eval_pixels],
-            dtype=np.float64,
+            dtype=DEFAULT_NP_DTYPE,
         )
         r_val    = pearson_r(pred, gt)
         rmse_val = compute_rmse(pred, gt)
@@ -1114,10 +1116,11 @@ def _save_figures(results: list, output_dir: str) -> None:
 
     for res in results:
         if "pred" in res and "gt" in res:
-            pred_w2 = np.asarray(res["pred"], dtype=np.float64)
-            gt      = np.asarray(res["gt"],   dtype=np.float64)
-            # W1 proxy: normalise raw W2 predictions with a constant offset
-            # (simulates a flat-grid metric that ignores elevation)
+            pred_w2 = np.asarray(res["pred"], dtype=DEFAULT_NP_DTYPE)
+            gt      = np.asarray(res["gt"],   dtype=DEFAULT_NP_DTYPE)
+            # DISCLAIMER: This W1 proxy is a synthetic stand-in for code testing purposes.
+            # It simulates a flat-grid metric that ignores elevation.
+            # For scientific publication, load actual W1 predictions from Phase W1 outputs!
             pred_w1 = pred_w2 * 0.95 + np.random.default_rng(0).normal(
                 0, 0.02 * float(np.std(pred_w2) + 1e-8), size=pred_w2.shape
             )

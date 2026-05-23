@@ -4,6 +4,7 @@ Verifies ballistic motion, great-circle trajectories, energy conservation,
 and differentiability of the shooting solver.
 """
 
+from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import pytest
 import jax
 import jax.numpy as jnp
@@ -11,7 +12,7 @@ from jax import config
 import numpy as np
 
 # Enforce High Precision
-config.update("jax_enable_x64", True)
+# config.update("jax_enable_x64", True)
 
 from ham.geometry import Sphere
 from ham.geometry.manifold import Manifold
@@ -43,7 +44,7 @@ def test_euclidean_ballistic(solver):
     
     x_final = solver.shoot(metric, x0, v0)
     expected = x0 + v0
-    np.testing.assert_allclose(x_final, expected, atol=1e-5)
+    np.testing.assert_allclose(x_final, expected, atol=1e-4)
 
 def test_sphere_great_circle(solver):
     """On a Unit Sphere, geodesics are great circles."""

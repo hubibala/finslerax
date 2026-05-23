@@ -1,3 +1,4 @@
+from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -5,7 +6,7 @@ import numpy as np
 import equinox as eqx
 import optax
 from jax import config
-config.update("jax_enable_x64", True)
+# config.update("jax_enable_x64", True)
 
 from ham.geometry import Sphere
 from ham.models.learned import NeuralRanders

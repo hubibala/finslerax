@@ -16,4 +16,6 @@ from .vis import setup_3d_plot, plot_sphere, plot_trajectory, generate_icosphere
 from .utils import safe_norm
 
 def enable_x64():
-    config.update("jax_enable_x64", True)
+    import warnings
+    warnings.warn("enable_x64 is deprecated. HAM now uses a configurable DTYPE defaulting to float32.")
+    # config.update("jax_enable_x64", True)

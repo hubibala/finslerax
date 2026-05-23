@@ -67,7 +67,7 @@ class NeuralRanders(Randers):
 
     def __init__(self, manifold: Manifold, key: jax.Array,
                  hidden_dim: int = 32, depth: int = 2,
-                 use_fourier: bool = True):
+                 use_fourier: bool = True, use_wind: bool = True):
         """Initializes the neural Randers metric.
 
         Args:
@@ -86,7 +86,7 @@ class NeuralRanders(Randers):
         w_net = VectorField(self.dim, hidden_dim, depth, k2, 
                             use_fourier=use_fourier, fourier_scale=3.0)
                             
-        super().__init__(manifold, h_net, w_net, epsilon=1e-5)
+        super().__init__(manifold, h_net, w_net, epsilon=1e-5, use_wind=use_wind)
 
 
 class PullbackRanders(Randers):

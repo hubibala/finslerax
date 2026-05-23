@@ -24,7 +24,7 @@ import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 from matplotlib.gridspec import GridSpec
 from matplotlib.patches import FancyArrowPatch
-from sklearn.preprocessing import StandardScaler
+import joblib
 from sklearn.decomposition import PCA
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
@@ -162,8 +162,8 @@ def main():
     n_types    = len(fate_names)
     time_point = adata.obs["time_point"].values.astype(float)
 
-    scaler  = StandardScaler()
-    X_norm  = scaler.fit_transform(X_pca).astype(np.float32)
+    scaler  = joblib.load("data/weinreb_pca_scaler.joblib")
+    X_norm  = scaler.transform(X_pca).astype(np.float32)
     V_norm  = (V_pca / (scaler.scale_ + 1e-8)).astype(np.float32)
     dataset = BioDataset(X=jnp.array(X_norm), V=jnp.array(V_norm),
                          labels=jnp.array(labels_np), lineage_pairs=None)

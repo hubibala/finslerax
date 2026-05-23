@@ -1,3 +1,4 @@
+from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import unittest
 import jax
 import jax.numpy as jnp
@@ -5,7 +6,7 @@ import numpy as np
 from jax.test_util import check_grads
 from jax import config
 
-config.update("jax_enable_x64", True)
+# config.update("jax_enable_x64", True)
 
 from ham.geometry.manifold import Manifold, _safe_norm_ratio
 from ham.geometry import Torus

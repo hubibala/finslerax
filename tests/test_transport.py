@@ -6,6 +6,7 @@ Note on conventions:
 - `numpy` (np) is used strictly for non-traced assertions and testing utilities.
 """
 
+from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import jax
 import jax.numpy as jnp
 import unittest
@@ -13,7 +14,7 @@ import numpy as np
 from jax import config
 
 # Ensure precision for geometric drift checks
-config.update("jax_enable_x64", True)
+# config.update("jax_enable_x64", True)
 
 from ham.geometry import Sphere, EuclideanSpace
 from ham.geometry.zoo import Euclidean, Riemannian, Randers

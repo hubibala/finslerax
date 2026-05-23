@@ -42,6 +42,7 @@ Usage::
     python examples/experiment_wildfire_flat.py --synthetic --quick --no_wind
 """
 
+from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import argparse
 import os
 import sys
@@ -60,7 +61,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from jax import config
 
-config.update("jax_enable_x64", True)
+# config.update("jax_enable_x64", True)
 
 # ---------------------------------------------------------------------------
 # HAMTools imports
@@ -175,14 +176,14 @@ def bind_scenario_to_metric(
         Bound :class:`~ham.models.wildfire.CovariateConditionedRanders`.
     """
     return metric.bind_scene(
-        elev=jnp.asarray(scenario.elev_raster, dtype=jnp.float64),
-        slope=jnp.asarray(scenario.slope_raster, dtype=jnp.float64),
-        aspect=jnp.asarray(scenario.aspect_raster, dtype=jnp.float64),
-        canopy=jnp.asarray(scenario.canopy_raster, dtype=jnp.float64),
+        elev=jnp.asarray(scenario.elev_raster, dtype=DEFAULT_JNP_DTYPE),
+        slope=jnp.asarray(scenario.slope_raster, dtype=DEFAULT_JNP_DTYPE),
+        aspect=jnp.asarray(scenario.aspect_raster, dtype=DEFAULT_JNP_DTYPE),
+        canopy=jnp.asarray(scenario.canopy_raster, dtype=DEFAULT_JNP_DTYPE),
         fuel_codes=jnp.asarray(scenario.fuel_code_raster, dtype=jnp.int32),
-        weather_vec=jnp.asarray(scenario.weather_vec, dtype=jnp.float64),
+        weather_vec=jnp.asarray(scenario.weather_vec, dtype=DEFAULT_JNP_DTYPE),
         pixel_spacing_m=float(scenario.pixel_spacing_m),
-        origin_xy=jnp.asarray(scenario.origin_xy, dtype=jnp.float64),
+        origin_xy=jnp.asarray(scenario.origin_xy, dtype=DEFAULT_JNP_DTYPE),
     )
 
 
@@ -203,13 +204,13 @@ def bind_scenario_terrain(
         Terrain-bound metric (``weather_vec`` still None).
     """
     return metric.bind_scene_rasters(
-        elev=jnp.asarray(scenario.elev_raster, dtype=jnp.float64),
-        slope=jnp.asarray(scenario.slope_raster, dtype=jnp.float64),
-        aspect=jnp.asarray(scenario.aspect_raster, dtype=jnp.float64),
-        canopy=jnp.asarray(scenario.canopy_raster, dtype=jnp.float64),
+        elev=jnp.asarray(scenario.elev_raster, dtype=DEFAULT_JNP_DTYPE),
+        slope=jnp.asarray(scenario.slope_raster, dtype=DEFAULT_JNP_DTYPE),
+        aspect=jnp.asarray(scenario.aspect_raster, dtype=DEFAULT_JNP_DTYPE),
+        canopy=jnp.asarray(scenario.canopy_raster, dtype=DEFAULT_JNP_DTYPE),
         fuel_codes=jnp.asarray(scenario.fuel_code_raster, dtype=jnp.int32),
         pixel_spacing_m=float(scenario.pixel_spacing_m),
-        origin_xy=jnp.asarray(scenario.origin_xy, dtype=jnp.float64),
+        origin_xy=jnp.asarray(scenario.origin_xy, dtype=DEFAULT_JNP_DTYPE),
     )
 
 
@@ -317,7 +318,7 @@ def _pixels_to_world(pixels: np.ndarray, pixel_spacing_m: float) -> np.ndarray:
     Returns:
         Shape (K, 2) float64 — ``[x_m, y_m]`` pairs.
     """
-    pix = np.asarray(pixels, dtype=np.float64)
+    pix = np.asarray(pixels, dtype=DEFAULT_NP_DTYPE)
     x_world = pix[:, 1] * float(pixel_spacing_m)
     y_world = pix[:, 0] * float(pixel_spacing_m)
     return np.stack([x_world, y_world], axis=1)
@@ -335,7 +336,7 @@ def _ignition_to_world(ignition_pixel: np.ndarray, pixel_spacing_m: float) -> ja
     """
     row, col = float(ignition_pixel[0]), float(ignition_pixel[1])
     return jnp.array([col * float(pixel_spacing_m), row * float(pixel_spacing_m)],
-                     dtype=jnp.float64)
+                     dtype=DEFAULT_JNP_DTYPE)
 
 
 # ===========================================================================
@@ -353,8 +354,8 @@ def pearson_r(a: np.ndarray, b: np.ndarray) -> float:
         Correlation in ``[-1, 1]``; ``0.0`` if either array is constant or
         too short.
     """
-    a = np.asarray(a, dtype=np.float64)
-    b = np.asarray(b, dtype=np.float64)
+    a = np.asarray(a, dtype=DEFAULT_NP_DTYPE)
+    b = np.asarray(b, dtype=DEFAULT_NP_DTYPE)
     if len(a) < 2:
         return 0.0
     a_mean = a.mean()
@@ -382,12 +383,12 @@ def spearman_r(a: np.ndarray, b: np.ndarray) -> float:
         Correlation in ``[-1, 1]``; ``0.0`` if either array is constant or
         too short.
     """
-    a = np.asarray(a, dtype=np.float64)
-    b = np.asarray(b, dtype=np.float64)
+    a = np.asarray(a, dtype=DEFAULT_NP_DTYPE)
+    b = np.asarray(b, dtype=DEFAULT_NP_DTYPE)
     if len(a) < 2:
         return 0.0
-    rank_a = np.argsort(np.argsort(a)).astype(np.float64)
-    rank_b = np.argsort(np.argsort(b)).astype(np.float64)
+    rank_a = np.argsort(np.argsort(a)).astype(DEFAULT_NP_DTYPE)
+    rank_b = np.argsort(np.argsort(b)).astype(DEFAULT_NP_DTYPE)
     return pearson_r(rank_a, rank_b)
 
 
@@ -465,14 +466,14 @@ def _predict_arrivals_chunked(
     for i in range(0, n, chunk_size):
         chunk_pix = eval_pixels[i : i + chunk_size]
         chunk_world = jnp.asarray(
-            _pixels_to_world(chunk_pix, spacing), dtype=jnp.float64
+            _pixels_to_world(chunk_pix, spacing), dtype=DEFAULT_JNP_DTYPE
         )
         chunk_pred = _predict_chunk_jit(
             bound_metric, solver, source_world, chunk_world, n_steps
         )
         all_pred.extend(np.asarray(chunk_pred).tolist())
 
-    return np.array(all_pred, dtype=np.float64)
+    return np.array(all_pred, dtype=DEFAULT_NP_DTYPE)
 
 
 # ===========================================================================
@@ -510,12 +511,12 @@ def train_one_fire(
 
     obs_world = jnp.asarray(
         _pixels_to_world(scenario.obs_pixels, scenario.pixel_spacing_m),
-        dtype=jnp.float64,
+        dtype=DEFAULT_JNP_DTYPE,
     )                                           # (K, 2)
-    t_obs = jnp.asarray(scenario.obs_arrival_times, dtype=jnp.float64)  # (K,)
+    t_obs = jnp.asarray(scenario.obs_arrival_times, dtype=DEFAULT_JNP_DTYPE)  # (K,)
     source = _ignition_to_world(scenario.ignition_pixel, scenario.pixel_spacing_m)
     # alpha=0 (pure Pearson-r) is the safe default for one-off calls
-    alpha = jnp.asarray(0.0, dtype=jnp.float64)
+    alpha = jnp.asarray(0.0, dtype=DEFAULT_JNP_DTYPE)
 
     @eqx.filter_jit
     def _loss(m: CovariateConditionedRanders) -> jax.Array:
@@ -598,7 +599,7 @@ def evaluate_fire(
 
     gt_arrival = np.array(
         [scenario.arrival_times[int(r), int(c)] for r, c in eval_pixels],
-        dtype=np.float64,
+        dtype=DEFAULT_NP_DTYPE,
     )
 
     r_pearson  = pearson_r(pred_arrivals, gt_arrival)
@@ -657,7 +658,7 @@ def _val_pearson_r(
 ) -> float:
     """Fast validation: Pearson r over held-out validation pixels."""
     val_pixels = scenario.val_pixels
-    val_gt = np.asarray(scenario.val_arrival_times, dtype=np.float64)
+    val_gt = np.asarray(scenario.val_arrival_times, dtype=DEFAULT_NP_DTYPE)
 
     if len(val_pixels) == 0:
         return 0.0
@@ -870,17 +871,17 @@ def train_scene(
     _obs_world_all = jnp.asarray(np.stack([
         _pixels_to_world(sc.obs_pixels[:K], sc.pixel_spacing_m)
         for sc in train_scenarios
-    ], axis=0), dtype=jnp.float64)   # (N_train, K, 2)
+    ], axis=0), dtype=DEFAULT_JNP_DTYPE)   # (N_train, K, 2)
     _obs_times_all = jnp.asarray(np.stack([
         sc.obs_arrival_times[:K] for sc in train_scenarios
-    ], axis=0), dtype=jnp.float64)   # (N_train, K)
+    ], axis=0), dtype=DEFAULT_JNP_DTYPE)   # (N_train, K)
     _sources_all = jnp.asarray(np.stack([
         _ignition_to_world(sc.ignition_pixel, sc.pixel_spacing_m)
         for sc in train_scenarios
-    ], axis=0), dtype=jnp.float64)   # (N_train, 2)
+    ], axis=0), dtype=DEFAULT_JNP_DTYPE)   # (N_train, 2)
     _weather_all = jnp.asarray(np.stack([
         sc.weather_vec for sc in train_scenarios
-    ], axis=0), dtype=jnp.float64)   # (N_train, 4)
+    ], axis=0), dtype=DEFAULT_JNP_DTYPE)   # (N_train, 4)
 
     B = cfg["batch_size_fires"]  # vmap batch size
     print(f"  Batched training: B={B} fires/step, "
@@ -897,7 +898,7 @@ def train_scene(
             ramp_epochs=cfg["curriculum_ramp_epochs"],
         )
 
-        alpha = jnp.asarray(alpha_val, dtype=jnp.float64)
+        alpha = jnp.asarray(alpha_val, dtype=DEFAULT_JNP_DTYPE)
         # Shuffle training fires
         perm = rng.permutation(len(train_scenarios))
         epoch_losses: list = []
@@ -1141,18 +1142,18 @@ def _make_synthetic_scenario(seed: int = 0) -> WildfireScenario:
 
     # Terrain rasters
     rows_g, cols_g = np.mgrid[0:H, 0:W]
-    elev_raster   = (100.0 + 10.0 * np.sin(np.pi * rows_g / H)).astype(np.float64)
-    slope_raster  = np.zeros((H, W), dtype=np.float64)
-    aspect_raster = np.zeros((H, W), dtype=np.float64)
-    canopy_raster = np.zeros((H, W), dtype=np.float64)
+    elev_raster   = (100.0 + 10.0 * np.sin(np.pi * rows_g / H)).astype(DEFAULT_NP_DTYPE)
+    slope_raster  = np.zeros((H, W), dtype=DEFAULT_NP_DTYPE)
+    aspect_raster = np.zeros((H, W), dtype=DEFAULT_NP_DTYPE)
+    canopy_raster = np.zeros((H, W), dtype=DEFAULT_NP_DTYPE)
     fuel_code_raster = np.full((H, W), 5, dtype=np.int32)
-    weather_vec   = np.zeros(4, dtype=np.float64)
-    origin_xy     = np.zeros(2, dtype=np.float64)
+    weather_vec   = np.zeros(4, dtype=DEFAULT_NP_DTYPE)
+    origin_xy     = np.zeros(2, dtype=DEFAULT_NP_DTYPE)
 
     # Arrival times
     dr = rows_g - ign_row
     dc = cols_g - ign_col
-    arrival_hours = np.sqrt(dr**2 + dc**2).astype(np.float64) * 0.03
+    arrival_hours = np.sqrt(dr**2 + dc**2).astype(DEFAULT_NP_DTYPE) * 0.03
     arrival_hours[ign_row, ign_col] = 0.0
 
     t_max = float(arrival_hours.max())
@@ -1173,7 +1174,7 @@ def _make_synthetic_scenario(seed: int = 0) -> WildfireScenario:
 
     ignition_world = np.array(
         [float(ign_col) * pixel_spacing_m, float(ign_row) * pixel_spacing_m],
-        dtype=np.float64,
+        dtype=DEFAULT_NP_DTYPE,
     )
 
     return WildfireScenario(
@@ -1246,9 +1247,9 @@ def run_synthetic(cfg: dict, output_dir: str, use_wind: bool = True) -> dict:
 
     obs_world = jnp.asarray(
         _pixels_to_world(scenario.obs_pixels, scenario.pixel_spacing_m),
-        dtype=jnp.float64,
+        dtype=DEFAULT_JNP_DTYPE,
     )
-    t_obs  = jnp.asarray(scenario.obs_arrival_times, dtype=jnp.float64)
+    t_obs  = jnp.asarray(scenario.obs_arrival_times, dtype=DEFAULT_JNP_DTYPE)
     source = _ignition_to_world(scenario.ignition_pixel, scenario.pixel_spacing_m)
 
     train_loss_history: list = []
@@ -1262,7 +1263,7 @@ def run_synthetic(cfg: dict, output_dir: str, use_wind: bool = True) -> dict:
             warmup_epochs=cfg["curriculum_warmup_epochs"],
             ramp_epochs=cfg["curriculum_ramp_epochs"],
         )
-        alpha = jnp.asarray(alpha, dtype=jnp.float64)
+        alpha = jnp.asarray(alpha, dtype=DEFAULT_JNP_DTYPE)
 
         def _loss(m):
             bound = bind_scenario_to_metric(m, scenario)

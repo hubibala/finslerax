@@ -1,5 +1,5 @@
 """
-experiment_h2_short_segments_standalone.py
+experiment_h2_directional.py
 ============================================
 H2 - Directional Asymmetry on Short Observed Clonal Segments (Fully Self-Contained)
 
@@ -16,7 +16,7 @@ import jax
 import jax.numpy as jnp
 import equinox as eqx
 import anndata
-from sklearn.preprocessing import StandardScaler
+import joblib
 
 # ====================== Core HAM Imports ======================
 from ham.bio.data import BioDataset
@@ -32,8 +32,9 @@ def load_phase1_vae(checkpoint, d_in, d_lat, n_cls, key):
     return eqx.tree_deserialise_leaves(checkpoint, model)
 
 
-def attach_datadriven_randers_metric(vae, dataset, n_anchors=2000, sigma=0.4, seed=42):
+def attach_datadriven_randers_metric(vae, dataset, n_anchors=2000, sigma=0.4, seed=42, permute_wind=False):
     """Self-contained attachment."""
+    # Filter velocities to training clones only implicitly via valid_mask
     vel_norms = np.linalg.norm(np.array(dataset.V), axis=1)
     valid_mask = vel_norms > 1e-6
     X_valid = dataset.X[valid_mask]
@@ -44,7 +45,10 @@ def attach_datadriven_randers_metric(vae, dataset, n_anchors=2000, sigma=0.4, se
     idx = rng.choice(len(X_valid), n_sample, replace=False)
 
     X_sample = X_valid[idx]
-    V_sample = V_valid[idx]
+    V_sample = V_valid[idx].copy()
+    
+    if permute_wind:
+        rng.shuffle(V_sample) # Shuffle velocities to destroy wind signal
 
     @eqx.filter_jit
     @eqx.filter_vmap(in_axes=(None, 0, 0))
@@ -64,16 +68,28 @@ def attach_datadriven_randers_metric(vae, dataset, n_anchors=2000, sigma=0.4, se
     return eqx.tree_at(lambda m: m.metric, vae, metric)
 
 
-def arc_length_forward_backward(metric, z_start, z_end, solver, steps=25):
-    """Forward and backward length on the SAME geodesic curve."""
-    traj = solver.solve(metric, z_start, z_end, n_steps=steps, train_mode=False)
-    xs = traj.xs
+def matched_rank_biserial(x, y):
+    """Compute matched-pairs rank biserial correlation for Wilcoxon signed-rank."""
+    d = np.array(x) - np.array(y)
+    d = d[d != 0]
+    if len(d) == 0:
+        return 0.0
+    ranks = stats.rankdata(np.abs(d))
+    R_plus = np.sum(ranks[d > 0])
+    R_minus = np.sum(ranks[d < 0])
+    return (R_plus - R_minus) / (R_plus + R_minus)
 
-    L_fwd = metric.arc_length(xs)
-    L_bwd = metric.arc_length(xs[::-1])   # reversed on same points
-
-    return float(L_fwd), float(L_bwd)
-
+def bh_fdr(p_values):
+    """Benjamini-Hochberg FDR correction."""
+    p_values = np.array(p_values)
+    n = len(p_values)
+    sorted_idx = np.argsort(p_values)
+    sorted_p = p_values[sorted_idx]
+    fdr_p = np.minimum.accumulate((sorted_p * n / np.arange(1, n + 1))[::-1])[::-1]
+    fdr_p = np.minimum(fdr_p, 1.0)
+    original_idx_p = np.empty(n)
+    original_idx_p[sorted_idx] = fdr_p
+    return original_idx_p
 
 def main():
     parser = argparse.ArgumentParser(description="H2: Directional Asymmetry Experiment")
@@ -84,10 +100,19 @@ def main():
     configure_device(args.device)
 
     CHECKPOINT   = "data/weinreb_vae_phase1.eqx"
+    PREPROCESSED = "data/weinreb_preprocessed.h5ad"
+    TEST_TRIPLES = "data/weinreb_test_triples.npy"
+    LATENT_DIM   = 8
+    MAX_PAIRS    = 800
+    SIGMAS = [0.1, 0.2, 0.4, 0.6, 0.8, 1.0]
+    SEEDS = [42, 101, 256, 1024, 2048]
+
+    print("=" * 80)
+    print("H2: Directional Asymmetry Experiment")
     print("=" * 80)
 
     if not all(os.path.exists(p) for p in [CHECKPOINT, PREPROCESSED, TEST_TRIPLES]):
-        print("Missing required files.")
+        print(f"Missing required files. Looked for {CHECKPOINT}, {PREPROCESSED}, {TEST_TRIPLES}")
         return
 
     # Load data
@@ -95,8 +120,8 @@ def main():
     X_pca = np.array(adata.obsm['X_pca'], dtype=np.float32)
     V_pca = np.array(adata.obsm['velocity_pca'], dtype=np.float32)
 
-    scaler = StandardScaler()
-    X_norm = scaler.fit_transform(X_pca).astype(np.float32)
+    scaler = joblib.load("data/weinreb_pca_scaler.joblib")
+    X_norm = scaler.transform(X_pca).astype(np.float32)
     V_norm = (V_pca / (scaler.scale_ + 1e-8)).astype(np.float32)
 
     dataset = BioDataset(X=jnp.array(X_norm), V=jnp.array(V_norm),
@@ -123,87 +148,106 @@ def main():
     Z4 = jax.vmap(lambda x: vae_base._get_dist(x).mean)(jnp.array(X4))
     Z6 = jax.vmap(lambda x: vae_base._get_dist(x).mean)(jnp.array(X6))
 
-    # Use scan-based solver (train_mode=True) — much faster under vmap than while_loop.
-    # 60 iterations is sufficient for short observed segments (day2→day4, day4→day6).
     solver = AVBDSolver(iterations=60)
 
-    print("\n" + "─"*95)
-    print(f"{'sigma':>6} {'seed':>6} {'L_fwd_mean':>12} {'L_bwd_mean':>12} {'ratio':>9} {'p-val':>12} {'frac<1':>8}")
-    print("─"*95)
+    print("\n" + "─"*130)
+    print(f"{'sigma':>6} {'seed':>6} {'L_fwd':>10} {'L_bwd':>10} {'ratio':>8} {'p-val':>10} {'FDR p':>10} {'frac<1':>8} {'eff_size':>10} {'C_viol':>10} {'Energy':>10} {'Failed':>8}")
+    print("─"*130)
 
     @eqx.filter_jit
-    def batch_arc_lengths(metric, zs_batch, ze_batch):
+    def batch_solve(metric, zs_batch, ze_batch):
         def single_pair(zs, ze):
-            # train_mode=True uses jax.lax.scan (fixed-length, vmap-friendly)
-            # instead of while_loop which stalls on worst-case convergence
             traj = solver.solve(metric, zs, ze, n_steps=15, train_mode=True)
             xs = traj.xs
             Lf = metric.arc_length(xs)
             Lb = metric.arc_length(xs[::-1])
-            return Lf, Lb
+            return Lf, Lb, traj.constraint_violation, traj.energy
         return jax.vmap(single_pair)(zs_batch, ze_batch)
 
-    sweep_results = {}
+    # We will collect all p-values for FDR correction
+    all_pvals = []
+    runs_info = []
+
     for sigma in SIGMAS:
-        per_sigma_ratios, per_sigma_pvals, per_sigma_fracs = [], [], []
         for seed in SEEDS:
-            vae = attach_datadriven_randers_metric(vae_base, dataset, n_anchors=2000, sigma=jnp.array(sigma), seed=seed)
+            # We will run both Randers and Permuted-Wind Randers to provide a baseline
+            for permute in [False, True]:
+                vae = attach_datadriven_randers_metric(vae_base, dataset, n_anchors=2000, sigma=jnp.array(sigma), seed=seed, permute_wind=permute)
 
-            # ── Batch BVP Solving (Chunked for memory) ──────────────────────────────
-            Z_starts = jnp.concatenate([Z2, Z4], axis=0) # (2*N, D)
-            Z_ends   = jnp.concatenate([Z4, Z6], axis=0) # (2*N, D)
-            
-            n_total = Z_starts.shape[0]
-            chunk_size = 50  # Smaller chunks for faster first-result and lower memory
-            n_chunks = (n_total + chunk_size - 1) // chunk_size
-            print(f"  σ={sigma}, seed={seed}: solving {n_total} BVPs in {n_chunks} chunks of {chunk_size}...")
-            
-            Lf_list, Lb_list = [], []
-            
-            for ci, i in enumerate(range(0, n_total, chunk_size)):
-                zs_chunk = Z_starts[i:i+chunk_size]
-                ze_chunk = Z_ends[i:i+chunk_size]
-                L_fwd_c, L_bwd_c = batch_arc_lengths(vae.metric, zs_chunk, ze_chunk)
-                Lf_list.append(np.array(L_fwd_c))
-                Lb_list.append(np.array(L_bwd_c))
-                print(f"    chunk {ci+1}/{n_chunks} done ({i+len(zs_chunk)}/{n_total} pairs)", flush=True)
+                Z_starts = jnp.concatenate([Z2, Z4], axis=0)
+                Z_ends   = jnp.concatenate([Z4, Z6], axis=0)
+                
+                n_total = Z_starts.shape[0]
+                chunk_size = 50
+                n_chunks = (n_total + chunk_size - 1) // chunk_size
+                
+                Lf_list, Lb_list, C_list, E_list = [], [], [], []
+                
+                for ci, i in enumerate(range(0, n_total, chunk_size)):
+                    zs_chunk = Z_starts[i:i+chunk_size]
+                    ze_chunk = Z_ends[i:i+chunk_size]
+                    L_fwd_c, L_bwd_c, C_c, E_c = batch_solve(vae.metric, zs_chunk, ze_chunk)
+                    Lf_list.append(np.array(L_fwd_c))
+                    Lb_list.append(np.array(L_bwd_c))
+                    C_list.append(np.array(C_c))
+                    E_list.append(np.array(E_c))
 
-            Lf = np.concatenate(Lf_list)
-            Lb = np.concatenate(Lb_list)
-            valid = (Lf > 0) & (Lb > 0) & np.isfinite(Lf) & np.isfinite(Lb)
-            Lf, Lb = Lf[valid], Lb[valid]
+                Lf = np.concatenate(Lf_list)
+                Lb = np.concatenate(Lb_list)
+                C_viol = np.concatenate(C_list)
+                Energy = np.concatenate(E_list)
+                
+                valid = (Lf > 0) & (Lb > 0) & np.isfinite(Lf) & np.isfinite(Lb)
+                failed_frac = 1.0 - np.mean(valid)
+                
+                Lf, Lb = Lf[valid], Lb[valid]
+                C_viol, Energy = C_viol[valid], Energy[valid]
 
-            if len(Lf) < 30:
-                continue
+                if len(Lf) < 30:
+                    continue
 
-            ratio = np.mean(Lf / Lb)
-            frac = np.mean(Lf < Lb)
-            _, pval = stats.wilcoxon(Lf, Lb, alternative='less')
+                ratio = np.mean(Lf / Lb)
+                frac = np.mean(Lf < Lb)
+                _, pval = stats.wilcoxon(Lf, Lb, alternative='less')
+                eff_size = matched_rank_biserial(Lf, Lb)
+                mean_c = np.mean(C_viol)
+                mean_e = np.mean(Energy)
 
-            print(f"{sigma:6.2f} {seed:6d} {np.mean(Lf):12.4f} {np.mean(Lb):12.4f} "
-                  f"{ratio:9.4f} {pval:12.2e} {frac:8.1%}")
+                all_pvals.append(pval)
+                runs_info.append({
+                    'sigma': sigma, 'seed': seed, 'permute': permute,
+                    'Lf': np.mean(Lf), 'Lb': np.mean(Lb), 'ratio': ratio,
+                    'pval': pval, 'frac': frac, 'eff_size': eff_size,
+                    'mean_c': mean_c, 'mean_e': mean_e, 'failed_frac': failed_frac
+                })
 
-            per_sigma_ratios.append(ratio)
-            per_sigma_pvals.append(pval)
-            per_sigma_fracs.append(frac)
-
-        sweep_results[sigma] = {"ratio": per_sigma_ratios, "pval": per_sigma_pvals, "frac": per_sigma_fracs}
+    fdr_pvals = bh_fdr(all_pvals)
+    
+    for i, run in enumerate(runs_info):
+        run['fdr_pval'] = fdr_pvals[i]
+        tag = "PERM" if run['permute'] else "NORM"
+        print(f"{run['sigma']:6.2f} {run['seed']:6d} {run['Lf']:10.3f} {run['Lb']:10.3f} "
+              f"{run['ratio']:8.4f} {run['pval']:10.1e} {run['fdr_pval']:10.1e} {run['frac']:8.1%} "
+              f"{run['eff_size']:10.3f} {run['mean_c']:10.2e} {run['mean_e']:10.3f} {run['failed_frac']:8.1%} [{tag}]")
 
     # Summary
     print("\n" + "=" * 80)
     print("H2 ROBUSTNESS SUMMARY — Short Observed Segments")
-    print(f"{'sigma':>8}  {'ratio mean±std':>18}  {'frac Lf<Lb':>12}  {'p<0.05 runs':>14}")
+    print(f"{'sigma':>8}  {'type':>6}  {'ratio mean±std':>18}  {'frac Lf<Lb':>12}  {'p_fdr<0.05':>12}")
     print("-" * 80)
 
-    for sigma, res in sweep_results.items():
-        if not res["ratio"]:
-            continue
-        r = np.array(res["ratio"])
-        f = np.array(res["frac"])
-        p = np.array(res["pval"])
-        p05_frac = np.mean(p < 0.05)
-        print(f"  {sigma:8.2f}  {np.mean(r):8.4f}±{np.std(r):.4f}  "
-              f"{np.mean(f):12.1%}  {p05_frac:14.1%}")
+    for sigma in SIGMAS:
+        for permute in [False, True]:
+            sigma_runs = [r for r in runs_info if r['sigma'] == sigma and r['permute'] == permute]
+            if not sigma_runs:
+                continue
+            r = np.array([run['ratio'] for run in sigma_runs])
+            f = np.array([run['frac'] for run in sigma_runs])
+            p = np.array([run['fdr_pval'] for run in sigma_runs])
+            p05_frac = np.mean(p < 0.05)
+            tag = "PERM" if permute else "NORM"
+            print(f"  {sigma:8.2f}  {tag:6s}  {np.mean(r):8.4f}±{np.std(r):.4f}  "
+                  f"{np.mean(f):12.1%}  {p05_frac:12.1%}")
 
     print("\nH2 Short-Segment Evaluation Completed.")
 

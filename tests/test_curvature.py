@@ -15,13 +15,14 @@ Test structure:
     6. flag_curvature_sample (metric Gram-Schmidt, PRNG key API)
 """
 
+from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import jax
 import jax.numpy as jnp
 import unittest
 import numpy as np
 from jax import config
 
-config.update("jax_enable_x64", True)
+# config.update("jax_enable_x64", True)
 
 from ham.geometry import EuclideanSpace, Sphere
 from ham.geometry import Euclidean, Riemannian, Randers

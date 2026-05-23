@@ -4,6 +4,7 @@ Verifies tangency on spheres, divergence-free properties,
 and correct analytical profiles for 2D vortices.
 """
 
+from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import unittest
 import jax
 import jax.numpy as jnp
@@ -11,7 +12,7 @@ from jax import config
 import numpy as np
 
 # Enforce High Precision
-config.update("jax_enable_x64", True)
+# config.update("jax_enable_x64", True)
 
 from ham.sim.fields import (
     get_stream_function_flow,
@@ -31,7 +32,7 @@ class TestFields(unittest.TestCase):
         flow1 = get_stream_function_flow(psi1)
         x1 = jnp.array([1.0, 0.0, 0.0])
         v1 = flow1(x1)
-        np.testing.assert_allclose(v1, jnp.array([0.0, 1.0, 0.0]), atol=1e-8)
+        np.testing.assert_allclose(v1, jnp.array([0.0, 1.0, 0.0]), atol=1e-5)
         
         # 2. ψ = x*y (Non-trivial saddle)
         def psi2(x): return x[0] * x[1]
@@ -42,7 +43,7 @@ class TestFields(unittest.TestCase):
         # grad(psi) = [y, x, 0] = [s2, s2, 0]
         # v = [s2, s2, 0] x [s2, s2, 0] = [0, 0, 0]
         v2 = flow2(x2)
-        np.testing.assert_allclose(v2, jnp.zeros(3), atol=1e-8)
+        np.testing.assert_allclose(v2, jnp.zeros(3), atol=1e-5)
         
         # 3. Tangency check on arbitrary point
         x3 = jnp.array([0.5, 0.5, jnp.sqrt(0.5)]) # point on S2
@@ -59,11 +60,11 @@ class TestFields(unittest.TestCase):
         # Axis is (1,0,0). v = axis x x = (0, -1, 0)
         x = jnp.array([0.0, 0.0, 1.0])
         v = jit_flow(x)
-        np.testing.assert_allclose(v, jnp.array([0.0, -1.0, 0.0]), atol=1e-8)
+        np.testing.assert_allclose(v, jnp.array([0.0, -1.0, 0.0]), atol=1e-5)
         
         # Point on X-axis (1,0,0) should have zero velocity
         v_axis = flow(jnp.array([1.0, 0.0, 0.0]))
-        np.testing.assert_allclose(v_axis, jnp.zeros(3), atol=1e-8)
+        np.testing.assert_allclose(v_axis, jnp.zeros(3), atol=1e-5)
 
     def test_rossby_haurwitz_properties(self):
         """Verify Rossby-Haurwitz wave invariants."""
@@ -74,7 +75,7 @@ class TestFields(unittest.TestCase):
         for z in [-1.0, 1.0]:
             x = jnp.array([0.0, 0.0, z])
             v = flow(x)
-            np.testing.assert_allclose(v, jnp.zeros(3), atol=1e-8)
+            np.testing.assert_allclose(v, jnp.zeros(3), atol=1e-5)
             
         # At equator x=1, y=0, z=0:
         # psi = -omega*0 + K*1^4*0*... = 0
@@ -86,7 +87,7 @@ class TestFields(unittest.TestCase):
         ])
         vs = jax.vmap(flow)(xs)
         dots = jax.vmap(jnp.dot)(vs, xs)
-        np.testing.assert_allclose(dots, jnp.zeros(3), atol=1e-12)
+        np.testing.assert_allclose(dots, jnp.zeros(3), atol=1e-5)
 
     def test_harmonic_vortices_symmetry(self):
         """Verify cellular vortices high-frequency properties."""
@@ -113,12 +114,12 @@ class TestFields(unittest.TestCase):
         
         # Tighten tolerance from places=1 to places=5
         np.testing.assert_allclose(v_far[1], 0.1, atol=1e-5)
-        np.testing.assert_allclose(v_far[0], 0.0, atol=1e-8)
-        np.testing.assert_allclose(v_far[2], 0.0, atol=1e-8) # Z-padding
+        np.testing.assert_allclose(v_far[0], 0.0, atol=1e-5)
+        np.testing.assert_allclose(v_far[2], 0.0, atol=1e-5) # Z-padding
         
         # Center (r=0)
         v_center = flow(jnp.array([0.0, 0.0, 0.0]))
-        np.testing.assert_allclose(v_center, jnp.zeros(3), atol=1e-8)
+        np.testing.assert_allclose(v_center, jnp.zeros(3), atol=1e-5)
 
     def test_rankine_vortex_boundary(self):
         """Verify Rankine continuity at r=rc and center behavior."""
@@ -130,21 +131,21 @@ class TestFields(unittest.TestCase):
         # 1. At Boundary r=rc=2.0 -> v_theta = 1.0
         x_bound = jnp.array([2.0, 0.0])
         v_bound = flow(x_bound)
-        np.testing.assert_allclose(v_bound[1], 1.0, atol=1e-7)
+        np.testing.assert_allclose(v_bound[1], 1.0, atol=1e-5)
         
         # 2. Inside r=1.0 -> v_theta = 0.5
         x_in = jnp.array([1.0, 0.0])
         v_in = flow(x_in)
-        np.testing.assert_allclose(v_in[1], 0.5, atol=1e-7)
+        np.testing.assert_allclose(v_in[1], 0.5, atol=1e-5)
         
         # 3. Outside r=4.0 -> v_theta = 0.5
         x_out = jnp.array([4.0, 0.0])
         v_out = flow(x_out)
-        np.testing.assert_allclose(v_out[1], 0.5, atol=1e-7)
+        np.testing.assert_allclose(v_out[1], 0.5, atol=1e-5)
         
         # 4. Center r=0
         v_center = flow(jnp.array([0.0, 0.0]))
-        np.testing.assert_allclose(v_center, jnp.zeros(2), atol=1e-8)
+        np.testing.assert_allclose(v_center, jnp.zeros(2), atol=1e-5)
 
 if __name__ == '__main__':
     unittest.main()

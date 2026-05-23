@@ -7,6 +7,7 @@ DiscreteRanders (zoo.py) for anisotropic mesh-based metrics.
 See also: spec/ARCH_SPEC.md § 5 (Module Structure).
 """
 
+from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -84,8 +85,8 @@ def _build_spatial_grid(
 
     return (
         jnp.array(grid_indices_np),
-        jnp.array(min_xy, dtype=jnp.float64),
-        jnp.array(cell_size, dtype=jnp.float64),
+        jnp.array(min_xy, dtype=DEFAULT_JNP_DTYPE),
+        jnp.array(cell_size, dtype=DEFAULT_JNP_DTYPE),
         int(max_m),
     )
 

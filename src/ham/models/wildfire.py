@@ -19,6 +19,7 @@ See Also:
     ham.models.learned       : NeuralRanders (position-conditioned variant).
 """
 
+from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import jax
 import jax.numpy as jnp
 import equinox as eqx
@@ -150,10 +151,10 @@ class LocalTerrainCNN(eqx.Module):
         self.n_channels = int(n_channels)
         self.fuel_emb_dim = int(fuel_emb_dim)
         self.weather_dim = int(weather_dim)
-        self.conv1 = eqx.nn.Conv2d(5, n_channels, 3, padding=1, dtype=jnp.float64, key=k1)
-        self.conv2 = eqx.nn.Conv2d(n_channels, n_channels, 3, padding=1, dtype=jnp.float64, key=k2)
-        self.conv3 = eqx.nn.Conv2d(n_channels, n_channels, 3, padding=1, dtype=jnp.float64, key=k3)
-        self.head  = eqx.nn.Conv2d(n_channels + fuel_emb_dim + weather_dim, 5, 1, dtype=jnp.float64, key=k4)
+        self.conv1 = eqx.nn.Conv2d(5, n_channels, 3, padding=1, dtype=DEFAULT_JNP_DTYPE, key=k1)
+        self.conv2 = eqx.nn.Conv2d(n_channels, n_channels, 3, padding=1, dtype=DEFAULT_JNP_DTYPE, key=k2)
+        self.conv3 = eqx.nn.Conv2d(n_channels, n_channels, 3, padding=1, dtype=DEFAULT_JNP_DTYPE, key=k3)
+        self.head  = eqx.nn.Conv2d(n_channels + fuel_emb_dim + weather_dim, 5, 1, dtype=DEFAULT_JNP_DTYPE, key=k4)
 
     def __call__(
         self,
@@ -320,7 +321,7 @@ class CovariateConditionedRanders(AsymmetricMetric):
             key=k2,
             weather_dim=4,  # [T_air, humidity, sin_wind, cos_wind]
         )
-        self.fuel_embedding = jnp.zeros((13, fuel_emb_dim), dtype=jnp.float64)
+        self.fuel_embedding = jnp.zeros((13, fuel_emb_dim), dtype=DEFAULT_JNP_DTYPE)
 
         # metric_field is None until precompute_metric_field() is called
         self.metric_field = None
@@ -332,7 +333,7 @@ class CovariateConditionedRanders(AsymmetricMetric):
         self.canopy_raster = None
         self.fuel_code_raster = None
         self.weather_vec = None
-        self.pixel_spacing_m = jnp.asarray(1.0, dtype=jnp.float64)
+        self.pixel_spacing_m = jnp.asarray(1.0, dtype=DEFAULT_JNP_DTYPE)
         self.scene_origin_xy = None
 
     def bind_scene(
@@ -379,14 +380,14 @@ class CovariateConditionedRanders(AsymmetricMetric):
             ),
             self,
             (
-                jnp.asarray(elev, dtype=jnp.float64),
-                jnp.asarray(slope, dtype=jnp.float64),
-                jnp.asarray(aspect, dtype=jnp.float64),
-                jnp.asarray(canopy, dtype=jnp.float64),
+                jnp.asarray(elev, dtype=DEFAULT_JNP_DTYPE),
+                jnp.asarray(slope, dtype=DEFAULT_JNP_DTYPE),
+                jnp.asarray(aspect, dtype=DEFAULT_JNP_DTYPE),
+                jnp.asarray(canopy, dtype=DEFAULT_JNP_DTYPE),
                 jnp.asarray(fuel_codes, dtype=jnp.int32),
-                jnp.asarray(weather_vec, dtype=jnp.float64),
-                jnp.asarray(pixel_spacing_m, dtype=jnp.float64),
-                jnp.asarray(origin_xy, dtype=jnp.float64),
+                jnp.asarray(weather_vec, dtype=DEFAULT_JNP_DTYPE),
+                jnp.asarray(pixel_spacing_m, dtype=DEFAULT_JNP_DTYPE),
+                jnp.asarray(origin_xy, dtype=DEFAULT_JNP_DTYPE),
                 None,
             ),
             is_leaf=lambda x: x is None,
@@ -434,13 +435,13 @@ class CovariateConditionedRanders(AsymmetricMetric):
             ),
             self,
             (
-                jnp.asarray(elev, dtype=jnp.float64),
-                jnp.asarray(slope, dtype=jnp.float64),
-                jnp.asarray(aspect, dtype=jnp.float64),
-                jnp.asarray(canopy, dtype=jnp.float64),
+                jnp.asarray(elev, dtype=DEFAULT_JNP_DTYPE),
+                jnp.asarray(slope, dtype=DEFAULT_JNP_DTYPE),
+                jnp.asarray(aspect, dtype=DEFAULT_JNP_DTYPE),
+                jnp.asarray(canopy, dtype=DEFAULT_JNP_DTYPE),
                 jnp.asarray(fuel_codes, dtype=jnp.int32),
-                jnp.asarray(pixel_spacing_m, dtype=jnp.float64),
-                jnp.asarray(origin_xy, dtype=jnp.float64),
+                jnp.asarray(pixel_spacing_m, dtype=DEFAULT_JNP_DTYPE),
+                jnp.asarray(origin_xy, dtype=DEFAULT_JNP_DTYPE),
                 None,
             ),
             is_leaf=lambda x: x is None,
@@ -463,7 +464,7 @@ class CovariateConditionedRanders(AsymmetricMetric):
         return eqx.tree_at(
             lambda m: m.weather_vec,
             self,
-            jnp.asarray(weather_vec, dtype=jnp.float64),
+            jnp.asarray(weather_vec, dtype=DEFAULT_JNP_DTYPE),
             is_leaf=lambda x: x is None,
         )
 
@@ -494,12 +495,12 @@ class CovariateConditionedRanders(AsymmetricMetric):
             jnp.sin(jax.lax.stop_gradient(self.aspect_raster)),
             jnp.cos(jax.lax.stop_gradient(self.aspect_raster)),
             jax.lax.stop_gradient(self.canopy_raster),
-        ], axis=0).astype(jnp.float64)  # (5, H, W)
+        ], axis=0).astype(DEFAULT_JNP_DTYPE)  # (5, H, W)
 
         # Per-pixel fuel embeddings: (H, W, fuel_emb_dim) → (fuel_emb_dim, H, W)
         fuel_codes_clipped = jnp.clip(jax.lax.stop_gradient(self.fuel_code_raster), 0, 12)
         fuel_field = self.fuel_embedding[fuel_codes_clipped]  # (H, W, fuel_emb_dim)
-        fuel_field = fuel_field.transpose(2, 0, 1).astype(jnp.float64)
+        fuel_field = fuel_field.transpose(2, 0, 1).astype(DEFAULT_JNP_DTYPE)
 
         if self.weather_vec is None:
             raise ValueError(
@@ -509,7 +510,7 @@ class CovariateConditionedRanders(AsymmetricMetric):
         # stop_gradient on weather_vec: it is scene input data, not a trainable
         # parameter.  Gradient of loss w.r.t. CNN weights still flows correctly
         # because weather is a constant conditioning input from the CNN's perspective.
-        weather = jax.lax.stop_gradient(self.weather_vec).astype(jnp.float64)
+        weather = jax.lax.stop_gradient(self.weather_vec).astype(DEFAULT_JNP_DTYPE)
 
         field = self.local_cnn(raster_stack, fuel_field, weather)  # (H, W, 5)
         return eqx.tree_at(

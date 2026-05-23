@@ -50,7 +50,7 @@ from matplotlib.colors import LogNorm
 from sklearn.neighbors import NearestNeighbors
 from sklearn.metrics import silhouette_score
 from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
+import joblib
 
 import jax
 import jax.numpy as jnp
@@ -921,8 +921,8 @@ def main():
     # We fit the scaler on X_pca and apply the SAME transform to V_pca
     # (velocity lives in the same feature space as position).
     print("Normalising PCA coordinates ...")
-    scaler  = StandardScaler()
-    X_pca_n = scaler.fit_transform(X_pca).astype(np.float32)
+    scaler  = joblib.load("data/weinreb_pca_scaler.joblib")
+    X_pca_n = scaler.transform(X_pca).astype(np.float32)
     # Velocity: same scale transform but no mean subtraction
     # (velocity has zero mean by construction; subtracting mean again
     # would shift it incorrectly — divide by std only)

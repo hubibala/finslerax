@@ -113,6 +113,13 @@ sc.tl.pca(adata, n_comps=PCA_COMPONENTS)
 adata.obsm['X_pca'] = adata.obsm['X_pca'] / (np.std(adata.obsm['X_pca'], axis=0) + 1e-8)
 print(f"  ✓ X_pca shape: {adata.obsm['X_pca'].shape} (unit variance applied)")
 
+import joblib
+from sklearn.preprocessing import StandardScaler
+scaler = StandardScaler()
+scaler.fit(adata.obsm['X_pca'])
+joblib.dump(scaler, "data/weinreb_pca_scaler.joblib")
+print("  ✓ StandardScaler fitted and saved to data/weinreb_pca_scaler.joblib")
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 3. Build pseudo-velocity from clonal structure

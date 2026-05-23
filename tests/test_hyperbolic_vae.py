@@ -1,3 +1,4 @@
+from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import unittest
 import jax
 import jax.numpy as jnp
@@ -5,7 +6,7 @@ import equinox as eqx
 from jax import config
 
 # Enable 64-bit precision for robust gradient checks
-config.update("jax_enable_x64", True)
+# config.update("jax_enable_x64", True)
 
 from ham.geometry import Hyperboloid, Riemannian
 from ham.geometry.metric import AsymmetricMetric

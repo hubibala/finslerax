@@ -28,6 +28,7 @@ CovariateConditionedRanders (or CovariateMeshRanders) metric:
     spec/ARCH_SPEC.md § 4.2 (AVBDSolver)
 """
 
+from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import argparse
 import os
 import time
@@ -42,7 +43,7 @@ import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 from jax import config
 
-config.update("jax_enable_x64", True)
+# config.update("jax_enable_x64", True)
 
 from ham.geometry.manifolds import EuclideanSpace
 from ham.models.wildfire import CovariateConditionedRanders
@@ -479,7 +480,7 @@ def run_geometric_analysis(metric, solver, source_world, scenario, domain_shape,
         )
         t0 = time.time()
         kappa = compute_curvature_field(metric, grid_world)
-        print(f"  Done in {time.time()-t0:.1f}s. κ range: "
+        print(f"  Done in {time.time()-t0:.1f}s. kappa range: "
               f"[{np.nanmin(kappa):.3f}, {np.nanmax(kappa):.3f}]")
         grid_px = np.stack([gx.ravel(), gy.ravel()], axis=-1)
         plot_curvature_field(kappa, grid_px, domain_shape, output_dir, suffix=suffix)

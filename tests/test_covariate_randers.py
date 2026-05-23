@@ -8,13 +8,14 @@ Covers:
   - metric_fn: positivity, 1-homogeneity, Riemannian limit, JIT/vmap, gradients
 """
 
+from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import pytest
 import jax
 import jax.numpy as jnp
 from jax import config
 import numpy as np
 
-config.update("jax_enable_x64", True)
+# config.update("jax_enable_x64", True)
 
 from ham.geometry.manifolds import EuclideanSpace
 from ham.models.wildfire import (
@@ -30,7 +31,7 @@ from ham.models.wildfire import (
 
 _H, _W = 10, 10
 _PIXEL_SPACING = 30.0
-_ORIGIN = jnp.zeros(2, dtype=jnp.float64)
+_ORIGIN = jnp.zeros(2, dtype=DEFAULT_JNP_DTYPE)
 _KEY = jax.random.PRNGKey(0)
 
 
@@ -39,12 +40,12 @@ def _make_scene(key=None):
     rng = jax.random.PRNGKey(42) if key is None else key
     k1, k2, k3, k4 = jax.random.split(rng, 4)
     return dict(
-        elev=jax.random.uniform(k1, (_H, _W), dtype=jnp.float64) * 500.0,
-        slope=jax.random.uniform(k2, (_H, _W), dtype=jnp.float64) * 0.5,
-        aspect=jax.random.uniform(k3, (_H, _W), dtype=jnp.float64) * 2.0 * jnp.pi,
-        canopy=jax.random.uniform(k4, (_H, _W), dtype=jnp.float64),
+        elev=jax.random.uniform(k1, (_H, _W), dtype=DEFAULT_JNP_DTYPE) * 500.0,
+        slope=jax.random.uniform(k2, (_H, _W), dtype=DEFAULT_JNP_DTYPE) * 0.5,
+        aspect=jax.random.uniform(k3, (_H, _W), dtype=DEFAULT_JNP_DTYPE) * 2.0 * jnp.pi,
+        canopy=jax.random.uniform(k4, (_H, _W), dtype=DEFAULT_JNP_DTYPE),
         fuel_codes=jnp.ones((_H, _W), dtype=jnp.int32) * 3,
-        weather_vec=jnp.array([20.0, 0.4, 0.5, 0.866], dtype=jnp.float64),
+        weather_vec=jnp.array([20.0, 0.4, 0.5, 0.866], dtype=DEFAULT_JNP_DTYPE),
         pixel_spacing_m=_PIXEL_SPACING,
         origin_xy=_ORIGIN,
     )
@@ -87,32 +88,32 @@ class TestProjectSPD:
     def test_eigenvalues_in_range(self, eps_min, eps_max):
         key = jax.random.PRNGKey(7)
         # Generate 20 random symmetric matrices
-        raw = jax.random.normal(key, (20, 2, 2), dtype=jnp.float64)
+        raw = jax.random.normal(key, (20, 2, 2), dtype=DEFAULT_JNP_DTYPE)
         mats = 0.5 * (raw + raw.transpose(0, 2, 1))  # symmetrize
 
         for mat in mats:
             out = project_spd(mat, eps_min, eps_max)
             eigs = self._eigs(out)
-            assert np.all(eigs >= eps_min - 1e-9), f"min eigenvalue {eigs.min()} < {eps_min}"
-            assert np.all(eigs <= eps_max + 1e-9), f"max eigenvalue {eigs.max()} > {eps_max}"
+            assert np.all(eigs >= eps_min - 1e-5), f"min eigenvalue {eigs.min()} < {eps_min}"
+            assert np.all(eigs <= eps_max + 1e-5), f"max eigenvalue {eigs.max()} > {eps_max}"
 
     def test_already_spd_unchanged(self):
         """Identity-like matrix should be unchanged up to the discriminant epsilon (~1e-8)."""
-        mat = jnp.array([[2.0, 0.0], [0.0, 3.0]], dtype=jnp.float64)
+        mat = jnp.array([[2.0, 0.0], [0.0, 3.0]], dtype=DEFAULT_JNP_DTYPE)
         out = project_spd(mat, 0.1, 10.0)
         np.testing.assert_allclose(np.array(out), np.array(mat), atol=1e-7)
 
     def test_vmap_compatible(self):
         """project_spd must run under vmap without errors."""
         key = jax.random.PRNGKey(13)
-        raw = jax.random.normal(key, (8, 2, 2), dtype=jnp.float64)
+        raw = jax.random.normal(key, (8, 2, 2), dtype=DEFAULT_JNP_DTYPE)
         mats = 0.5 * (raw + raw.transpose(0, 2, 1))
         batched = jax.vmap(lambda m: project_spd(m, 0.1, 10.0))(mats)
         assert batched.shape == (8, 2, 2)
 
     def test_grad_compatible(self):
         """project_spd must be differentiable (no NaN grad)."""
-        mat = jnp.array([[1.0, 0.5], [0.5, 2.0]], dtype=jnp.float64)
+        mat = jnp.array([[1.0, 0.5], [0.5, 2.0]], dtype=DEFAULT_JNP_DTYPE)
         grad = jax.grad(lambda m: jnp.sum(project_spd(m, 0.1, 10.0)))(mat)
         assert not jnp.any(jnp.isnan(grad))
 
@@ -134,25 +135,25 @@ class TestProjectBNorm:
     @pytest.mark.parametrize("max_norm", [0.9, 0.5, 0.99])
     def test_norm_within_bound(self, max_norm):
         key = jax.random.PRNGKey(3)
-        G = project_spd(jnp.array([[2.0, 0.3], [0.3, 1.5]], dtype=jnp.float64), 0.1, 10.0)
+        G = project_spd(jnp.array([[2.0, 0.3], [0.3, 1.5]], dtype=DEFAULT_JNP_DTYPE), 0.1, 10.0)
         for _ in range(10):
             key, k = jax.random.split(key)
-            b_raw = jax.random.normal(k, (2,), dtype=jnp.float64) * 3.0
+            b_raw = jax.random.normal(k, (2,), dtype=DEFAULT_JNP_DTYPE) * 3.0
             b = project_b_norm(b_raw, G, max_norm)
             norm = self._ginv_norm(b, G)
-            assert norm < max_norm + 1e-7, f"G^{{-1}}-norm {norm} exceeds max {max_norm}"
+            assert norm < max_norm + 1e-5, f"G^{{-1}}-norm {norm} exceeds max {max_norm}"
 
     def test_already_within_bound_unchanged(self):
         """A drift vector already below max_norm should not be scaled down."""
-        G = jnp.eye(2, dtype=jnp.float64)
-        b_small = jnp.array([0.1, 0.1], dtype=jnp.float64)  # ||b|| ≈ 0.141 < 0.9
+        G = jnp.eye(2, dtype=DEFAULT_JNP_DTYPE)
+        b_small = jnp.array([0.1, 0.1], dtype=DEFAULT_JNP_DTYPE)  # ||b|| ≈ 0.141 < 0.9
         b_out = project_b_norm(b_small, G, 0.9)
         np.testing.assert_allclose(np.array(b_out), np.array(b_small), atol=1e-9)
 
     def test_grad_compatible(self):
         """project_b_norm must be differentiable (no NaN grad)."""
-        G = jnp.array([[2.0, 0.5], [0.5, 3.0]], dtype=jnp.float64)
-        b = jnp.array([1.0, -1.0], dtype=jnp.float64)
+        G = jnp.array([[2.0, 0.5], [0.5, 3.0]], dtype=DEFAULT_JNP_DTYPE)
+        b = jnp.array([1.0, -1.0], dtype=DEFAULT_JNP_DTYPE)
         grad = jax.grad(lambda bv: jnp.sum(project_b_norm(bv, G, 0.9)))(b)
         assert not jnp.any(jnp.isnan(grad))
 
@@ -178,9 +179,9 @@ def riemannian_model():
 def test_metric_fn_positive(bound_model):
     """F(x, v) > 0 for all nonzero v."""
     key = jax.random.PRNGKey(1)
-    x = jnp.array([150.0, 150.0], dtype=jnp.float64)  # centre of 10×10 @ 30m
+    x = jnp.array([150.0, 150.0], dtype=DEFAULT_JNP_DTYPE)  # centre of 10×10 @ 30m
 
-    vs = jax.random.normal(key, (20, 2), dtype=jnp.float64)
+    vs = jax.random.normal(key, (20, 2), dtype=DEFAULT_JNP_DTYPE)
     vs = vs / jnp.linalg.norm(vs, axis=-1, keepdims=True)  # unit vectors
 
     for v in vs:
@@ -194,8 +195,8 @@ def test_metric_fn_positive(bound_model):
 
 def test_metric_fn_homogeneous(bound_model):
     """F(x, λv) = λ F(x, v) for λ > 0."""
-    x = jnp.array([150.0, 150.0], dtype=jnp.float64)
-    v = jnp.array([1.0, 0.5], dtype=jnp.float64)
+    x = jnp.array([150.0, 150.0], dtype=DEFAULT_JNP_DTYPE)
+    v = jnp.array([1.0, 0.5], dtype=DEFAULT_JNP_DTYPE)
 
     for lam in [0.5, 1.0, 2.0, 5.0]:
         f_v = bound_model.metric_fn(x, v)
@@ -213,9 +214,9 @@ def test_metric_fn_homogeneous(bound_model):
 
 def test_metric_fn_riemannian_limit(riemannian_model):
     """With use_wind=False the metric is symmetric: F(x,v) = F(x,-v)."""
-    x = jnp.array([150.0, 150.0], dtype=jnp.float64)
+    x = jnp.array([150.0, 150.0], dtype=DEFAULT_JNP_DTYPE)
     key = jax.random.PRNGKey(99)
-    vs = jax.random.normal(key, (10, 2), dtype=jnp.float64)
+    vs = jax.random.normal(key, (10, 2), dtype=DEFAULT_JNP_DTYPE)
 
     for v in vs:
         f_pos = riemannian_model.metric_fn(x, v)
@@ -228,8 +229,8 @@ def test_metric_fn_riemannian_limit(riemannian_model):
 
 def test_metric_fn_riemannian_matches_sqrt_Gv(riemannian_model):
     """With use_wind=False, F(x,v)^2 == v^T G v (up to rounding)."""
-    x = jnp.array([90.0, 90.0], dtype=jnp.float64)
-    v = jnp.array([1.0, 0.0], dtype=jnp.float64)
+    x = jnp.array([90.0, 90.0], dtype=DEFAULT_JNP_DTYPE)
+    v = jnp.array([1.0, 0.0], dtype=DEFAULT_JNP_DTYPE)
 
     # Extract G directly via _get_params
     G, b = riemannian_model._get_params(x)
@@ -246,8 +247,8 @@ def test_bind_scene_jit(bound_model):
     """metric_fn is jit-compilable and vmappable after bind_scene."""
     import equinox as eqx
 
-    x = jnp.array([150.0, 150.0], dtype=jnp.float64)
-    v = jnp.array([1.0, 0.5], dtype=jnp.float64)
+    x = jnp.array([150.0, 150.0], dtype=DEFAULT_JNP_DTYPE)
+    v = jnp.array([1.0, 0.5], dtype=DEFAULT_JNP_DTYPE)
 
     # Use eqx.filter_jit — the standard equinox pattern for module methods
     f_jit = eqx.filter_jit(lambda xi, vi: bound_model.metric_fn(xi, vi))
@@ -271,8 +272,8 @@ def test_bind_scene_jit(bound_model):
 
 def test_gradients_wrt_v(bound_model):
     """jax.grad of metric_fn w.r.t. v must not produce NaN."""
-    x = jnp.array([150.0, 150.0], dtype=jnp.float64)
-    v = jnp.array([1.0, 0.5], dtype=jnp.float64)
+    x = jnp.array([150.0, 150.0], dtype=DEFAULT_JNP_DTYPE)
+    v = jnp.array([1.0, 0.5], dtype=DEFAULT_JNP_DTYPE)
 
     grad_v = jax.grad(bound_model.metric_fn, argnums=1)(x, v)
     assert not jnp.any(jnp.isnan(grad_v)), f"NaN gradient w.r.t. v: {grad_v}"
@@ -280,8 +281,8 @@ def test_gradients_wrt_v(bound_model):
 
 def test_gradients_wrt_x(bound_model):
     """jax.grad of metric_fn w.r.t. x must not produce NaN."""
-    x = jnp.array([150.0, 150.0], dtype=jnp.float64)
-    v = jnp.array([1.0, 0.5], dtype=jnp.float64)
+    x = jnp.array([150.0, 150.0], dtype=DEFAULT_JNP_DTYPE)
+    v = jnp.array([1.0, 0.5], dtype=DEFAULT_JNP_DTYPE)
 
     grad_x = jax.grad(bound_model.metric_fn, argnums=0)(x, v)
     assert not jnp.any(jnp.isnan(grad_x)), f"NaN gradient w.r.t. x: {grad_x}"
@@ -289,8 +290,8 @@ def test_gradients_wrt_x(bound_model):
 
 def test_gradients_near_zero_v(bound_model):
     """grad w.r.t. v must be finite even for near-zero v."""
-    x = jnp.array([150.0, 150.0], dtype=jnp.float64)
-    v_tiny = jnp.array([1e-7, 1e-7], dtype=jnp.float64)
+    x = jnp.array([150.0, 150.0], dtype=DEFAULT_JNP_DTYPE)
+    v_tiny = jnp.array([1e-7, 1e-7], dtype=DEFAULT_JNP_DTYPE)
 
     grad_v = jax.grad(bound_model.metric_fn, argnums=1)(x, v_tiny)
     assert jnp.all(jnp.isfinite(grad_v)), f"Non-finite gradient near v=0: {grad_v}"
@@ -307,8 +308,8 @@ def test_fuel_embedding_gradient():
 
     # Start from a bound model with metric_field precomputed
     model = _bound_model(use_wind=True)
-    x = jnp.array([150.0, 150.0], dtype=jnp.float64)
-    v = jnp.array([1.0, 0.5], dtype=jnp.float64)
+    x = jnp.array([150.0, 150.0], dtype=DEFAULT_JNP_DTYPE)
+    v = jnp.array([1.0, 0.5], dtype=DEFAULT_JNP_DTYPE)
 
     def loss(emb):
         # Update embedding then recompute the metric field so gradients flow
@@ -334,33 +335,33 @@ class TestLocalTerrainCNN:
 
     def test_output_shape(self):
         cnn = self._make_cnn()
-        raster = jnp.ones((5, 10, 10), dtype=jnp.float64)
-        fuel = jnp.ones((4, 10, 10), dtype=jnp.float64)
-        weather = jnp.zeros(4, dtype=jnp.float64)
+        raster = jnp.ones((5, 10, 10), dtype=DEFAULT_JNP_DTYPE)
+        fuel = jnp.ones((4, 10, 10), dtype=DEFAULT_JNP_DTYPE)
+        weather = jnp.zeros(4, dtype=DEFAULT_JNP_DTYPE)
         out = cnn(raster, fuel, weather)
         assert out.shape == (10, 10, 5), f"Expected (10,10,5), got {out.shape}"
 
     def test_output_dtype(self):
         cnn = self._make_cnn()
-        raster = jnp.ones((5, 10, 10), dtype=jnp.float64)
-        fuel = jnp.ones((4, 10, 10), dtype=jnp.float64)
-        weather = jnp.zeros(4, dtype=jnp.float64)
+        raster = jnp.ones((5, 10, 10), dtype=DEFAULT_JNP_DTYPE)
+        fuel = jnp.ones((4, 10, 10), dtype=DEFAULT_JNP_DTYPE)
+        weather = jnp.zeros(4, dtype=DEFAULT_JNP_DTYPE)
         out = cnn(raster, fuel, weather)
-        assert out.dtype == jnp.float64, f"Expected float64, got {out.dtype}"
+        assert out.dtype == DEFAULT_JNP_DTYPE, f"Expected float64, got {out.dtype}"
 
     def test_output_finite(self):
         cnn = self._make_cnn()
-        raster = jnp.ones((5, 10, 10), dtype=jnp.float64)
-        fuel = jnp.zeros((4, 10, 10), dtype=jnp.float64)
-        weather = jnp.zeros(4, dtype=jnp.float64)
+        raster = jnp.ones((5, 10, 10), dtype=DEFAULT_JNP_DTYPE)
+        fuel = jnp.zeros((4, 10, 10), dtype=DEFAULT_JNP_DTYPE)
+        weather = jnp.zeros(4, dtype=DEFAULT_JNP_DTYPE)
         out = cnn(raster, fuel, weather)
         assert jnp.all(jnp.isfinite(out)), "CNN output contains non-finite values"
 
     def test_grad_through_weights(self):
         cnn = self._make_cnn()
-        raster = jnp.ones((5, 10, 10), dtype=jnp.float64)
-        fuel = jnp.ones((4, 10, 10), dtype=jnp.float64)
-        weather = jnp.array([20.0, 0.4, 0.5, 0.866], dtype=jnp.float64)
+        raster = jnp.ones((5, 10, 10), dtype=DEFAULT_JNP_DTYPE)
+        fuel = jnp.ones((4, 10, 10), dtype=DEFAULT_JNP_DTYPE)
+        weather = jnp.array([20.0, 0.4, 0.5, 0.866], dtype=DEFAULT_JNP_DTYPE)
 
         import equinox as eqx
         def loss_fn(c):
@@ -389,7 +390,7 @@ class TestPrecomputeMetricField:
         model = _make_model()
         scene = _make_scene()
         bound = model.bind_scene(**scene).precompute_metric_field()
-        assert bound.metric_field.dtype == jnp.float64
+        assert bound.metric_field.dtype == DEFAULT_JNP_DTYPE
 
     def test_field_finite(self):
         model = _make_model()
@@ -401,8 +402,8 @@ class TestPrecomputeMetricField:
         """Gradient of metric_fn w.r.t. CNN weights must be nonzero."""
         import equinox as eqx
 
-        x = jnp.array([150.0, 150.0], dtype=jnp.float64)
-        v = jnp.array([1.0, 0.5], dtype=jnp.float64)
+        x = jnp.array([150.0, 150.0], dtype=DEFAULT_JNP_DTYPE)
+        v = jnp.array([1.0, 0.5], dtype=DEFAULT_JNP_DTYPE)
         scene = _make_scene()
 
         def loss_fn(m):
@@ -447,8 +448,8 @@ class TestRasterStopGradient:
 
         def loss_fn(m):
             bound = m.bind_scene(**scene).precompute_metric_field()
-            x = jnp.array([150.0, 150.0], dtype=jnp.float64)
-            v = jnp.array([1.0, 0.5], dtype=jnp.float64)
+            x = jnp.array([150.0, 150.0], dtype=DEFAULT_JNP_DTYPE)
+            v = jnp.array([1.0, 0.5], dtype=DEFAULT_JNP_DTYPE)
             return bound.metric_fn(x, v)
 
         # Differentiating w.r.t. the unbound model: rasters are NOT leaves here.
@@ -457,8 +458,8 @@ class TestRasterStopGradient:
 
         def loss_terrain(m):
             m2 = m.precompute_metric_field()
-            x = jnp.array([150.0, 150.0], dtype=jnp.float64)
-            v = jnp.array([1.0, 0.5], dtype=jnp.float64)
+            x = jnp.array([150.0, 150.0], dtype=DEFAULT_JNP_DTYPE)
+            v = jnp.array([1.0, 0.5], dtype=DEFAULT_JNP_DTYPE)
             return m2.metric_fn(x, v)
 
         grads = eqx.filter_grad(loss_terrain)(terrain_bound)

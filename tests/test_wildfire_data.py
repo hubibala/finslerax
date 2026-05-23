@@ -1,5 +1,6 @@
 """Unit tests for ham.data.wildfire — no real dataset required."""
 
+from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import numpy as np
 import pytest
 
@@ -87,7 +88,7 @@ class TestExtractArrivalTimes:
     def test_dtype(self):
         masks = np.ones((2, 3, 3), dtype=np.uint8)
         arr = extract_arrival_times(masks)
-        assert arr.dtype == np.float64
+        assert arr.dtype == DEFAULT_NP_DTYPE
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +106,7 @@ class TestFindIgnitionPoint:
         pt = find_ignition_point(masks)
 
         assert pt.shape == (2,)
-        assert pt.dtype == np.float64
+        assert pt.dtype == DEFAULT_NP_DTYPE
         np.testing.assert_allclose(pt, [3.0, 3.0])
 
     def test_fallback_to_frames_0_2(self):
@@ -296,7 +297,7 @@ class TestSceneNormalizer:
 
         weather_vecs = []
         for raw in scenarios:
-            w4 = _weather_to_4vec(np.asarray(raw["weather"], dtype=np.float64))
+            w4 = _weather_to_4vec(np.asarray(raw["weather"], dtype=DEFAULT_NP_DTYPE))
             weather_vecs.append(normalizer.normalize_weather(w4))
 
         W = np.stack(weather_vecs)   # (30, 4)
@@ -322,4 +323,4 @@ class TestSceneNormalizer:
         norm = SceneNormalizer.fit([_make_synthetic_raw(0)])
         w = norm.normalize_weather(np.array([75.0, 50.0, 0.5, 0.866]))
         assert w.shape == (4,)
-        assert w.dtype == np.float64
+        assert w.dtype == DEFAULT_NP_DTYPE

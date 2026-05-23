@@ -33,7 +33,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from typing import Dict, Tuple, Optional
 from scipy import stats
-from sklearn.preprocessing import StandardScaler
+import joblib
 
 import jax
 import jax.numpy as jnp
@@ -197,6 +197,8 @@ def attach_datadriven_randers_metric(vae: GeometricVAE, dataset: BioDataset, n_a
     component of the Randers metric.
     """
     # 1. Filter cells with valid velocity
+    # Note: preprocess_weinreb.py sets velocity to 0 for test clones,
+    # so vel_norms > 1e-6 implicitly filters for training clones only.
     vel_norms = np.linalg.norm(dataset.V, axis=1)
     valid_mask = vel_norms > 1e-6
     X_valid = dataset.X[valid_mask]
@@ -289,6 +291,34 @@ def build_fate_attractors(
               f"|z|={float(jnp.linalg.norm(attractors[fate])):.3f}")
     return attractors
 
+def build_fate_cells(
+    vae: GeometricVAE,
+    dataset: BioDataset,
+    lineage_triples: np.ndarray,
+    cell_type_labels: np.ndarray,
+    fate_names: list,
+    target_fates: list,
+) -> Dict[str, jnp.ndarray]:
+    """
+    All day-6 latent positions for each target fate.
+    Used for sampled counterfactuals.
+    """
+    fate_cells = {}
+    day6_idx    = lineage_triples[:, 2]
+    day6_labels = cell_type_labels[day6_idx]
+
+    for fate in target_fates:
+        if fate not in fate_names:
+            continue
+        fidx = fate_names.index(fate)
+        mask = day6_labels == fidx
+        if mask.sum() == 0:
+            continue
+        X_fate = dataset.X[day6_idx[mask]]
+        z_fate = jax.vmap(lambda x: encode_mean(vae, x))(X_fate)
+        fate_cells[fate] = z_fate
+    return fate_cells
+
 
 def run_validation(
     randers_vae: GeometricVAE,
@@ -306,6 +336,11 @@ def run_validation(
 
     print("\nBuilding fate attractors ...")
     attractors = build_fate_attractors(
+        randers_vae, dataset,
+        np.array(lineage_triples), cell_type_labels,
+        fate_names, target_fates,
+    )
+    fate_cells = build_fate_cells(
         randers_vae, dataset,
         np.array(lineage_triples), cell_type_labels,
         fate_names, target_fates,
@@ -331,8 +366,8 @@ def run_validation(
 
     # Accumulate per-model results
     raw = {
-        'randers':    {'ratio': [], 'e_obs': [], 'e_cf': [], 'fate': []},
-        'riemannian': {'ratio': [], 'e_obs': [], 'e_cf': [], 'fate': []},
+        'randers':    {'ratio': [], 'ratio_sampled': [], 'e_obs': [], 'e_cf': [], 'e_cf_sampled': [], 'fate': []},
+        'riemannian': {'ratio': [], 'ratio_sampled': [], 'e_obs': [], 'e_cf': [], 'e_cf_sampled': [], 'fate': []},
     }
 
     fate_idx_map = {f: fate_names.index(f)
@@ -351,20 +386,27 @@ def run_validation(
                          if fn != obs_fname]
         if not cf_candidates:
             continue
-        z6_cf = min(cf_candidates,
-                    key=lambda fz: float(jnp.linalg.norm(fz[1] - z2)))[1]
+        closest_cf_name, z6_cf_centroid = min(cf_candidates,
+                    key=lambda fz: float(jnp.linalg.norm(fz[1] - z2)))
+        
+        # Sampled counterfactual from the same closest wrong-fate
+        cf_fate_cells = fate_cells[closest_cf_name]
+        z6_cf_sampled = cf_fate_cells[rng.choice(len(cf_fate_cells))]
 
         for mname, model in [('randers', randers_vae),
                               ('riemannian', riemannian_vae)]:
             e_obs = float(two_segment_energy(model.metric, z2, z4, z6_obs))
-            e_cf  = float(two_segment_energy(model.metric, z2, z4, z6_cf))
+            e_cf  = float(two_segment_energy(model.metric, z2, z4, z6_cf_centroid))
+            e_cf_sampled = float(two_segment_energy(model.metric, z2, z4, z6_cf_sampled))
 
-            if e_obs <= 0 or e_cf <= 0 or not np.isfinite(e_obs) or not np.isfinite(e_cf):
+            if e_obs <= 0 or e_cf <= 0 or e_cf_sampled <= 0 or not np.isfinite(e_obs):
                 continue
 
             raw[mname]['ratio'].append(e_cf / e_obs)
+            raw[mname]['ratio_sampled'].append(e_cf_sampled / e_obs)
             raw[mname]['e_obs'].append(e_obs)
             raw[mname]['e_cf'].append(e_cf)
+            raw[mname]['e_cf_sampled'].append(e_cf_sampled)
             raw[mname]['fate'].append(obs_fname)
 
     # ── Aggregate ─────────────────────────────────────────────────────────────
@@ -382,16 +424,47 @@ def run_validation(
             'energy_ratio_mean':   float(np.mean(ratios)),
             'energy_ratio_median': float(np.median(ratios)),
             'energy_ratio_std':    float(np.std(ratios)),
+            'ratio_sampled_mean':  float(np.mean(r['ratio_sampled'])),
             # Fraction of triples where counterfactual is more expensive
             'correct_fate_frac':   float(np.mean(ratios > 1.0)),
+            'correct_fate_frac_sampled': float(np.mean(np.array(r['ratio_sampled']) > 1.0)),
             'mean_e_obs':          float(np.mean(r['e_obs'])),
             'mean_e_cf':           float(np.mean(r['e_cf'])),
+            'mean_e_cf_sampled':   float(np.mean(r['e_cf_sampled'])),
         }
         for fate in target_fates:
             m = fates == fate
             if m.sum() > 0:
                 results[mname][f'ratio_mean_{fate}']  = float(np.mean(ratios[m]))
                 results[mname][f'correct_frac_{fate}'] = float(np.mean(ratios[m] > 1.0))
+        
+        if mname == 'randers':
+            from scipy import stats
+            r_rand = np.array(r['ratio'])
+            t, p = stats.ttest_1samp(r_rand, 1.0, alternative='greater')
+            d = (np.mean(r_rand) - 1.0) / (np.std(r_rand) + 1e-8)
+            if p < 0.001:
+                sig_str = "***"
+            elif p < 0.01:
+                sig_str = "**"
+            elif p < 0.05:
+                sig_str = "*"
+            else:
+                sig_str = "ns"
+            
+            # Sampled ratio test vs 1.0
+            r_samp = np.array(r['ratio_sampled'])
+            if len(r_samp) > 1:
+                stat_s, p_s = stats.ttest_1samp(r_samp, 1.0, alternative='greater')
+            else:
+                p_s = 1.0
+            sig_s_str = "***" if p_s < 0.001 else "**" if p_s < 0.01 else "*" if p_s < 0.05 else "ns"
+
+            results['randers']['ttest_p'] = float(p)
+            results['randers']['ttest_sig'] = sig_str
+            results['randers']['ttest_sampled_p'] = float(p_s)
+            results['randers']['ttest_sampled_sig'] = sig_s_str
+            results['randers']['cohens_d'] = float(d)
 
     # ── Statistical tests ─────────────────────────────────────────────────────
     if 'randers' in results and 'riemannian' in results:
@@ -403,6 +476,8 @@ def run_validation(
         w_stat, w_pval = stats.wilcoxon(
             r_rand[:n_test], r_riem[:n_test], alternative='greater'
         )
+        results['randers']['wilcox_p'] = float(w_pval)
+        results['randers']['wilcox_sig'] = "***" if w_pval < 0.001 else "**" if w_pval < 0.01 else "*" if w_pval < 0.05 else "ns"
         # Test 2: Randers ratios > 1.0 (one-sample t-test)
         t_stat, t_pval = stats.ttest_1samp(r_rand, popmean=1.0,
                                             alternative='greater')
@@ -633,7 +708,7 @@ def plot_results(
 def main():
     CHECKPOINT   = "data/weinreb_vae_phase1.eqx"
     PREPROCESSED = "data/weinreb_preprocessed.h5ad"
-    TRIPLES      = "data/weinreb_lineage_triples.npy"
+    TRIPLES      = "data/weinreb_test_triples.npy"
     LATENT_DIM   = 8
 
     for p in [CHECKPOINT, PREPROCESSED, TRIPLES]:
@@ -658,8 +733,8 @@ def main():
 
     # Same normalisation as phase 1 — MUST be identical
     print("Applying StandardScaler (same as phase 1) ...")
-    scaler   = StandardScaler()
-    X_norm   = scaler.fit_transform(X_pca).astype(np.float32)
+    scaler   = joblib.load("data/weinreb_pca_scaler.joblib")
+    X_norm   = scaler.transform(X_pca).astype(np.float32)
     V_norm   = (V_pca / (scaler.scale_ + 1e-8)).astype(np.float32)
 
     dataset = BioDataset(
@@ -683,91 +758,88 @@ def main():
     key = jax.random.PRNGKey(2026)
     vae_p1 = load_phase1_vae(CHECKPOINT, X_norm.shape[1], LATENT_DIM, n_types, key)
 
-    # ── Attach Data-Driven Randers metric ─────────────────────────────────────
-    print("Attaching Data-Driven PullbackRanders metric using kernel smoothed RNA velocities ...")
-    vae_randers = attach_datadriven_randers_metric(vae_p1, dataset, n_anchors=2000, sigma=0.4)
-
-    # Verify |W|_H before validation
-    sample_z = jax.vmap(lambda x: encode_mean(vae_randers, x))(dataset.X[:200])
-    def wn_at(z):
-        H, W, _ = vae_randers.metric.zermelo_data(z)
-        return jnp.sqrt(jnp.dot(W, jnp.dot(H, W)))
-    final_wn = float(np.mean(np.array(jax.vmap(wn_at)(sample_z))))
-    print(f"  Mean |W|_H = {final_wn:.4f}  (must be < 0.95)")
-    if final_wn >= 0.95:
-        print("  WARNING: |W|_H near singularity — consider tuning sigma.")
-
-    # Skip Phase 2 network training entirely
-    vae_trained = vae_randers
-    p2_history = None
-
-    # ── Validation ────────────────────────────────────────────────────────────
-    print("\n" + "="*60)
-    print("VALIDATION: Fate-stratified Randers energy comparison")
-    print("="*60)
-    val_key = jax.random.PRNGKey(7)
-    results, raw = run_validation(
-        vae_trained, dataset,
-        lineage_triples, labels_np,
-        fate_names, TARGET_FATES,
-        val_key, n_pairs=1000,
-    )
-
-    # ── Print results ──────────────────────────────────────────────────────────
-    print("\nRESULTS:")
-    for mname in ['randers', 'riemannian']:
-        if mname not in results:
-            continue
-        print(f"\n  {mname.upper()}:")
-        for k, v in results[mname].items():
-            print(f"    {k}: {v:.4f}" if isinstance(v, float) else f"    {k}: {v}")
-
-    print("\n  STATISTICAL TESTS:")
-    s = results.get('stats', {})
-    for k, v in s.items():
-        print(f"    {k}: {v:.6f}" if isinstance(v, float) else f"    {k}: {v}")
-
-    # ── Verdict ───────────────────────────────────────────────────────────────
-    print("\n" + "="*60)
-    s        = results.get('stats', {})
-    w_sig    = s.get('wilcoxon_sig_p05', False)
-    t_sig    = s.get('ttest_sig_p05', False)
-    cf_frac  = results.get('randers', {}).get('correct_fate_frac', 0.5)
-    ratio_m  = results.get('randers', {}).get('energy_ratio_mean', 1.0)
-    cohens_d = s.get('cohens_d', 0.0)
-
-    if w_sig or t_sig:
-        print("✓ HYPOTHESIS SUPPORTED")
-        print(f"  Randers metric assigns higher energy to wrong-fate paths")
-        print(f"  correct_fate_frac = {cf_frac:.1%}  (chance = 50%)")
-        print(f"  energy_ratio_mean = {ratio_m:.3f}  (null = 1.0)")
-        print(f"  Cohen's d         = {cohens_d:.3f}")
-        if s.get('wilcoxon_sig_p01'):
-            print("  Strong evidence: Wilcoxon p < 0.01")
-    else:
-        print("✗ HYPOTHESIS NOT SUPPORTED at p < 0.05")
-        print(f"  correct_fate_frac = {cf_frac:.1%}")
-        print(f"  energy_ratio_mean = {ratio_m:.3f}")
-        print(f"  Cohen's d         = {cohens_d:.3f}")
-        print("\n  Diagnostic guidance:")
-        if cf_frac > 0.55:
-            print("  → Directional signal present (cf_frac > 0.55) but")
-            print("    underpowered. Try n_pairs=2000 or more phase 2 epochs.")
-        if final_wn < 0.1:
-            print("  → |W|_H is very small — wind barely deforms the metric.")
-            print("    Try increasing RNAVelocityWindLoss weight to 2.0.")
-        if ratio_m < 1.02:
-            print("  → Energy ratio ≈ 1. The metric is nearly symmetric.")
-            print("    Check whether w_net weights updated (gradient flow).")
-    print("="*60)
-
-    plot_results(
-        vae_trained, dataset, results, raw,
-        TARGET_FATES, fate_names, p2_history,
-        save_path="weinreb_results_v5.png",
-    )
+    print("\nStarting sigma sensitivity sweep ...")
+    for sigma in [0.2, 0.4, 0.6]:
+        print(f"\n{'='*60}")
+        print(f"Testing sigma = {sigma}")
+        print(f"{'='*60}")
     
-    save_wind_visualization(vae_trained, dataset, save_path="wind_latent_space.png")
+        # ── Attach Data-Driven Randers metric ─────────────────────────────────────
+        print("Attaching Data-Driven PullbackRanders metric using kernel smoothed RNA velocities ...")
+        vae_randers = attach_datadriven_randers_metric(vae_p1, dataset, n_anchors=2000, sigma=sigma)
+    
+        # Verify |W|_H before validation
+        sample_z = jax.vmap(lambda x: encode_mean(vae_randers, x))(dataset.X[:200])
+        def wn_at(z):
+            H, W, _ = vae_randers.metric.zermelo_data(z)
+            return jnp.sqrt(jnp.dot(W, jnp.dot(H, W)))
+        final_wn = float(np.mean(np.array(jax.vmap(wn_at)(sample_z))))
+        print(f"  Mean |W|_H = {final_wn:.4f}  (must be < 0.95)")
+        if final_wn >= 0.95:
+            print("  WARNING: |W|_H near singularity — consider tuning sigma.")
+    
+        # Skip Phase 2 network training entirely
+        vae_trained = vae_randers
+        p2_history = None
+    
+        # ── Validation ────────────────────────────────────────────────────────────
+        print("\n" + "="*60)
+        print(f"VALIDATION: Fate-stratified Randers energy comparison (sigma={sigma})")
+        print("="*60)
+        val_key = jax.random.PRNGKey(7)
+        results, raw = run_validation(
+            vae_trained, dataset,
+            lineage_triples, labels_np,
+            fate_names, TARGET_FATES,
+            val_key, n_pairs=1000,
+        )
+    
+        # ── Print results ──────────────────────────────────────────────────────────
+        print("\nRESULTS:")
+        for mname in ['randers', 'riemannian']:
+            if mname not in results:
+                continue
+            r = results[mname]
+            print(f"  {mname.upper()}:")
+            print(f"    E_cf / E_obs ratio (centroid) : {r['energy_ratio_mean']:.3f} ± {r['energy_ratio_std']:.3f} "
+                  f"(median {r['energy_ratio_median']:.3f})")
+            if 'ratio_sampled_mean' in r:
+                print(f"    E_cf / E_obs ratio (sampled)  : {r['ratio_sampled_mean']:.3f}")
+            print(f"    Correct fate fraction (cntrd) : {r['correct_fate_frac']:.1%}")
+            if 'correct_fate_frac_sampled' in r:
+                print(f"    Correct fate fraction (samp)  : {r['correct_fate_frac_sampled']:.1%}")
+            
+            if mname == 'randers' and 'wilcox_p' in r:
+                print(f"    vs Riemannian (Wilcoxon)      : p = {r.get('wilcox_p', 1.0):.2e} {r.get('wilcox_sig', '')}")
+                print(f"    vs 1.0 ratio (t-test)         : p = {r.get('ttest_p', 1.0):.2e} {r.get('ttest_sig', '')}  (Cohen's d = {r.get('cohens_d', 0.0):.2f})")
+                print(f"    vs 1.0 (sampled, t-test)      : p = {r.get('ttest_sampled_p', 1.0):.2e} {r.get('ttest_sampled_sig', '')}")
+    
+            print("    By fate (centroid ratio > 1.0):")
+            for fate in TARGET_FATES:
+                if f'ratio_mean_{fate}' in r:
+                    print(f"      {fate:12s}: {r[f'ratio_mean_{fate}']:.3f}  ({r[f'correct_frac_{fate}']:.1%} correct)")
+    
+        # ── Plotting ───────────────────────────────────────────────────────────────
+        os.makedirs("results/weinreb", exist_ok=True)
+        save_path = f"results/weinreb/weinreb_randers_validation_sigma_{sigma}.png"
+        
+        # Format stats for plot_results
+        if 'randers' in results:
+            r = results['randers']
+            results['stats'] = {
+                'wilcoxon_sig_p05': r.get('wilcox_p', 1.0) < 0.05,
+                'wilcoxon_sig_p01': r.get('wilcox_p', 1.0) < 0.01,
+                'ttest_sig_p05': r.get('ttest_p', 1.0) < 0.05,
+                'cohens_d': r.get('cohens_d', 0.0)
+            }
+            
+        plot_results(
+            vae_trained, dataset, results, raw,
+            TARGET_FATES, fate_names, p2_history,
+            save_path=save_path,
+        )
+        
+        save_wind_visualization(vae_trained, dataset, save_path=f"results/weinreb/wind_latent_space_sigma_{sigma}.png")
 
 
 if __name__ == "__main__":
