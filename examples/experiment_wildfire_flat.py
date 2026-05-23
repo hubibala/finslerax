@@ -684,6 +684,7 @@ def train_scene(
     cfg: dict,
     seed: int,
     use_wind: bool = True,
+    use_sequential_fires: bool = True,
 ) -> dict | None:
     """Full per-scene training loop for Phase W1.
 
@@ -855,7 +856,7 @@ def train_scene(
     metric = terrain_metric  # from here on, metric always carries terrain
     batched_step = make_batched_train_step(
         terrain_metric, arrival_loss_obj, optimizer,
-        sequential=cfg.get("sequential_fires", False),
+        sequential=use_sequential_fires,
     )
 
     # Pre-stack all training arrays for fast batch slicing
@@ -999,6 +1000,7 @@ def run_experiment(
     output_dir: str,
     cfg: dict,
     use_wind: bool = True,
+    use_sequential_fires: bool = True,
 ) -> list:
     """Run Phase W1 for all scenes × seeds and produce publication figures.
 
@@ -1016,7 +1018,7 @@ def run_experiment(
 
     for scene_id in scene_ids:
         for seed in cfg["train_seeds"]:
-            result = train_scene(data_root, scene_id, cfg, seed, use_wind=use_wind)
+            result = train_scene(data_root, scene_id, cfg, seed, use_wind=use_wind, use_sequential_fires=use_sequential_fires)
             if result is not None:
                 all_results.append(result)
 
