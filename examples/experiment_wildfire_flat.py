@@ -836,7 +836,7 @@ def train_scene(
     # opt_state is (re-)initialised after binding terrain below
 
     # Training state
-    best_val_r: float = -np.inf
+    best_loss: float = np.inf
     best_metric = metric
     patience_counter: int = 0
     train_loss_history: list = []
@@ -936,15 +936,15 @@ def train_scene(
             f"time={epoch_runtimes[-1]:.1f}s"
         )
 
-        # Early stopping
-        if mean_val_r > best_val_r:
-            best_val_r = mean_val_r
+        # Early stopping based on loss
+        if mean_loss < best_loss:
+            best_loss = mean_loss
             best_metric = metric
             patience_counter = 0
         else:
             patience_counter += 1
             if patience_counter >= cfg["early_stopping_patience"]:
-                print(f"  Early stopping at epoch {epoch+1}  (best_val_r={best_val_r:.4f})")
+                print(f"  Early stopping at epoch {epoch+1}  (best_loss={best_loss:.4f})")
                 break
 
     # Test evaluation — parallelise across fires (each is independent; JAX GIL is released)

@@ -638,7 +638,7 @@ def train_scene_mesh(
     )
     rng = np.random.default_rng(seed)
 
-    best_val_r: float = -np.inf
+    best_loss: float = np.inf
     best_metric = metric
     patience_counter: int = 0
     train_loss_history: list = []
@@ -717,14 +717,14 @@ def train_scene_mesh(
             f"time={epoch_runtimes[-1]:.1f}s"
         )
 
-        if mean_val_r > best_val_r:
-            best_val_r = mean_val_r
+        if mean_loss < best_loss:
+            best_loss = mean_loss
             best_metric = metric
             patience_counter = 0
         else:
             patience_counter += 1
             if patience_counter >= cfg["early_stopping_patience"]:
-                print(f"  Early stopping at epoch {epoch+1}")
+                print(f"  Early stopping at epoch {epoch+1}  (best_loss={best_loss:.4f})")
                 break
 
     # ---- Test evaluation -------------------------------------------
