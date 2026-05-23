@@ -113,6 +113,7 @@ def get_config(quick: bool = False) -> dict:
         lr_schedule="cosine",
         early_stopping_patience=20,
         batch_size_fires=16,
+        sequential_fires=False,
         k_train_obs=100 if quick else 500,
         k_eval_all=True,
         avbd_n_steps=20,
@@ -216,20 +217,24 @@ def make_batched_train_step(
     terrain_metric: CovariateConditionedRanders,
     loss_fn: ArrivalTimeLoss,
     optimizer,
+    sequential: bool = False,
 ):
-    """Return a JIT-compiled vmapped training step over a batch of fires.
+    """Return a JIT-compiled training step over a batch of fires.
 
-    All B fires are processed inside a single ``filter_jit`` call:
-    ``jax.vmap`` maps the per-fire loss over the batch axis and
-    ``eqx.filter_value_and_grad`` differentiates the mean.  This replaces the
-    previous Python loop (B sequential TPU dispatches) with a single dispatch,
-    eliminating the host↔device round-trip overhead that caused 15–20 min
-    epochs on TPU.
+    All B fires are processed inside a single ``filter_jit`` call.
+    By default (``sequential=False``) ``jax.vmap`` maps the per-fire loss over
+    the batch axis — fast but requires O(B × grid) peak memory.  Set
+    ``sequential=True`` to use ``jax.lax.map`` instead, which processes fires
+    one at a time inside the XLA kernel: peak memory drops to O(grid) at the
+    cost of longer compile and wall-clock time.  Use ``sequential=True`` on
+    memory-constrained devices such as a Colab TPU v2-8.
 
     Args:
         terrain_metric: Scene-terrain-bound metric (weather not set).
         loss_fn:        :class:`~ham.training.losses.ArrivalTimeLoss`.
         optimizer:      Optax optimizer.
+        sequential:     If ``True``, use ``jax.lax.map`` (low memory) instead
+                        of ``jax.vmap`` (high throughput).
 
     Returns:
         ``batched_step(metric, opt_state, weather_batch, source_batch,
@@ -245,19 +250,20 @@ def make_batched_train_step(
                      weather_batch, source_batch,
                      obs_world_batch, obs_times_batch,
                      alpha: jax.Array):
-        """Single JIT dispatch: vmap over B fires, then one optimizer update."""
-        def fire_loss_single(weather, source, obs_world, obs_times):
-            bound = metric.bind_weather(weather)
-            bound = bound.precompute_metric_field()
-            return loss_fn(bound, source, obs_world, obs_times, alpha)
-
+        """Single JIT dispatch: vmap/lax.map over B fires, then one optimizer update."""
         def total_loss(m):
-            # vmap over the leading batch axis of all per-fire arrays
-            per_fire_losses = jax.vmap(
-                lambda w, s, ow, ot: (
-                    lambda bound: loss_fn(bound, s, ow, ot, alpha)
-                )(m.bind_weather(w).precompute_metric_field())
-            )(weather_batch, source_batch, obs_world_batch, obs_times_batch)
+            def fire_loss(args):
+                w, s, ow, ot = args
+                bound = m.bind_weather(w).precompute_metric_field()
+                return loss_fn(bound, s, ow, ot, alpha)
+
+            stacked = (weather_batch, source_batch, obs_world_batch, obs_times_batch)
+            if sequential:
+                # O(grid) peak memory: fires processed one-at-a-time inside XLA
+                per_fire_losses = jax.lax.map(fire_loss, stacked)
+            else:
+                # O(B × grid) peak memory: all fires in parallel via vmap
+                per_fire_losses = jax.vmap(fire_loss)(stacked)
             return jnp.mean(per_fire_losses)
 
         loss_val, grads = eqx.filter_value_and_grad(total_loss)(metric)
@@ -847,7 +853,10 @@ def train_scene(
     # pytree structure matches what the batched step will return.
     opt_state = optimizer.init(eqx.filter(terrain_metric, eqx.is_inexact_array))
     metric = terrain_metric  # from here on, metric always carries terrain
-    batched_step = make_batched_train_step(terrain_metric, arrival_loss_obj, optimizer)
+    batched_step = make_batched_train_step(
+        terrain_metric, arrival_loss_obj, optimizer,
+        sequential=cfg.get("sequential_fires", False),
+    )
 
     # Pre-stack all training arrays for fast batch slicing
     # All fires in the scene share the same K (obs per fire) after stratified
@@ -1358,6 +1367,15 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--sequential", action="store_true",
+        help=(
+            "Use jax.lax.map instead of jax.vmap for the per-fire training loop. "
+            "Reduces peak memory from O(B×grid) to O(grid) — required on "
+            "memory-constrained TPUs (e.g. Colab v2-8 with 32 GB HBM). "
+            "Slower than vmap but otherwise numerically identical."
+        ),
+    )
+    parser.add_argument(
         "--seeds", nargs="+", type=int, default=None,
         metavar="SEED",
         help="Override training seeds (default: from config).",
@@ -1382,6 +1400,8 @@ def main() -> None:
 
     if args.batch_fires is not None:
         cfg["batch_size_fires"] = args.batch_fires
+    if args.sequential:
+        cfg["sequential_fires"] = True
     if args.seeds is not None:
         cfg["train_seeds"] = args.seeds
 
