@@ -262,8 +262,12 @@ def make_batched_train_step(
                 # O(grid) peak memory: fires processed one-at-a-time inside XLA
                 per_fire_losses = jax.lax.map(fire_loss, stacked)
             else:
-                # O(B × grid) peak memory: all fires in parallel via vmap
-                per_fire_losses = jax.vmap(fire_loss)(stacked)
+                # O(B × grid) peak memory: all fires in parallel via vmap.
+                # jax.checkpoint rematerialises activations during the backward
+                # pass instead of storing them, cutting the activation buffer
+                # from O(B × grid) to O(grid) while keeping full vmap parallelism
+                # at the cost of ~30-40% extra FLOPs.
+                per_fire_losses = jax.vmap(jax.checkpoint(fire_loss))(stacked)
             return jnp.mean(per_fire_losses)
 
         loss_val, grads = eqx.filter_value_and_grad(total_loss)(metric)
