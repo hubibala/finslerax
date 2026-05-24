@@ -498,6 +498,7 @@ def train_scene_mesh(
     cfg: dict,
     seed: int,
     use_wind: bool = True,
+    output_dir: str = "results",
 ) -> dict | None:
     """Full per-scene Phase W2 training loop.
 
@@ -778,6 +779,12 @@ def train_scene_mesh(
         f"    total time      = {time.time()-t_scene_start:.1f} s"
     )
 
+    ckpt_dir = os.path.join(output_dir, "checkpoints")
+    os.makedirs(ckpt_dir, exist_ok=True)
+    ckpt_path = os.path.join(ckpt_dir, f"w2_{scene_id}_seed{seed}.eqx")
+    eqx.tree_serialise_leaves(ckpt_path, best_metric)
+    print(f"    Saved checkpoint to {ckpt_path}")
+
     return dict(
         scene_id=scene_id,
         seed=seed,
@@ -1007,6 +1014,12 @@ def run_synthetic_mesh(cfg: dict, output_dir: str, use_wind: bool = True) -> lis
             f"     Train time   = {train_time:.1f}s for {n_epochs} epochs"
         )
 
+        ckpt_dir = os.path.join(output_dir, "checkpoints")
+        os.makedirs(ckpt_dir, exist_ok=True)
+        ckpt_path = os.path.join(ckpt_dir, f"w2_synthetic_{slope_level}_seed{cfg['seed']}.eqx")
+        eqx.tree_serialise_leaves(ckpt_path, metric)
+        print(f"     Saved checkpoint to {ckpt_path}")
+
         all_results.append(dict(
             slope_level=slope_level,
             slope_std_deg=slope_std_deg,
@@ -1193,7 +1206,7 @@ def run_experiment_mesh(
     for scene_id in scene_ids:
         for seed in cfg["train_seeds"]:
             result = train_scene_mesh(
-                data_root, scene_id, cfg, seed, use_wind=use_wind
+                data_root, scene_id, cfg, seed, use_wind=use_wind, output_dir=output_dir
             )
             if result is not None:
                 all_results.append(result)

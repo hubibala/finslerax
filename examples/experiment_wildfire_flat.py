@@ -690,6 +690,7 @@ def train_scene(
     seed: int,
     use_wind: bool = True,
     use_sequential_fires: bool = True,
+    output_dir: str = "results",
 ) -> dict | None:
     """Full per-scene training loop for Phase W1.
 
@@ -980,6 +981,12 @@ def train_scene(
         f"    total time      = {time.time()-t_scene_start:.1f} s"
     )
 
+    ckpt_dir = os.path.join(output_dir, "checkpoints")
+    os.makedirs(ckpt_dir, exist_ok=True)
+    ckpt_path = os.path.join(ckpt_dir, f"w1_{scene_id}_seed{seed}.eqx")
+    eqx.tree_serialise_leaves(ckpt_path, best_metric)
+    print(f"    saved checkpoint to = {ckpt_path}")
+
     return dict(
         scene_id=scene_id,
         seed=seed,
@@ -1023,7 +1030,7 @@ def run_experiment(
 
     for scene_id in scene_ids:
         for seed in cfg["train_seeds"]:
-            result = train_scene(data_root, scene_id, cfg, seed, use_wind=use_wind, use_sequential_fires=use_sequential_fires)
+            result = train_scene(data_root, scene_id, cfg, seed, use_wind=use_wind, use_sequential_fires=use_sequential_fires, output_dir=output_dir)
             if result is not None:
                 all_results.append(result)
 
@@ -1314,6 +1321,12 @@ def run_synthetic(cfg: dict, output_dir: str, use_wind: bool = True) -> dict:
             fig.savefig(os.path.join(fig_dir, f"phaseW1_synthetic_loss.{ext}"), dpi=150)
         plt.close(fig)
         print(f"  Figure saved to {fig_dir}/phaseW1_synthetic_loss.{{pdf,png}}")
+
+        ckpt_dir = os.path.join(output_dir, "checkpoints")
+        os.makedirs(ckpt_dir, exist_ok=True)
+        ckpt_path = os.path.join(ckpt_dir, f"w1_synthetic_seed{cfg['seed']}.eqx")
+        eqx.tree_serialise_leaves(ckpt_path, metric)
+        print(f"  Checkpoint saved to {ckpt_path}")
 
     return dict(
         scene_id="synthetic",
