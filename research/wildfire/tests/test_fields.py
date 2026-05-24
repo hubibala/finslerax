@@ -4,7 +4,6 @@ Verifies tangency on spheres, divergence-free properties,
 and correct analytical profiles for 2D vortices.
 """
 
-from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import unittest
 import jax
 import jax.numpy as jnp
@@ -14,7 +13,7 @@ import numpy as np
 # Enforce High Precision
 # config.update("jax_enable_x64", True)
 
-from ham.sim.fields import (
+from sim.fields import (
     get_stream_function_flow,
     tilted_rotation,
     rossby_haurwitz,

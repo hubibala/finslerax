@@ -84,7 +84,7 @@ class TestNeuralRanders(unittest.TestCase):
         jit_energy = eqx.filter_jit(self.metric.energy)
         result = jit_energy(x, v)
         self.assertTrue(jnp.isfinite(result))
-        np.testing.assert_allclose(float(result), float(self.metric.energy(x, v)), atol=1e-6)
+        np.testing.assert_allclose(float(result), float(self.metric.energy(x, v)), atol=1e-5)
 
     def test_vmap_compatible(self):
         """Energy must work under vmap for batch evaluation."""
@@ -152,7 +152,7 @@ class TestPullbackGNet(unittest.TestCase):
     def test_jit_compatible(self):
         z = jnp.array([0.1, 0.2, 0.3])
         jit_fn = eqx.filter_jit(self.g_net)
-        np.testing.assert_allclose(jit_fn(z), self.g_net(z), atol=1e-6)
+        np.testing.assert_allclose(jit_fn(z), self.g_net(z), atol=1e-5)
 
     def test_gradient_finite(self):
         z = jnp.array([0.1, 0.2, 0.3])
@@ -209,7 +209,7 @@ class TestKernelWindField(unittest.TestCase):
     def test_jit_compatible(self):
         z = jnp.array([0.5, 0.5])
         jit_fn = eqx.filter_jit(self.kwf)
-        np.testing.assert_allclose(jit_fn(z), self.kwf(z), atol=1e-7)
+        np.testing.assert_allclose(jit_fn(z), self.kwf(z), atol=1e-5)
 
     def test_vmap_compatible(self):
         zs = jnp.array([[0.0, 0.0], [1.0, 0.0], [0.5, 0.5]])

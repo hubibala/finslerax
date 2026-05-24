@@ -5,8 +5,8 @@ import optax
 import time
 from typing import Tuple
 
-from ham.bio.vae import GeometricVAE
-from ham.bio.data import BioDataset
+from bio.vae import GeometricVAE
+from bio.data import BioDataset
 
 # --- Pure Update Functions (Outside Class) ---
 

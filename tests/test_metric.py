@@ -7,7 +7,6 @@ Note on conventions:
 - All tests use `ATOL` for consistency unless a tighter bound is documented.
 """
 
-from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import jax
 import jax.numpy as jnp
 import unittest

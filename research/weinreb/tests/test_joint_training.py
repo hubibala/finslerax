@@ -1,4 +1,3 @@
-from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import unittest
 import jax
 import jax.numpy as jnp
@@ -8,8 +7,8 @@ from jax import config
 
 # config.update("jax_enable_x64", True)
 
-from ham.bio.data import BioDataset
-from ham.bio.vae import GeometricVAE
+from bio.data import BioDataset
+from bio.vae import GeometricVAE
 from ham.geometry.zoo import Riemannian
 from ham.geometry import Hyperboloid
 from ham.geometry.metric import AsymmetricMetric

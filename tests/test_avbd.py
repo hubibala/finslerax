@@ -1,4 +1,3 @@
-from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import unittest
 import jax
 import jax.numpy as jnp

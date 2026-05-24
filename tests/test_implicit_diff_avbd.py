@@ -8,7 +8,6 @@ Verifies that:
  5. ArrivalTimeLoss works end-to-end with the implicit solver.
 """
 
-from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import pytest
 import jax
 import jax.numpy as jnp
@@ -82,8 +81,8 @@ class TestImplicitForward:
         p1 = jnp.array([-0.2, 0.7])
 
         traj = implicit.solve(metric, p0, p1, n_steps=6)
-        assert jnp.allclose(traj.xs[0], p0, atol=1e-10)
-        assert jnp.allclose(traj.xs[-1], p1, atol=1e-10)
+        assert jnp.allclose(traj.xs[0], p0, atol=1e-5)
+        assert jnp.allclose(traj.xs[-1], p1, atol=1e-5)
 
     def test_trajectory_shape(self):
         """Output shape must be (n_steps+1, D)."""

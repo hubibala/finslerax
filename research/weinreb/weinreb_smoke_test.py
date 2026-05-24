@@ -25,8 +25,8 @@ import equinox as eqx
 import optax
 import numpy as np
 
-from ham.bio.data import BioDataset
-from ham.bio.vae import GeometricVAE
+from bio.data import BioDataset
+from bio.vae import GeometricVAE
 from ham.geometry import EuclideanSpace
 from ham.models.learned import PullbackRanders, PullbackRiemannian
 from ham.solvers.avbd import AVBDSolver

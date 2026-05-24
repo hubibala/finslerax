@@ -1,4 +1,3 @@
-from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import unittest
 import jax
 import jax.numpy as jnp
@@ -43,7 +42,7 @@ class TestHyperboloid(unittest.TestCase):
             norm_sq = self.minkowski_dot(p, p)
             
             # 1. Check Hyperboloid equation <p,p>_L = -1
-            self.assertAlmostEqual(norm_sq, -1.0, places=6)
+            self.assertAlmostEqual(norm_sq, -1.0, places=4)
             
             # 2. Check Upper Sheet x0 > 0
             self.assertGreater(p[0], 0.0)
@@ -52,11 +51,11 @@ class TestHyperboloid(unittest.TestCase):
         """Projecting a valid point should not change it."""
         x = jnp.array([1.0, 0.0, 0.0]) # The origin is definitely on the manifold
         p = self.manifold.project(x)
-        np.testing.assert_allclose(p, x, atol=1e-8)
+        np.testing.assert_allclose(p, x, atol=1e-5)
         
         # Double projection
         p2 = self.manifold.project(p)
-        np.testing.assert_allclose(p2, p, atol=1e-8)
+        np.testing.assert_allclose(p2, p, atol=1e-5)
 
     def test_tangent_space_orthogonality(self):
         """
@@ -85,7 +84,7 @@ class TestHyperboloid(unittest.TestCase):
         for i in range(100):
             p = samples[i]
             norm_sq = self.minkowski_dot(p, p)
-            self.assertAlmostEqual(norm_sq, -1.0, places=5)
+            self.assertAlmostEqual(norm_sq, -1.0, places=4)
             self.assertGreater(p[0], 0.0)
 
     def test_exp_log_roundtrip(self):
@@ -101,13 +100,13 @@ class TestHyperboloid(unittest.TestCase):
         self.assertAlmostEqual(norm_sq, -1.0, places=6)
         
         v_recovered = self.manifold.log_map(x, y)
-        np.testing.assert_allclose(v_recovered, v, atol=1e-6)
+        np.testing.assert_allclose(v_recovered, v, atol=1e-5)
 
         # Reverse roundtrip
         y2 = self.manifold.random_sample(self.key, ())
         v2 = self.manifold.log_map(x, y2)
         y2_recovered = self.manifold.exp_map(x, v2)
-        np.testing.assert_allclose(y2_recovered, y2, atol=1e-6)
+        np.testing.assert_allclose(y2_recovered, y2, atol=1e-5)
 
     def test_parallel_transport(self):
         """

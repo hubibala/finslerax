@@ -1,4 +1,3 @@
-from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import unittest
 import jax
 import jax.numpy as jnp
@@ -10,7 +9,7 @@ from jax import config
 
 from ham.geometry import Hyperboloid, Riemannian
 from ham.geometry.metric import AsymmetricMetric
-from ham.bio.vae import GeometricVAE, WrappedNormal
+from bio.vae import GeometricVAE, WrappedNormal
 from ham.training.losses import ReconstructionLoss, KLDivergenceLoss, ZermeloAlignmentLoss
 
 class MockMetric(Riemannian, AsymmetricMetric):

@@ -19,8 +19,8 @@ import anndata
 import joblib
 
 # ====================== Core HAM Imports ======================
-from ham.bio.data import BioDataset
-from ham.bio.vae import GeometricVAE
+from bio.data import BioDataset
+from bio.vae import GeometricVAE
 from ham.models.learned import DataDrivenPullbackRanders
 from ham.solvers.avbd import AVBDSolver
 

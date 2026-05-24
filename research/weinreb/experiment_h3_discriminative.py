@@ -7,8 +7,8 @@ import jax
 import jax.numpy as jnp
 import equinox as eqx
 import anndata
-from ham.bio.data import BioDataset
-from ham.bio.vae import GeometricVAE
+from bio.data import BioDataset
+from bio.vae import GeometricVAE
 from ham.models.learned import DataDrivenPullbackRanders, PullbackRiemannian
 from ham.solvers.avbd import AVBDSolver
 

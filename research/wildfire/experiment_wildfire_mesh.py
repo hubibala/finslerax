@@ -37,7 +37,6 @@ Usage::
         --output_dir results/phaseW2
 """
 
-from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import argparse
 import os
 import sys
@@ -276,12 +275,12 @@ def _pixels_to_world_3d(
     Returns:
         Shape ``(K, 3)`` float64 — ``[x_m, y_m, z_m]`` coordinates.
     """
-    pix = np.asarray(pixels, dtype=DEFAULT_NP_DTYPE)
+    pix = np.asarray(pixels, dtype=np.float32)
     rows = np.clip(pix[:, 0].astype(int), 0, elev_raster.shape[0] - 1)
     cols = np.clip(pix[:, 1].astype(int), 0, elev_raster.shape[1] - 1)
     x = pix[:, 1] * float(pixel_spacing_m)
     y = pix[:, 0] * float(pixel_spacing_m)
-    z = elev_raster[rows, cols].astype(DEFAULT_NP_DTYPE)
+    z = elev_raster[rows, cols].astype(np.float32)
     return np.stack([x, y, z], axis=1)
 
 
@@ -305,7 +304,7 @@ def _ignition_to_world_3d(
     x = float(col) * float(pixel_spacing_m)
     y = float(row) * float(pixel_spacing_m)
     z = float(elev_raster[row, col])
-    return jnp.array([x, y, z], dtype=DEFAULT_JNP_DTYPE)
+    return jnp.array([x, y, z], dtype=jnp.float32)
 
 
 # ===========================================================================
@@ -322,8 +321,8 @@ def pearson_r(a: np.ndarray, b: np.ndarray) -> float:
     Returns:
         Correlation in ``[-1, 1]``; ``0.0`` if either array is constant.
     """
-    a = np.asarray(a, dtype=DEFAULT_NP_DTYPE)
-    b = np.asarray(b, dtype=DEFAULT_NP_DTYPE)
+    a = np.asarray(a, dtype=np.float32)
+    b = np.asarray(b, dtype=np.float32)
     if len(a) < 2:
         return 0.0
     a_m = a.mean()
@@ -343,8 +342,8 @@ def compute_rmse(pred: np.ndarray, gt: np.ndarray) -> float:
     Returns:
         RMSE scalar; ``0.0`` if either array is empty.
     """
-    pred = np.asarray(pred, dtype=DEFAULT_NP_DTYPE)
-    gt = np.asarray(gt, dtype=DEFAULT_NP_DTYPE)
+    pred = np.asarray(pred, dtype=np.float32)
+    gt = np.asarray(gt, dtype=np.float32)
     if len(pred) == 0:
         return 0.0
     valid = np.isfinite(pred) & np.isfinite(gt)
@@ -405,11 +404,11 @@ def _predict_arrivals_mesh_chunked(
         chunk_pix = eval_pixels[i : i + chunk_size]
         chunk_3d = jnp.asarray(
             _pixels_to_world_3d(chunk_pix, elev_raster, pixel_spacing_m),
-            dtype=DEFAULT_JNP_DTYPE,
+            dtype=jnp.float32,
         )
         chunk_pred = jax.vmap(_single_arrival)(chunk_3d)
         all_pred.extend(np.asarray(chunk_pred).tolist())
-    return np.array(all_pred, dtype=DEFAULT_NP_DTYPE)
+    return np.array(all_pred, dtype=np.float32)
 
 
 # ===========================================================================
@@ -484,7 +483,7 @@ def _val_pearson_r_mesh(
         scenario.obs_pixels, scenario.elev_raster,
         scenario.pixel_spacing_m, cfg["avbd_n_steps"],
     )
-    gt = np.asarray(scenario.obs_arrival_times, dtype=DEFAULT_NP_DTYPE)
+    gt = np.asarray(scenario.obs_arrival_times, dtype=np.float32)
     return pearson_r(pred, gt)
 
 
@@ -666,9 +665,9 @@ def train_scene_mesh(
                     _pixels_to_world_3d(
                         sc.obs_pixels, sc.elev_raster, sc.pixel_spacing_m
                     ),
-                    dtype=DEFAULT_JNP_DTYPE,
+                    dtype=jnp.float32,
                 )
-                t_obs = jnp.asarray(sc.obs_arrival_times, dtype=DEFAULT_JNP_DTYPE)
+                t_obs = jnp.asarray(sc.obs_arrival_times, dtype=jnp.float32)
                 source_3d = _ignition_to_world_3d(
                     sc.ignition_pixel, sc.elev_raster, sc.pixel_spacing_m
                 )
@@ -754,7 +753,7 @@ def train_scene_mesh(
         )
         gt = np.array(
             [sc.arrival_times[int(r), int(c)] for r, c in eval_pix],
-            dtype=DEFAULT_NP_DTYPE,
+            dtype=np.float32,
         )
         r_val   = pearson_r(pred, gt)
         rmse_val = compute_rmse(pred, gt)
@@ -836,18 +835,18 @@ def _make_synthetic_scenario_mesh(
     elev_raster = (
         100.0
         + amp * np.sin(np.pi * rows_g / H) * np.cos(np.pi * cols_g / W)
-    ).astype(DEFAULT_NP_DTYPE)
+    ).astype(np.float32)
 
-    slope_raster  = np.zeros((H, W), dtype=DEFAULT_NP_DTYPE)
-    aspect_raster = np.zeros((H, W), dtype=DEFAULT_NP_DTYPE)
-    canopy_raster = np.zeros((H, W), dtype=DEFAULT_NP_DTYPE)
+    slope_raster  = np.zeros((H, W), dtype=np.float32)
+    aspect_raster = np.zeros((H, W), dtype=np.float32)
+    canopy_raster = np.zeros((H, W), dtype=np.float32)
     fuel_code_raster = np.full((H, W), 5, dtype=np.int32)
-    weather_vec   = np.zeros(4, dtype=DEFAULT_NP_DTYPE)
-    origin_xy     = np.zeros(2, dtype=DEFAULT_NP_DTYPE)
+    weather_vec   = np.zeros(4, dtype=np.float32)
+    origin_xy     = np.zeros(2, dtype=np.float32)
 
     dr = rows_g - ign_row
     dc = cols_g - ign_col
-    arrival_hours = np.sqrt(dr ** 2 + dc ** 2).astype(DEFAULT_NP_DTYPE) * 0.03
+    arrival_hours = np.sqrt(dr ** 2 + dc ** 2).astype(np.float32) * 0.03
     arrival_hours[ign_row, ign_col] = 0.0
 
     t_max = float(arrival_hours.max())
@@ -865,7 +864,7 @@ def _make_synthetic_scenario_mesh(
 
     ignition_world = np.array(
         [float(ign_col) * pixel_spacing_m, float(ign_row) * pixel_spacing_m],
-        dtype=DEFAULT_NP_DTYPE,
+        dtype=np.float32,
     )
 
     return WildfireScenario(
@@ -945,9 +944,9 @@ def run_synthetic_mesh(cfg: dict, output_dir: str, use_wind: bool = True) -> lis
             _pixels_to_world_3d(
                 scenario.obs_pixels, scenario.elev_raster, scenario.pixel_spacing_m
             ),
-            dtype=DEFAULT_JNP_DTYPE,
+            dtype=jnp.float32,
         )
-        t_obs = jnp.asarray(scenario.obs_arrival_times, dtype=DEFAULT_JNP_DTYPE)
+        t_obs = jnp.asarray(scenario.obs_arrival_times, dtype=jnp.float32)
         source_3d = _ignition_to_world_3d(
             scenario.ignition_pixel, scenario.elev_raster, scenario.pixel_spacing_m
         )
@@ -997,7 +996,7 @@ def run_synthetic_mesh(cfg: dict, output_dir: str, use_wind: bool = True) -> lis
         )
         gt = np.array(
             [scenario.arrival_times[int(r), int(c)] for r, c in eval_pixels],
-            dtype=DEFAULT_NP_DTYPE,
+            dtype=np.float32,
         )
         r_val    = pearson_r(pred, gt)
         rmse_val = compute_rmse(pred, gt)
@@ -1129,8 +1128,8 @@ def _save_figures(results: list, output_dir: str) -> None:
 
     for res in results:
         if "pred" in res and "gt" in res:
-            pred_w2 = np.asarray(res["pred"], dtype=DEFAULT_NP_DTYPE)
-            gt      = np.asarray(res["gt"],   dtype=DEFAULT_NP_DTYPE)
+            pred_w2 = np.asarray(res["pred"], dtype=np.float32)
+            gt      = np.asarray(res["gt"],   dtype=np.float32)
             # DISCLAIMER: This W1 proxy is a synthetic stand-in for code testing purposes.
             # It simulates a flat-grid metric that ignores elevation.
             # For scientific publication, load actual W1 predictions from Phase W1 outputs!

@@ -5,8 +5,8 @@ import optax
 import time
 
 from ham.models.learned import NeuralRanders
-from ham.bio.vae import GeometricVAE
-from ham.bio.data import DataLoader
+from bio.vae import GeometricVAE
+from bio.data import DataLoader
 from ham.training.losses import (
     ReconstructionLoss,
     KLDivergenceLoss,

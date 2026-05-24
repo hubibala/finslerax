@@ -58,7 +58,7 @@ import equinox as eqx
 import optax
 import anndata
 
-from ham.bio.data import BioDataset
+from bio.data import BioDataset
 from ham.geometry import EuclideanSpace
 from ham.models.learned import PullbackRiemannian
 from ham.training.losses import LossComponent
@@ -363,7 +363,7 @@ def build_diagnostic_vae(data_dim: int, latent_dim: int,
         extremely expensive and causes NaN on random init weights.
       - classifier_head with small weight init (Fix C)
     """
-    from ham.bio.vae import GeometricVAE
+    from bio.vae import GeometricVAE
 
     k1, k2, k3, k_cls = jax.random.split(key, 4)
     manifold = EuclideanSpace(dim=latent_dim)

@@ -12,7 +12,7 @@ import jax.numpy as jnp
 import equinox as eqx
 import anndata
 
-from ham.bio.data import BioDataset
+from bio.data import BioDataset
 from ham.solvers.geodesic import ExponentialMap
 
 from weinreb_vae import build_diagnostic_vae, encode_all, TARGET_FATES

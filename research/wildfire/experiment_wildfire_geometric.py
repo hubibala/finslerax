@@ -28,7 +28,6 @@ CovariateConditionedRanders (or CovariateMeshRanders) metric:
     spec/ARCH_SPEC.md § 4.2 (AVBDSolver)
 """
 
-from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import argparse
 import os
 import time

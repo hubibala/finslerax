@@ -58,10 +58,19 @@ minversion = "6.0"
 addopts = "-ra -q"
 testpaths = [
     "tests",
+    "research/weinreb/tests",
+    "research/wildfire/tests"
+]
+pythonpath = [
+    "research/weinreb",
+    "research/wildfire"
 ]
 filterwarnings = [
     "ignore:Module already imported so cannot be rewritten. (fast_array_utils|jaxtyping|zarr):pytest.PytestAssertRewriteWarning",
 ]
+
+[tool.pyright]
+extraPaths = ["research/weinreb", "research/wildfire"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

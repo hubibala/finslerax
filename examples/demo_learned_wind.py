@@ -1,4 +1,3 @@
-from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -10,7 +9,7 @@ from jax import config
 
 from ham.geometry import Sphere
 from ham.models.learned import NeuralRanders
-from ham.sim.fields import rossby_haurwitz
+from sim.fields import rossby_haurwitz
 from ham.vis import setup_3d_plot, plot_sphere, plot_vector_field, generate_icosphere
 
 def main():
