@@ -12,7 +12,7 @@ from jax import config
 import equinox as eqx
 
 # Enforce High Precision
-config.update("jax_enable_x64", True)
+# config.update("jax_enable_x64", True)
 
 from ham.solvers.avbd import AVBDSolver
 from ham.geometry import Sphere, Torus, Paraboloid

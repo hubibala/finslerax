@@ -15,7 +15,7 @@ import equinox as eqx
 from typing import Tuple
 
 from ham.geometry.mesh import TriangularMesh
-from ham.geometry.metric import FinslerMetric
+from ham.geometry.metric import FinslerMetric, AsymmetricMetric
 from ham.models.wildfire import project_spd, project_b_norm
 from ham.utils.math import GRAD_EPS
 
@@ -214,7 +214,7 @@ def compute_face_slopes_aspects(
 # CovariateMeshRanders
 # ---------------------------------------------------------------------------
 
-class CovariateMeshRanders(FinslerMetric):
+class CovariateMeshRanders(AsymmetricMetric):
     """Randers metric on a TriangularMesh with per-face covariate conditioning.
 
     Uses the same global/local MLP encoder architecture as
@@ -353,8 +353,8 @@ class CovariateMeshRanders(FinslerMetric):
             Tuple ``(G_f, b_f)`` where ``G_f`` is (2, 2) SPD and ``b_f``
             is (2,).
         """
-        local_feat = self.face_covariates[face_idx]   # (5+fuel_emb_dim,)
-        raw_global = self.global_mlp(self.weather_vec)
+        local_feat = jax.lax.stop_gradient(self.face_covariates)[face_idx]   # (5+fuel_emb_dim,)
+        raw_global = self.global_mlp(jax.lax.stop_gradient(self.weather_vec))
         raw_local = self.local_mlp(local_feat)
         raw = raw_global + raw_local
 
@@ -451,3 +451,43 @@ class CovariateMeshRanders(FinslerMetric):
         disc = lam * v_sq_h + bdotv ** 2
         cost = (jnp.sqrt(jnp.maximum(disc, GRAD_EPS)) - bdotv) / lam
         return jnp.where(is_zero, 0.0, cost)
+
+    def zermelo_data(
+        self, x: jax.Array
+    ) -> tuple[jax.Array, jax.Array, jax.Array]:
+        """Return Zermelo triple ``(H_3d, W_3d, lambda)`` at position x.
+
+        Implements the :class:`~ham.geometry.metric.AsymmetricMetric` interface.
+        Returns the Phase-W2 isotropic approximation: H = g_iso * I_3,
+        W = b lifted to 3D via the face frame.
+
+        Args:
+            x: (3,) position on (or near) the mesh surface.
+
+        Returns:
+            H_3d:   (3, 3) isotropic metric tensor g_iso * I_3.
+            W_3d:   (3,) wind vector lifted to face tangent plane.
+            lambda: Causality scalar ``1 - ||W||²_{H^{-1}}``.
+        """
+        weights = self.manifold.get_face_weights(x)
+        face_idx = jnp.argmax(weights)
+
+        tri = self.manifold.triangles[face_idx]
+        v0_tri, v1_tri, v2_tri = tri[0], tri[1], tri[2]
+        e1_raw = v1_tri - v0_tri
+        e2_raw = v2_tri - v0_tri
+        norm_e1 = jnp.sqrt(jnp.sum(e1_raw ** 2) + 1e-12)
+        u1 = e1_raw / norm_e1
+        e2_orth = e2_raw - jnp.dot(e2_raw, u1) * u1
+        norm_e2 = jnp.sqrt(jnp.sum(e2_orth ** 2) + 1e-12)
+        u2 = e2_orth / norm_e2
+
+        G_f, b_f = self._get_face_params(face_idx)
+        g_iso = 0.5 * (G_f[0, 0] + G_f[1, 1])
+        b_3d = b_f[0] * u1 + b_f[1] * u2
+
+        H_3d = g_iso * jnp.eye(3, dtype=G_f.dtype)
+        b_norm_sq = jnp.sum(b_3d ** 2)
+        b_Ginv_b = b_norm_sq / jnp.maximum(g_iso, 1e-8)
+        lam = jnp.maximum(1.0 - b_Ginv_b, 1e-6)
+        return H_3d, b_3d, lam

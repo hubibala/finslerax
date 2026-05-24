@@ -5,11 +5,11 @@ import numpy as np
 import equinox as eqx
 import optax
 from jax import config
-config.update("jax_enable_x64", True)
+# config.update("jax_enable_x64", True)
 
 from ham.geometry import Sphere
 from ham.models.learned import NeuralRanders
-from ham.sim.fields import rossby_haurwitz
+from sim.fields import rossby_haurwitz
 from ham.vis import setup_3d_plot, plot_sphere, plot_vector_field, generate_icosphere
 
 def main():
@@ -58,7 +58,7 @@ def main():
             # C. Jacobian Regularization (The Smoother)
             # We calculate dW/dx to penalize rapid changes in magnitude/direction
             def get_w(pt):
-                _, W, _ = m._get_zermelo_data(pt)
+                _, W, _ = m.zermelo_data(pt)
                 return W
             
             # Compute Jacobian matrix for each point x
@@ -93,7 +93,7 @@ def main():
     vecs_true = np.array(jax.vmap(w_true)(jnp.array(grid_pts)))
     
     def get_learned_wind(x):
-        _, W, _ = learner._get_zermelo_data(x)
+        _, W, _ = learner.zermelo_data(x)
         return W
     
     vecs_pred = np.array(jax.vmap(get_learned_wind)(jnp.array(grid_pts)))

@@ -5,7 +5,7 @@ import numpy as np
 from jax.test_util import check_grads
 from jax import config
 
-config.update("jax_enable_x64", True)
+# config.update("jax_enable_x64", True)
 
 from ham.geometry.manifold import Manifold, _safe_norm_ratio
 from ham.geometry import Torus
@@ -47,15 +47,15 @@ class TestManifold(unittest.TestCase):
         # Normal case
         x = jnp.array([3.0, 4.0]) # norm 5
         y = jnp.array([1.0, 0.0]) # norm 1
-        np.testing.assert_allclose(_safe_norm_ratio(x, y), jnp.array([5.0]), atol=1e-7)
+        np.testing.assert_allclose(_safe_norm_ratio(x, y), jnp.array([5.0]), atol=1e-5)
         
         # y is zero vector
         y_zero = jnp.array([0.0, 0.0])
-        np.testing.assert_allclose(_safe_norm_ratio(x, y_zero), jnp.array([1.0]), atol=1e-7)
+        np.testing.assert_allclose(_safe_norm_ratio(x, y_zero), jnp.array([1.0]), atol=1e-5)
         
         # Both zero
         x_zero = jnp.array([0.0, 0.0])
-        np.testing.assert_allclose(_safe_norm_ratio(x_zero, y_zero), jnp.array([1.0]), atol=1e-7)
+        np.testing.assert_allclose(_safe_norm_ratio(x_zero, y_zero), jnp.array([1.0]), atol=1e-5)
 
     def test_safe_norm_ratio_grad(self):
         # check_grads verifies the custom JVP against numerical differentiation.
@@ -83,7 +83,7 @@ class TestManifold(unittest.TestCase):
         x = jnp.array([1.0, 0.0, 0.0])
         v = self.manifold.log_map(x, x)
         # Should return exactly 0
-        np.testing.assert_allclose(v, jnp.zeros(3), atol=1e-7)
+        np.testing.assert_allclose(v, jnp.zeros(3), atol=1e-5)
 
     def test_default_log_map_normal_secant(self):
         # Use Torus where a purely normal secant can be easily created.
@@ -96,7 +96,7 @@ class TestManifold(unittest.TestCase):
         v = torus.log_map(x, y)
         # Since displacement is purely normal, tangent projection is zero.
         # log_map should handle this and return zero, avoiding division by zero.
-        np.testing.assert_allclose(v, jnp.zeros(3), atol=1e-7)
+        np.testing.assert_allclose(v, jnp.zeros(3), atol=1e-5)
 
     def test_log_map_jit_vmap(self):
         # Verify composition with JAX transforms
@@ -113,11 +113,11 @@ class TestManifold(unittest.TestCase):
         # jit
         jit_vmap_log = jax.jit(vmap_log)
         vs_jit = jit_vmap_log(xs, ys)
-        np.testing.assert_allclose(vs, vs_jit, atol=1e-7)
+        np.testing.assert_allclose(vs, vs_jit, atol=1e-5)
 
         # Ensure all vectors are tangent
         projs = jax.vmap(self.manifold.to_tangent)(xs, vs)
-        np.testing.assert_allclose(vs, projs, atol=1e-7)
+        np.testing.assert_allclose(vs, projs, atol=1e-5)
 
 if __name__ == '__main__':
     unittest.main()

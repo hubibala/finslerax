@@ -6,6 +6,7 @@ Provides dataset loaders, normalizers, and spatial/temporal preprocessing method
 the Sim2Real-Fire dataset (Gahtan et al., 2026).
 """
 
+from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import numpy as np
 
 
@@ -52,7 +53,7 @@ class WildfireScenario:
         self.origin_xy = origin_xy
         self.burned_mask = burned_mask
         self.val_pixels = val_pixels if val_pixels is not None else np.zeros((0, 2), dtype=np.int64)
-        self.val_arrival_times = val_arrival_times if val_arrival_times is not None else np.zeros((0,), dtype=np.float64)
+        self.val_arrival_times = val_arrival_times if val_arrival_times is not None else np.zeros((0,), dtype=DEFAULT_NP_DTYPE)
 
 
 def extract_arrival_times(masks: np.ndarray) -> np.ndarray:
@@ -68,7 +69,7 @@ def extract_arrival_times(masks: np.ndarray) -> np.ndarray:
     """
     masks = np.asarray(masks)
     any_burned = np.any(masks, axis=0)
-    first_burn = np.argmax(masks, axis=0).astype(np.float64)
+    first_burn = np.argmax(masks, axis=0).astype(DEFAULT_NP_DTYPE)
     first_burn[~any_burned] = np.inf
     return first_burn
 
@@ -86,23 +87,23 @@ def find_ignition_point(masks: np.ndarray) -> np.ndarray:
     # Check frame 0 first
     r, c = np.where(masks[0])
     if len(r) > 0:
-        return np.array([np.mean(r), np.mean(c)], dtype=np.float64)
+        return np.array([np.mean(r), np.mean(c)], dtype=DEFAULT_NP_DTYPE)
 
     # Fallback to cumulative frames 0-2 (up to index 3)
     T = masks.shape[0]
     limit = min(3, T)
     r, c = np.where(np.any(masks[:limit], axis=0))
     if len(r) > 0:
-        return np.array([np.mean(r), np.mean(c)], dtype=np.float64)
+        return np.array([np.mean(r), np.mean(c)], dtype=DEFAULT_NP_DTYPE)
 
     # Fallback to the entire mask sequence
     r, c = np.where(np.any(masks, axis=0))
     if len(r) > 0:
-        return np.array([np.mean(r), np.mean(c)], dtype=np.float64)
+        return np.array([np.mean(r), np.mean(c)], dtype=DEFAULT_NP_DTYPE)
 
     # Ultimate fallback: center of the spatial grid
     H, W = masks.shape[1], masks.shape[2]
-    return np.array([H / 2.0, W / 2.0], dtype=np.float64)
+    return np.array([H / 2.0, W / 2.0], dtype=DEFAULT_NP_DTYPE)
 
 
 def stratified_sample_observations(arrival: np.ndarray, n_samples: int, seed=None) -> np.ndarray:
@@ -212,13 +213,13 @@ def _weather_to_4vec(weather: np.ndarray) -> np.ndarray:
     weather = np.asarray(weather)
     if weather.ndim == 1:
         t, h, ws, s, c = weather
-        return np.array([t, h, ws * s, ws * c], dtype=np.float64)
+        return np.array([t, h, ws * s, ws * c], dtype=DEFAULT_NP_DTYPE)
     elif weather.ndim == 2:
         t = np.mean(weather[:, 0])
         h = np.mean(weather[:, 1])
         wx = np.mean(weather[:, 2] * weather[:, 3])
         wy = np.mean(weather[:, 2] * weather[:, 4])
-        return np.array([t, h, wx, wy], dtype=np.float64)
+        return np.array([t, h, wx, wy], dtype=DEFAULT_NP_DTYPE)
     else:
         raise ValueError("Weather must be a 1D or 2D array.")
 
@@ -243,8 +244,8 @@ class SceneNormalizer:
         self.slope_std = float(slope_std)
         self.canopy_mean = float(canopy_mean)
         self.canopy_std = float(canopy_std)
-        self.weather_mean = np.zeros(4) if weather_mean is None else np.asarray(weather_mean, dtype=np.float64)
-        self.weather_std = np.ones(4) if weather_std is None else np.asarray(weather_std, dtype=np.float64)
+        self.weather_mean = np.zeros(4) if weather_mean is None else np.asarray(weather_mean, dtype=DEFAULT_NP_DTYPE)
+        self.weather_std = np.ones(4) if weather_std is None else np.asarray(weather_std, dtype=DEFAULT_NP_DTYPE)
 
     @classmethod
     def fit(cls, scenarios: list):
@@ -391,7 +392,7 @@ def load_wildfire_scenario(
     pixel_spacing_m = 30.0  # Sim2Real-Fire dataset default resolution is 30m
     ignition_world = np.array(
         [float(ignition_pixel[1]) * pixel_spacing_m, float(ignition_pixel[0]) * pixel_spacing_m],
-        dtype=np.float64,
+        dtype=DEFAULT_NP_DTYPE,
     )
 
     # Stratified observation sampling (training targets)
@@ -399,7 +400,7 @@ def load_wildfire_scenario(
     if len(obs_pixels) > 0:
         obs_arrival_times = arrival_times[obs_pixels[:, 0], obs_pixels[:, 1]]
     else:
-        obs_arrival_times = np.zeros((0,), dtype=np.float64)
+        obs_arrival_times = np.zeros((0,), dtype=DEFAULT_NP_DTYPE)
 
     # Held-out validation pixels: draw a fresh stratified sample with a different
     # seed so val_pixels are independent of the training observation set.
@@ -410,7 +411,7 @@ def load_wildfire_scenario(
     if len(val_pixels) > 0:
         val_arrival_times = arrival_times[val_pixels[:, 0], val_pixels[:, 1]]
     else:
-        val_arrival_times = np.zeros((0,), dtype=np.float64)
+        val_arrival_times = np.zeros((0,), dtype=DEFAULT_NP_DTYPE)
 
     # Standardize covariates
     elev_raster, slope_raster, canopy_raster = normalizer.normalize_spatial(
@@ -419,9 +420,9 @@ def load_wildfire_scenario(
         raw["fuel"]["canopy_cover"],
     )
 
-    aspect_raster = np.asarray(raw["topography"]["aspect"], dtype=np.float64)
+    aspect_raster = np.asarray(raw["topography"]["aspect"], dtype=DEFAULT_NP_DTYPE)
     fuel_code_raster = np.asarray(raw["fuel"]["fbfm13"], dtype=np.int32)
-    origin_xy = np.zeros(2, dtype=np.float64)
+    origin_xy = np.zeros(2, dtype=DEFAULT_NP_DTYPE)
 
     # Standardize weather
     weather_vec = normalizer.normalize_weather(_weather_to_4vec(raw["weather"]))

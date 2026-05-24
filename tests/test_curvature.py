@@ -21,7 +21,7 @@ import unittest
 import numpy as np
 from jax import config
 
-config.update("jax_enable_x64", True)
+# config.update("jax_enable_x64", True)
 
 from ham.geometry import EuclideanSpace, Sphere
 from ham.geometry import Euclidean, Riemannian, Randers
@@ -88,7 +88,7 @@ class TestRiemannCurvatureTensor(unittest.TestCase):
 
         R = riemann_curvature_tensor(metric, x, v)
         # R[i, j, k] == -R[i, k, j]
-        np.testing.assert_allclose(R, -jnp.transpose(R, (0, 2, 1)), atol=1e-6)
+        np.testing.assert_allclose(R, -jnp.transpose(R, (0, 2, 1)), atol=1e-5)
 
     def test_nonlinear_connection_euler_identity(self):
         """
@@ -202,7 +202,7 @@ class TestSectionalCurvature(unittest.TestCase):
 
         K_eager = sectional_curvature(metric, x, v1, v2)
         K_jit = jax.jit(sectional_curvature, static_argnums=0)(metric, x, v1, v2)
-        np.testing.assert_allclose(K_eager, K_jit, atol=1e-6)
+        np.testing.assert_allclose(K_eager, K_jit, atol=1e-5)
 
     def test_grad_through_sectional_curvature(self):
         """

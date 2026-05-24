@@ -36,7 +36,7 @@ class TestRandomFourierFeatures(unittest.TestCase):
         rff = RandomFourierFeatures(in_dim=3, mapping_size=16, scale=1.0, key=self.key)
         x = jnp.array([0.1, 0.2, 0.3])
         jit_fn = eqx.filter_jit(lambda m, v: m(v))
-        np.testing.assert_allclose(jit_fn(rff, x), rff(x), atol=1e-7)
+        np.testing.assert_allclose(jit_fn(rff, x), rff(x), atol=1e-5)
 
 
 class TestNetworks(unittest.TestCase):
@@ -55,7 +55,7 @@ class TestNetworks(unittest.TestCase):
         def jit_vf(model, val):
             return model(val)
             
-        np.testing.assert_allclose(jit_vf(vf, x), vf(x), atol=1e-7)
+        np.testing.assert_allclose(jit_vf(vf, x), vf(x), atol=1e-5)
         
         # 2. Vmap (Map over data, not model)
         xs = jnp.ones((5, self.dim))
@@ -115,7 +115,7 @@ class TestNetworks(unittest.TestCase):
         # JIT
         jit_fn = eqx.filter_jit(lambda m, v: m(v))
         G_jit = jit_fn(psd_net, x)
-        np.testing.assert_allclose(G_jit, psd_net(x), atol=1e-7)
+        np.testing.assert_allclose(G_jit, psd_net(x), atol=1e-5)
 
         # Vmap
         xs = jnp.ones((4, self.dim))

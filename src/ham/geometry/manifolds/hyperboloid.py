@@ -101,12 +101,18 @@ class Hyperboloid(Manifold):
         return v + scale[..., None] * (x + y)
 
     def retract(self, x: jax.Array, delta: jax.Array) -> jax.Array:
-        """Clamped retraction via exponential map."""
+        """Clamped retraction via exact exponential map.
+
+        The exponential map of a tangent vector on the hyperboloid is already
+        on the hyperboloid exactly, so a redundant ``project`` call is omitted.
+        Clamping ensures the step magnitude stays within RETRACT_MAX_NORM,
+        preventing numerical overflow for large gradient steps.
+        """
         norm_delta = self._minkowski_norm(delta)
         safe_nd = jnp.maximum(norm_delta, GRAD_EPS)
         scale = jnp.where(norm_delta > RETRACT_MAX_NORM, RETRACT_MAX_NORM / safe_nd, 1.0)
         safe_delta = delta * scale[..., None]
-        return self.project(self.exp_map(x, safe_delta))
+        return self.exp_map(x, safe_delta)
 
     def random_sample(self, key: jax.Array, shape: tuple[int, ...] = ()) -> jax.Array:
         """Samples uniformly on the hyperboloid upper sheet."""

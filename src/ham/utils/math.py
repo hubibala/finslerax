@@ -21,7 +21,7 @@ __all__ = [
 # Canonical numerical constants (P2: consolidate magic numbers)
 # ---------------------------------------------------------------------------
 
-GRAD_EPS = 1e-12
+GRAD_EPS = 1e-6
 """Guard for ``jnp.sqrt`` backward pass at zero. 
 
 Used inside :func:`safe_norm`. Ref: ``spec/MATH_SPEC.md § 6.1``.
@@ -43,7 +43,7 @@ All modules that regularise metric matrices (G -> G + eps*I) should import
 this constant rather than hardcoding magic numbers.
 """
 
-TAYLOR_EPS = 1e-6
+TAYLOR_EPS = 1e-4
 """Threshold for switching to Taylor expansions.
 
 When a quantity (e.g. sin(theta)/theta) is below this threshold, 

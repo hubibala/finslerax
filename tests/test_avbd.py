@@ -5,7 +5,7 @@ from jax import config
 import numpy as np
 
 # Use Double Precision
-config.update("jax_enable_x64", True)
+# config.update("jax_enable_x64", True)
 
 from ham.solvers.avbd import AVBDSolver
 from ham.geometry import Sphere, Paraboloid

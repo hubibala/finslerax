@@ -7,14 +7,89 @@ DiscreteRanders (zoo.py) for anisotropic mesh-based metrics.
 See also: spec/ARCH_SPEC.md § 5 (Module Structure).
 """
 
+from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
 import jax
 import jax.numpy as jnp
+import numpy as np
 import equinox as eqx
 from typing import Tuple, List, Union
 from .manifold import Manifold
 from ham.utils.math import safe_norm, GRAD_EPS, NORM_EPS
 
 __all__ = ["TriangularMesh"]
+
+
+def _build_spatial_grid(
+    vertices: jax.Array,
+    faces: jax.Array,
+    grid_size: int,
+) -> Tuple[jax.Array, jax.Array, jax.Array, int]:
+    """Build a 2D spatial hash grid mapping XY cells → face index lists.
+
+    Runs entirely on the CPU with numpy at construction time (not under JIT).
+    Each face is assigned to the grid cell containing its XY centroid.
+
+    Args:
+        vertices: (V, N) vertex positions.
+        faces:    (F, 3) face index array.
+        grid_size: Number of cells per axis (G).
+
+    Returns:
+        grid_indices: (G, G, max_M) int32 padded face index array.
+            Unused slots contain -1.
+        grid_origin:  (2,) float64 XY origin of the bounding box.
+        grid_cell_size: (2,) float64 cell dimensions.
+        max_m:        Maximum faces in any single cell (static).
+    """
+    # Work in numpy so the build is pure Python, not JAX-traced.
+    verts_np = np.asarray(jax.device_get(vertices))
+    faces_np = np.asarray(jax.device_get(faces), dtype=np.int32)
+    tris_np = verts_np[faces_np]          # (F, 3, N)
+
+    # XY bounding box
+    xy = verts_np[:, :2]
+    min_xy = xy.min(axis=0)
+    max_xy = xy.max(axis=0)
+    extent = np.maximum(max_xy - min_xy, 1e-6)
+    cell_size = extent / grid_size
+
+    # Assign each face to ALL cells its XY bounding box overlaps (not just centroid).
+    # This prevents misses when large triangles span multiple cells.
+    grid: list = [[[] for _ in range(grid_size)] for _ in range(grid_size)]
+    for face_idx in range(len(faces_np)):
+        tri_xy = tris_np[face_idx, :, :2]   # (3, 2)
+        bb_min = tri_xy.min(axis=0)
+        bb_max = tri_xy.max(axis=0)
+        # Cell range the bounding box covers (inclusive on both ends)
+        ci_lo = int(np.clip(np.floor((bb_min[0] - min_xy[0]) / cell_size[0]), 0, grid_size - 1))
+        ci_hi = int(np.clip(np.floor((bb_max[0] - min_xy[0]) / cell_size[0]), 0, grid_size - 1))
+        cj_lo = int(np.clip(np.floor((bb_min[1] - min_xy[1]) / cell_size[1]), 0, grid_size - 1))
+        cj_hi = int(np.clip(np.floor((bb_max[1] - min_xy[1]) / cell_size[1]), 0, grid_size - 1))
+        for ci in range(ci_lo, ci_hi + 1):
+            for cj in range(cj_lo, cj_hi + 1):
+                grid[ci][cj].append(face_idx)
+
+    # Find maximum occupancy (must be ≥ 1 to avoid zero-size arrays)
+    max_m = max(
+        (len(grid[i][j]) for i in range(grid_size) for j in range(grid_size)),
+        default=1,
+    )
+    max_m = max(max_m, 1)
+
+    # Build padded index array (-1 = empty slot)
+    grid_indices_np = np.full((grid_size, grid_size, max_m), -1, dtype=np.int32)
+    for i in range(grid_size):
+        for j in range(grid_size):
+            cell_faces = grid[i][j]
+            grid_indices_np[i, j, : len(cell_faces)] = cell_faces
+
+    return (
+        jnp.array(grid_indices_np),
+        jnp.array(min_xy, dtype=DEFAULT_JNP_DTYPE),
+        jnp.array(cell_size, dtype=DEFAULT_JNP_DTYPE),
+        int(max_m),
+    )
+
 
 class TriangularMesh(Manifold):
     """A discrete 2-manifold defined by a triangular mesh in R^N.
@@ -32,18 +107,37 @@ class TriangularMesh(Manifold):
     vertices: jax.Array
     faces: jax.Array
     triangles: jax.Array
+    # Spatial hash grid for O(max_M) nearest-face lookup instead of O(F).
+    # Built once at construction time from the XY bounding box of the mesh.
+    _grid_indices: jax.Array   # (G, G, max_M) int32 — padded face index grid
+    _grid_origin: jax.Array    # (2,) float64 — XY origin of the grid
+    _grid_cell_size: jax.Array # (2,) float64 — cell dimensions in metres
+    _grid_size: int = eqx.field(static=True)   # G (number of cells per axis)
+    _grid_max_m: int = eqx.field(static=True)  # max faces per cell (static for XLA)
 
-    def __init__(self, vertices: jax.Array, faces: jax.Array):
-        """Construct a TriangularMesh.
+    def __init__(self, vertices: jax.Array, faces: jax.Array, grid_size: int = 16):
+        """Construct a TriangularMesh with a precomputed spatial hash grid.
 
         Args:
             vertices: Array of shape (V, N) — the V vertex positions in R^N.
-            faces: Integer array of shape (F, 3) — each row indexes three 
+            faces: Integer array of shape (F, 3) — each row indexes three
                 vertices forming a triangle.
+            grid_size: Number of grid cells per axis for the spatial hash.
+                Larger values give faster ``project`` but more memory.
+                Default: 16 (yields ~F/256 candidates per lookup).
         """
         self.vertices = vertices
         self.faces = faces
-        self.triangles = self.vertices[self.faces] 
+        self.triangles = vertices[faces]
+        self._grid_size = int(grid_size)
+
+        g_idx, g_origin, g_cell, max_m = _build_spatial_grid(
+            vertices, faces, int(grid_size)
+        )
+        self._grid_indices = g_idx
+        self._grid_origin = g_origin
+        self._grid_cell_size = g_cell
+        self._grid_max_m = int(max_m)
 
     @property
     def ambient_dim(self) -> int:
@@ -119,7 +213,12 @@ class TriangularMesh(Manifold):
     def project(self, x: jax.Array) -> jax.Array:
         """Project a point from ambient space onto the nearest triangle face.
 
-        Performs a linear scan over all F faces and returns the closest point.
+        Uses the precomputed spatial hash grid to restrict the search to a
+        3×3 neighbourhood of grid cells (~9 × max_M candidate faces instead
+        of all F faces), giving an O(max_M) cost per call under JIT/vmap.
+
+        Dummy padding entries (index == -1) are assigned infinite distance
+        and excluded from the argmin.
 
         Args:
             x: Query point in R^N.
@@ -127,14 +226,46 @@ class TriangularMesh(Manifold):
         Returns:
             Closest point on the mesh surface, shape (N,).
         """
+        all_candidate_indices = self._candidate_face_indices(x)
+        # Replace dummy index -1 with 0 for safe gather (we mask those out below)
+        safe_indices = jnp.maximum(all_candidate_indices, 0)
+        local_triangles = self.triangles[safe_indices]   # (9*max_M, 3, N)
+
         dist_fn = lambda tri: self._point_triangle_distance(x, tri)
-        dists_sq, points = jax.vmap(dist_fn)(self.triangles)
-        min_idx = jnp.argmin(dists_sq)
+        dists_sq, points = jax.vmap(dist_fn)(local_triangles)
+
+        # Mask out dummy slots with infinite distance
+        is_valid = all_candidate_indices >= 0
+        masked_dists = jnp.where(is_valid, dists_sq, jnp.inf)
+
+        min_idx = jnp.argmin(masked_dists)
         return points[min_idx]
+
+    def _candidate_face_indices(self, x: jax.Array) -> jax.Array:
+        """Return the (9*max_M,) int32 array of candidate face indices for x.
+
+        Used by project, get_face_index, and get_face_weights to restrict the
+        search to a 3x3 neighbourhood of grid cells instead of all F faces.
+        Dummy padding slots have value -1.
+        """
+        G = self._grid_size
+        frac = (x[:2] - self._grid_origin) / self._grid_cell_size
+        ci = jnp.clip(jnp.floor(frac[0]).astype(jnp.int32), 0, G - 1)
+        cj = jnp.clip(jnp.floor(frac[1]).astype(jnp.int32), 0, G - 1)
+        return jnp.concatenate([
+            self._grid_indices[
+                jnp.clip(ci + di, 0, G - 1),
+                jnp.clip(cj + dj, 0, G - 1),
+            ]
+            for di in (-1, 0, 1)
+            for dj in (-1, 0, 1)
+        ], axis=0)
 
     @eqx.filter_jit
     def get_face_index(self, x: jax.Array) -> jax.Array:
         """Return the index of the triangle face closest to the query point.
+
+        Uses the spatial hash grid for O(max_M) cost instead of O(F).
 
         Args:
             x: Query point in R^N.
@@ -142,17 +273,30 @@ class TriangularMesh(Manifold):
         Returns:
             Scalar integer index into self.faces / self.triangles.
         """
+        all_indices = self._candidate_face_indices(x)
+        safe_indices = jnp.maximum(all_indices, 0)
+        local_triangles = self.triangles[safe_indices]
         dist_fn = lambda tri: self._point_triangle_distance(x, tri)[0]
-        dists_sq = jax.vmap(dist_fn)(self.triangles)
-        return jnp.argmin(dists_sq)
+        dists_sq = jax.vmap(dist_fn)(local_triangles)
+        is_valid = all_indices >= 0
+        masked_dists = jnp.where(is_valid, dists_sq, jnp.inf)
+        local_min = jnp.argmin(masked_dists)
+        return safe_indices[local_min]
 
     @eqx.filter_jit
     def get_face_weights(self, x: jax.Array, temperature: float = 100.0) -> jax.Array:
         """Compute differentiable face-proximity weights via softmax.
 
-        Weights are computed as softmax(-d² * temperature) where d² is the 
-        squared distance from x to each face. Higher temperature yields a 
+        Weights are computed as softmax(-d^2 * temperature) where d^2 is the
+        squared distance from x to each face.  Higher temperature yields a
         sharper (more one-hot) distribution.
+
+        This method intentionally scans all F faces (O(F)) because it is
+        used in the differentiable ``metric_fn`` path (in DiscreteRanders and
+        CovariateMeshRanders) and the softmax must normalise over the complete
+        face set for correct gradient flow.  For non-differentiable
+        nearest-face lookup use ``get_face_index`` (which uses the spatial
+        hash grid and is O(max_M)).
 
         Args:
             x: Query point in R^N.

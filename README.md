@@ -118,7 +118,7 @@ phase = TrainingPhase(
 
 ## 📂 Repository Structure
 
-```
+```text
 src/ham/
 ├── geometry/
 │   ├── manifold.py       # Manifold abstract base class
@@ -137,17 +137,15 @@ src/ham/
 │   └── geodesic.py       # IVP solver (ExponentialMap via RK4)
 ├── training/
 │   ├── pipeline.py       # HAMPipeline: multi-phase declarative training
-│   └── losses.py         # Modular loss components (reconstruction, KL,
-│                          # alignment, Euler-Lagrange residual, etc.)
-├── bio/
-│   ├── vae.py            # GeometricVAE with Zermelo control dynamics
-│   └── data.py           # BioDataset (AnnData integration, lineage pairs)
-├── sim/
-│   └── fields.py         # Field abstractions
+│   └── losses.py         # Modular loss components
 ├── utils/
 │   └── math.py           # safe_norm, numerical stability primitives
 └── vis/
     └── hyperbolic.py     # Poincaré disk visualization
+
+research/
+├── weinreb/              # Hematopoiesis single-cell data application
+└── wildfire/             # Wildfire front propagation simulation
 ```
 
 ## 🧪 Running Tests

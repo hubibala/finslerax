@@ -36,15 +36,21 @@ def _safe_minkowski_self_norm_jvp(primals, tangents):
 
 @jax.custom_jvp
 def _safe_arccos(x: jax.Array) -> jax.Array:
-    """Computes arccos(x) with stable gradients at x=±1.
+    """Computes arccos(x) with stable primal and gradients at x=±1.
+
+    The primal clamps ``x`` to ``[-1, 1]`` before calling ``jnp.arccos``
+    to avoid NaN when points drift slightly off the manifold (float64
+    rounding can produce ``|<x,y>/r^2| > 1``).  The custom JVP then
+    regularises the ``sqrt(1-x^2)`` denominator independently so that
+    near-antipodal gradients are well-defined even after the clamp.
 
     Args:
         x: Input array.
 
     Returns:
-        arccos(x).
+        arccos(x), clipped to avoid NaN for |x| > 1.
     """
-    return jnp.arccos(x)
+    return jnp.arccos(jnp.clip(x, -1.0, 1.0))
 
 
 @_safe_arccos.defjvp

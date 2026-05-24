@@ -2,13 +2,13 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
-from typing import NamedTuple, Union
+from typing import NamedTuple, Union, Callable
 from jax import config
-config.update("jax_enable_x64", True)
+# config.update("jax_enable_x64", True)
 
 from ham.geometry import Sphere
 from ham.geometry import Randers
-from ham.sim.fields import rossby_haurwitz
+from sim.fields import rossby_haurwitz
 from ham.solvers import AVBDSolver
 from ham.solvers.geodesic import ExponentialMap
 from ham.vis import setup_3d_plot, plot_sphere, plot_vector_field, plot_trajectory, plot_indicatrices, generate_icosphere
@@ -20,7 +20,7 @@ class Trajectory(NamedTuple):
 
 
 def pure_advection(p0: jnp.ndarray,
-                   flow: callable,
+                   flow: Callable,
                    dt: float = 0.005,
                    n_steps: int = 800) -> Trajectory:
     """

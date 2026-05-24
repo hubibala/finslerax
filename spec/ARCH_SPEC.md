@@ -171,9 +171,6 @@ Implemented in `src/ham/solvers/geodesic.py` via standard Runge-Kutta 4 integrat
 
 ```text
 src/ham/
-├── bio/
-│   ├── vae.py            # GeometricVAE with Zermelo control dynamics
-│   └── data.py           # BioDataset (AnnData integration, lineage triples)
 ├── geometry/
 │   ├── manifold.py       # Abstract Base Class
 │   ├── metric.py         # FinslerMetric ABC & AutoDiff Physics
@@ -186,8 +183,6 @@ src/ham/
 │                          # PullbackRiemannian, DataDrivenPullbackRanders
 ├── nn/
 │   └── networks.py       # VectorField, PSDMatrixField, RandomFourierFeatures
-├── sim/
-│   └── fields.py         # Field abstractions for sim
 ├── solvers/
 │   ├── avbd.py           # BVP solver (Augmented Vertex Block Descent)
 │   └── geodesic.py       # IVP solver (ExponentialMap via RK4)
@@ -198,6 +193,10 @@ src/ham/
 │   └── math.py           # safe_norm, numerical stability primitives
 └── vis/
     └── hyperbolic.py     # Poincaré disk visualization
+
+research/
+├── weinreb/              # Hematopoiesis single-cell data application
+└── wildfire/             # Wildfire front propagation simulation
 ```
 
 ## 6. Implementation Status
@@ -209,7 +208,9 @@ src/ham/
 2.  **Solvers:** AVBD (BVP) and ExponentialMap (IVP) solvers are validated on Sphere, Torus, Hyperboloid, and triangular meshes.
 3.  **Parallel Transport:** Berwald connection verified — norm-preservation on Sphere and non-trivial Randers transport produce correct holonomy.
 4.  **Training Pipeline:** `HAMPipeline` supports multi-phase training with per-phase parameter freezing, lineage-triple batching, and modular losses.
-5.  **Bio Application (Weinreb):** GeometricVAE + DataDrivenPullbackRanders trained on Weinreb hematopoiesis data. Experiments H1-H4 validate geometric topology, directional asymmetry, discriminative cost, and forward predictive simulation.
+5.  **Applications (research folder):**
+    *   **Weinreb (bio):** GeometricVAE + DataDrivenPullbackRanders trained on Weinreb hematopoiesis data. Experiments H1-H4 validate geometric topology, directional asymmetry, discriminative cost, and forward predictive simulation.
+    *   **Wildfire (sim):** Applications to wildfire front propagation (W1-W3) using mesh metrics and vector fields.
 
 ### Known Limitations
 6.  **Hyperboloid VAE:** Joint training on complex curved manifolds (Sphere, Hyperboloid) with the full VAE pipeline remains numerically sensitive. The flat `EuclideanSpace` latent space is the recommended default for biological applications.

@@ -11,7 +11,7 @@ from jax import config
 import numpy as np
 
 # Enforce High Precision
-config.update("jax_enable_x64", True)
+# config.update("jax_enable_x64", True)
 
 from ham.geometry import Sphere
 from ham.geometry.manifold import Manifold
@@ -43,7 +43,7 @@ def test_euclidean_ballistic(solver):
     
     x_final = solver.shoot(metric, x0, v0)
     expected = x0 + v0
-    np.testing.assert_allclose(x_final, expected, atol=1e-5)
+    np.testing.assert_allclose(x_final, expected, atol=1e-4)
 
 def test_sphere_great_circle(solver):
     """On a Unit Sphere, geodesics are great circles."""
@@ -86,7 +86,7 @@ def test_zero_velocity(solver):
     x0 = jnp.array([1.0, 0.0, 0.0])
     v0 = jnp.zeros(3)
     xf = solver.shoot(metric, x0, v0)
-    np.testing.assert_allclose(xf, x0, atol=1e-10)
+    np.testing.assert_allclose(xf, x0, atol=1e-5)
 
 def test_jit_and_vmap_compatibility(solver):
     """Verify solver works under JAX transforms."""

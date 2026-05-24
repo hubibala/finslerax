@@ -19,6 +19,7 @@ import jax
 import jax.numpy as jnp
 import equinox as eqx
 from abc import abstractmethod
+from typing import Tuple
 
 from ham.geometry.manifold import Manifold
 from ham.utils.math import PSD_EPS
@@ -74,7 +75,7 @@ class FinslerMetric(eqx.Module):
         """
         return 0.5 * self.metric_fn(x, v)**2
 
-    def inner_product(self, x: jax.Array, v: jax.Array, 
+    def inner_product(self, x: jax.Array, v: jax.Array,
                       w1: jax.Array, w2: jax.Array) -> jax.Array:
         """
         Finsler inner product <w1, w2>_v using the fundamental tensor g_ij(x, v).
@@ -135,10 +136,16 @@ class FinslerMetric(eqx.Module):
         rhs = grad_x - mixed_term
         
         hess_v = jax.hessian(self.energy, argnums=1)(x, v)
-        
-        # Solve for acceleration
-        # Regularize hessian slightly to avoid singular matrices (Randers ill-conditioning near boundary)
-        acc = jnp.linalg.solve(hess_v + self.spray_reg * jnp.eye(v.shape[-1]), rhs)
+
+        # Trace-scaled Tikhonov regularisation: ε·(tr(H)/D)·I instead of a
+        # bare ε·I.  Scaling by the mean eigenvalue keeps the relative
+        # perturbation constant regardless of the metric's overall magnitude,
+        # preventing over-regularisation for small metrics and under-
+        # regularisation for large ones (spec/MATH_SPEC.md § 6.1).
+        dim = v.shape[-1]
+        reg_scale = self.spray_reg * jnp.maximum(jnp.trace(hess_v) / dim, 1.0)
+        safe_hess = hess_v + reg_scale * jnp.eye(dim)
+        acc = jnp.linalg.solve(safe_hess, rhs)
         return -0.5 * acc
 
     def geod_acceleration(self, x: jax.Array, v: jax.Array) -> jax.Array:
@@ -187,3 +194,34 @@ class FinslerMetric(eqx.Module):
             return self.metric_fn(midpoint, v)
             
         return jnp.sum(jax.vmap(segment_length)(gamma[:-1], gamma[1:]))
+
+
+class AsymmetricMetric(FinslerMetric):
+    """Base class for Randers-type metrics defined by a Riemannian sea and a drift.
+
+    Subclasses must implement :meth:`zermelo_data`, which returns the triple
+    ``(H, W, lambda)`` needed for the Zermelo navigation formula.  Inheriting
+    from this class (rather than bare :class:`FinslerMetric`) allows consumers
+    (losses, VAE) to branch on ``isinstance(metric, AsymmetricMetric)`` instead
+    of the fragile ``hasattr(metric, '_get_zermelo_data')`` duck-typing pattern,
+    which is not safe inside ``jax.jit`` due to Python-level conditional tracing.
+
+    Architecture reference: spec/ARCH_SPEC.md § 2.2.
+    """
+
+    @abstractmethod
+    def zermelo_data(
+        self, x: jax.Array
+    ) -> Tuple[jax.Array, jax.Array, jax.Array]:
+        """Return the Zermelo navigation triple ``(H, W, lambda)`` at position x.
+
+        Args:
+            x: Position on the manifold, shape ``(D,)``.
+
+        Returns:
+            H:      Riemannian sea metric tensor, shape ``(D, D)``.
+            W:      Wind (drift) vector, shape ``(D,)``.
+            lambda: Causality scalar ``1 - ||W||²_H``, shape ``()``.
+        """
+        pass
+

@@ -144,7 +144,7 @@ class DirectWindAlignmentLoss(LossComponent):
         start = batch[0]
         end = batch[1]
         v_true = model.manifold.log_map(start, end)
-        _, W, _ = model._get_zermelo_data(start)
+        _, W, _ = model.zermelo_data(start)
         return jnp.mean((W - v_true) ** 2) * self.weight
 
 
@@ -156,7 +156,7 @@ class WindRegularizationLoss(LossComponent):
     def __call__(self, model, batch, key):
         start = batch[0]
         def get_w(pt):
-            _, W, _ = model._get_zermelo_data(pt)
+            _, W, _ = model.zermelo_data(pt)
             return W
         jac = jax.jacfwd(get_w)(start)
         return jnp.mean(jac ** 2) * self.weight
@@ -169,7 +169,7 @@ class MetricIdentityLoss(LossComponent):
 
     def __call__(self, model, batch, key):
         start = batch[0]
-        H, _, _ = model._get_zermelo_data(start)
+        H, _, _ = model.zermelo_data(start)
         I = jnp.eye(H.shape[-1])
         return jnp.mean((H - I) ** 2) * self.weight
 
@@ -187,8 +187,8 @@ class MetricModel(eqx.Module):
         self.metric = metric
         self.manifold = metric.manifold
 
-    def _get_zermelo_data(self, x):
-        return self.metric._get_zermelo_data(x)
+    def zermelo_data(self, x):
+        return self.metric.zermelo_data(x)
 
     def encode(self, x, key):
         """Identity — data is already in latent space for this test."""
@@ -276,7 +276,7 @@ class TestGeodesicLearning(unittest.TestCase):
         eval_pts = jax.random.uniform(jax.random.PRNGKey(99), (100, 2),
                                       minval=-1.5, maxval=1.5)
         def get_w(pt):
-            _, W, _ = trained._get_zermelo_data(pt)
+            _, W, _ = trained.zermelo_data(pt)
             return W
         W_pred = jax.vmap(get_w)(eval_pts)
 
@@ -298,7 +298,7 @@ class TestGeodesicLearning(unittest.TestCase):
         eval_pts = jax.random.uniform(jax.random.PRNGKey(99), (100, 2),
                                       minval=-1.5, maxval=1.5)
         def get_w(pt):
-            _, W, _ = trained._get_zermelo_data(pt)
+            _, W, _ = trained.zermelo_data(pt)
             return W
         W_pred = jax.vmap(get_w)(eval_pts)
 
@@ -321,7 +321,7 @@ class TestGeodesicLearning(unittest.TestCase):
             jax.random.split(jax.random.PRNGKey(999), 200), ()
         )
         def get_w(pt):
-            _, W, _ = trained._get_zermelo_data(pt)
+            _, W, _ = trained.zermelo_data(pt)
             return W
         W_pred = jax.vmap(get_w)(eval_pts)
         W_true = jax.vmap(true_wind_fn)(eval_pts)
@@ -342,7 +342,7 @@ class TestGeodesicLearning(unittest.TestCase):
             jax.random.split(jax.random.PRNGKey(999), 200), ()
         )
         def get_w(pt):
-            _, W, _ = trained._get_zermelo_data(pt)
+            _, W, _ = trained.zermelo_data(pt)
             return W
         W_pred = jax.vmap(get_w)(eval_pts)
         W_true = jax.vmap(true_wind_fn)(eval_pts)
