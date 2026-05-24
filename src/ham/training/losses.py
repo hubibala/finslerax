@@ -650,6 +650,59 @@ class ArrivalTimeLoss(eqx.Module):
         return loss * self.weight
 
 
+class DenseArrivalTimeLoss(eqx.Module):
+    """Dense scale-invariant arrival-time loss for eikonal solver full-field metric recovery.
+    
+    Computes loss between predicted full-field arrival times and target satellite data
+    using relative MSE or Pearson-r.
+    
+    Args:
+        weight: Loss weight multiplier.
+    """
+    weight: float = eqx.field(static=True)
+    name: str = eqx.field(static=True)
+
+    def __init__(self, weight: float = 1.0):
+        self.weight = weight
+        self.name = "DenseArrivalTime"
+
+    def __call__(self, t_pred, t_obs, alpha: float = 0.0):
+        """
+        Args:
+            t_pred: Full field predicted arrival times, shape (nx, ny).
+            t_obs: Full field observed arrival times, shape (nx, ny).
+                   Points where t_obs is invalid can be masked by setting t_obs to nan,
+                   or by using a valid_mask. Here we assume all points are valid or masked.
+        """
+        mask = jnp.isfinite(t_obs) & jnp.isfinite(t_pred)
+        
+        t_pred_valid = jnp.where(mask, t_pred, 0.0)
+        t_obs_valid = jnp.where(mask, t_obs, 0.0)
+        num_valid = jnp.sum(mask) + 1e-8
+        
+        # Pearson-r component
+        mu_p = jnp.sum(t_pred_valid) / num_valid
+        mu_o = jnp.sum(t_obs_valid) / num_valid
+        
+        dp = jnp.where(mask, t_pred_valid - mu_p, 0.0)
+        do = jnp.where(mask, t_obs_valid - mu_o, 0.0)
+        
+        num = jnp.sum(dp * do)
+        denom = jnp.sqrt(jnp.sum(dp ** 2) * jnp.sum(do ** 2) + 1e-8)
+        l_pearson = 1.0 - num / denom
+        
+        # Relative MSE component
+        t_max = jax.lax.stop_gradient(jnp.maximum(jnp.max(jnp.where(mask, t_pred, -jnp.inf)), 1e-6))
+        t_pred_norm = t_pred / t_max
+        
+        sq_err = jnp.where(mask, (t_pred_norm - t_obs) ** 2, 0.0)
+        l_relmse = jnp.sum(sq_err) / num_valid
+        
+        loss = (1.0 - alpha) * l_pearson + alpha * l_relmse
+        
+        return loss * self.weight
+
+
 def curriculum_alpha(epoch: int, warmup_epochs: int, ramp_epochs: int) -> float:
     """Compute the curriculum blend coefficient alpha for :class:`ArrivalTimeLoss`.
 
