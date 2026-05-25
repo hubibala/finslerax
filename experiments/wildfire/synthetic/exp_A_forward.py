@@ -179,7 +179,7 @@ class A2_UniformAnisotropic(Experiment):
     def visualize(self, save_path: Optional[str] = None) -> plt.Figure:
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
         plot_arrival_time(self.T, ax=axes[0], title='Computed T')
-        plot_metric_ellipses(np.array([self.G]), axes[0], step=20, scale=3.0)
+        plot_metric_ellipses(np.array(self.G), axes[0], step=20, scale=3.0)
         plot_arrival_time(self.T_exact, ax=axes[1], title='Exact T')
         plot_error_map(self.T - self.T_exact, ax=axes[2], 
                        title=f'Error (rel L2={self.result.metrics["rel_l2"]:.4f})')
@@ -245,7 +245,7 @@ class A3_RotatedAnisotropic(Experiment):
     def visualize(self, save_path: Optional[str] = None) -> plt.Figure:
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
         plot_arrival_time(self.T, ax=axes[0], title='Computed T')
-        plot_metric_ellipses(np.array([self.G]), axes[0], step=20, scale=3.0)
+        plot_metric_ellipses(np.array(self.G), axes[0], step=20, scale=3.0)
         plot_arrival_time(self.T_exact, ax=axes[1], title='Exact T')
         plot_error_map(self.T - self.T_exact, ax=axes[2],
                        title=f'Error (rel L2={self.result.metrics["rel_l2"]:.4f})')
@@ -310,7 +310,7 @@ class A4_ConstantDrift(Experiment):
     def visualize(self, save_path: Optional[str] = None) -> plt.Figure:
         fig, axes = plt.subplots(1, 2, figsize=(12, 5))
         plot_arrival_time(self.T, ax=axes[0], title='Arrival Time with Drift')
-        plot_drift_field(np.array([self.B]), axes[0], step=15, scale=20)
+        plot_drift_field(np.array(self.B), axes[0], step=15, scale=20)
         
         N = self.N
         profile = np.array(self.T[N//2, :])
@@ -401,8 +401,8 @@ class A5_CombinedAnisotropicDrift(Experiment):
     def visualize(self, save_path: Optional[str] = None) -> plt.Figure:
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
         plot_arrival_time(self.T, ax=axes[0], title='Coarse')
-        plot_metric_ellipses(np.array([self.G]), axes[0], step=10, scale=1.5)
-        plot_drift_field(np.array([self.B]), axes[0], step=10, scale=30)
+        plot_metric_ellipses(np.array(self.G), axes[0], step=10, scale=1.5)
+        plot_drift_field(np.array(self.B), axes[0], step=10, scale=30)
         plot_arrival_time(self.T_fine_rescaled, ax=axes[1], title='Fine (rescaled)')
         plot_error_map(self.T - self.T_fine_rescaled, ax=axes[2],
                        title=f'Error (rel L2={self.result.metrics["rel_l2"]:.4f})')

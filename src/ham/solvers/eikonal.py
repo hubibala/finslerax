@@ -245,6 +245,7 @@ class EikonalSolver(eqx.Module):
         self.max_iters = max_iters
         self.tol = tol
 
+    @eqx.filter_jit
     def solve(self, metric: FinslerMetric, source_coords: jax.Array, 
               grid_extent: Tuple[float, float, float, float], 
               grid_shape: Tuple[int, int]) -> Tuple[jax.Array, jax.Array, jax.Array]:

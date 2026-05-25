@@ -9,34 +9,37 @@ from experiments.wildfire.synthetic.experiment_base import (
     create_metric_from_eigenvalues, plot_arrival_time, plot_error_map
 )
 from ham.solvers.eikonal import _fast_sweeping_solve
+import functools
+
+@functools.partial(jax.jit, static_argnames=('hx', 'hy', 'max_iters', 'tol'))
+def compute_loss_jitted(G_in, B_in, source_mask, dL_dT, hx, hy, max_iters, tol):
+    T = _fast_sweeping_solve(G_in, B_in, source_mask, hx, hy, max_iters, tol)
+    return jnp.sum(T * dL_dT)
+
+val_and_grad_jitted = jax.jit(
+    jax.value_and_grad(compute_loss_jitted, argnums=(0, 1)),
+    static_argnames=('hx', 'hy', 'max_iters', 'tol')
+)
 
 def backward_pass(G, B, source_mask, dL_dT, hx=1.0, hy=1.0, max_iters=50, tol=1e-4):
     """Wrapper to get analytical gradients."""
-    def compute_loss(G_in, B_in):
-        T = _fast_sweeping_solve(G_in, B_in, source_mask, hx, hy, max_iters, tol)
-        return jnp.sum(T * dL_dT)
-    
-    loss, grads = jax.value_and_grad(compute_loss, argnums=(0, 1))(G, B)
+    loss, grads = val_and_grad_jitted(G, B, source_mask, dL_dT, hx, hy, max_iters, tol)
     return grads[0], grads[1]
 
 def finite_difference_gradient(G, B, source_mask, dL_dT, param, indices, eps=1e-5, hx=1.0, hy=1.0, max_iters=50, tol=1e-4):
     """Compute gradient via central finite differences."""
-    def compute_loss(G_in, B_in):
-        T = _fast_sweeping_solve(G_in, B_in, source_mask, hx, hy, max_iters, tol)
-        return jnp.sum(T * dL_dT)
-    
     c, i, j = indices
     
     if param == 'G':
         G_plus = G.at[c, i, j].add(eps)
         G_minus = G.at[c, i, j].add(-eps)
-        L_plus = compute_loss(G_plus, B)
-        L_minus = compute_loss(G_minus, B)
+        L_plus = compute_loss_jitted(G_plus, B, source_mask, dL_dT, hx, hy, max_iters, tol)
+        L_minus = compute_loss_jitted(G_minus, B, source_mask, dL_dT, hx, hy, max_iters, tol)
     else:
         B_plus = B.at[c, i, j].add(eps)
         B_minus = B.at[c, i, j].add(-eps)
-        L_plus = compute_loss(G, B_plus)
-        L_minus = compute_loss(G, B_minus)
+        L_plus = compute_loss_jitted(G, B_plus, source_mask, dL_dT, hx, hy, max_iters, tol)
+        L_minus = compute_loss_jitted(G, B_minus, source_mask, dL_dT, hx, hy, max_iters, tol)
         
     return float((L_plus - L_minus) / (2 * eps))
 
