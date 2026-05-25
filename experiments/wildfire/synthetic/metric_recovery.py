@@ -11,7 +11,11 @@ from experiments.wildfire.synthetic.experiment_base import SyntheticZermeloMetri
 
 def compute_tv_regularization(H_grid: jax.Array, W_grid: Optional[jax.Array],
                               lambda_H: float, lambda_W: float) -> jax.Array:
-    """Compute Total Variation (TV) regularization for H and W grids."""
+    """Compute Total Variation (TV) regularization for H and W grids.
+
+    Uses mean-reduction — appropriate for the AVBD solver whose data loss
+    is also mean-normalised (via ArrivalTimeLoss).
+    """
     loss_reg = 0.0
     
     if lambda_H > 0:
@@ -28,6 +32,33 @@ def compute_tv_regularization(H_grid: jax.Array, W_grid: Optional[jax.Array],
         tv_W = jnp.mean(jnp.abs(dw_dx)) + jnp.mean(jnp.abs(dw_dy))
         loss_reg += lambda_W * tv_W
         
+    return loss_reg
+
+
+def compute_tv_regularization_eikonal(G: jax.Array, B: Optional[jax.Array],
+                                      lambda_G: float, lambda_B: float) -> jax.Array:
+    """TV regularization matching Gahtan et al. exactly.
+
+    Operates on Godunov parameters (G, B) — not Zermelo (H, W) — and uses
+    *sum* (not mean) reduction so the effective strength is grid-size-proportional,
+    identical to Gahtan's ``compute_tv_regularization`` in experiment_base.py.
+    """
+    loss_reg = 0.0
+
+    if lambda_G > 0:
+        # G shape: (3, M, N) — iterate over each symmetric-tensor component
+        for c in range(3):
+            Gc = G[c]
+            loss_reg += lambda_G * (jnp.sum(jnp.abs(Gc[:, 1:] - Gc[:, :-1]))
+                                  + jnp.sum(jnp.abs(Gc[1:, :] - Gc[:-1, :])))
+
+    if B is not None and lambda_B > 0:
+        # B shape: (2, M, N)
+        for c in range(2):
+            Bc = B[c]
+            loss_reg += lambda_B * (jnp.sum(jnp.abs(Bc[:, 1:] - Bc[:, :-1]))
+                                  + jnp.sum(jnp.abs(Bc[1:, :] - Bc[:-1, :])))
+
     return loss_reg
 
 def eikonal_to_zermelo(G: jax.Array, B: jax.Array) -> Tuple[jax.Array, jax.Array]:
@@ -215,23 +246,31 @@ class MetricRecoveryOptimizer:
                 T_obs_masked = jnp.where(obs_mask, T_obs, jnp.nan)
                 diff = T_pred[obs_mask] - T_obs_values
                 loss_data = 0.5 * jnp.sum(diff**2)
+
+                # Gahtan-exact regularization: sum-reduced TV on G/B parameters
+                G, B = zermelo_to_eikonal(model.H_grid, model.W_grid)
+                loss_reg = compute_tv_regularization_eikonal(
+                    G,
+                    B if self.recover_W else None,
+                    self.lambda_H if self.recover_H else 0.0,
+                    self.lambda_W if self.recover_W else 0.0,
+                )
             else:
                 src = source_coords[0]
                 loss_data = self.loss_fn(metric, src, obs_coords, T_obs_values, alpha=current_alpha)
                 
-            if self.reg_type == 'tv':
-                loss_reg = compute_tv_regularization(model.H_grid, model.W_grid, 
-                                                     self.lambda_H if self.recover_H else 0.0,
-                                                     self.lambda_W if self.recover_W else 0.0)
-            elif self.reg_type == 'tikhonov':
-                # Tikhonov: penalty on magnitude of H and W
-                loss_reg = 0.0
-                if self.recover_H:
-                    loss_reg += self.lambda_H * jnp.sum(model.H_grid**2)
-                if self.recover_W:
-                    loss_reg += self.lambda_W * jnp.sum(model.W_grid**2)
-            else:
-                loss_reg = 0.0
+                if self.reg_type == 'tv':
+                    loss_reg = compute_tv_regularization(model.H_grid, model.W_grid, 
+                                                         self.lambda_H if self.recover_H else 0.0,
+                                                         self.lambda_W if self.recover_W else 0.0)
+                elif self.reg_type == 'tikhonov':
+                    loss_reg = 0.0
+                    if self.recover_H:
+                        loss_reg += self.lambda_H * jnp.sum(model.H_grid**2)
+                    if self.recover_W:
+                        loss_reg += self.lambda_W * jnp.sum(model.W_grid**2)
+                else:
+                    loss_reg = 0.0
                 
             loss = loss_data + loss_reg
             return loss, (loss_data, loss_reg)

@@ -683,7 +683,7 @@ class C7_RegularizationAblation(Experiment):
     
     name = "C7_regularization_ablation"
     category = "C_inverse_problem"
-    description = "Recovery error vs regularization strength (Eikonal only for speed)"
+    description = "Recovery error vs regularization strength (Eikonal vs AVBD)"
     
     def __init__(self, N: int = 40, n_iter: int = 200):
         super().__init__()
@@ -712,48 +712,57 @@ class C7_RegularizationAblation(Experiment):
         
         obs_mask = create_sparse_observation_mask(N, N, 0.05, source_mask, seed=47)
         
-        results = []
+        results_eik, results_avbd = [], []
         for lam in self.lambda_values:
             print(f"\n  λ = {lam}")
-            opt = MetricRecoveryOptimizer(N, N, solver_type='eikonal', lambda_H=lam, constrain_isotropic=True)
-            opt.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
-            
-            G_rec, _ = opt.get_G_B()
             interior = get_interior_mask(N, N, 5, source_mask)
-            err_g11, _ = evaluate_recovery(G_true, G_rec, interior)
+
+            opt_eik = MetricRecoveryOptimizer(N, N, solver_type='eikonal', lambda_H=lam, constrain_isotropic=True)
+            opt_eik.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+            G_rec_eik, _ = opt_eik.get_G_B()
+            err_eik, _ = evaluate_recovery(G_true, G_rec_eik, interior)
+
+            opt_avbd = MetricRecoveryOptimizer(N, N, solver_type='avbd', lambda_H=lam, constrain_isotropic=True)
+            opt_avbd.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+            G_rec_avbd, _ = opt_avbd.get_G_B()
+            err_avbd, _ = evaluate_recovery(G_true, G_rec_avbd, interior)
+
+            results_eik.append({'lambda': lam, 'error': err_eik})
+            results_avbd.append({'lambda': lam, 'error': err_avbd})
+            print(f"    Eikonal: {err_eik:.4f}  |  AVBD: {err_avbd:.4f}")
             
-            results.append({'lambda': lam, 'error': err_g11})
-            print(f"    Error: {err_g11:.4f}")
-            
-        best = min(results, key=lambda x: x['error'])
-        self.results = results
+        best_eik = min(results_eik, key=lambda x: x['error'])
+        best_avbd = min(results_avbd, key=lambda x: x['error'])
+        self.results_eik = results_eik
+        self.results_avbd = results_avbd
         
         return ExperimentResult(
             name=self.name, category=self.category,
             success=True,
-            metrics={'best_lambda': best['lambda'], 'best_error': best['error'], 
-                    'no_reg_error': results[0]['error']},
-            arrays={'lambdas': np.array([r['lambda'] for r in results]),
-                   'errors': np.array([r['error'] for r in results])},
+            metrics={
+                'eik_best_lambda': best_eik['lambda'], 'eik_best_error': best_eik['error'],
+                'avbd_best_lambda': best_avbd['lambda'], 'avbd_best_error': best_avbd['error'],
+            },
+            arrays={
+                'lambdas': np.array([r['lambda'] for r in results_eik]),
+                'eik_errors': np.array([r['error'] for r in results_eik]),
+                'avbd_errors': np.array([r['error'] for r in results_avbd]),
+            },
             metadata={'N': N}
         )
     
     def visualize(self, save_path: Optional[str] = None) -> plt.Figure:
         fig, ax = plt.subplots(figsize=(8, 5))
         
-        lambdas = np.array([r['lambda'] for r in self.results])
-        errors = np.array([r['error'] for r in self.results])
-        
+        lambdas = np.array([r['lambda'] for r in self.results_eik])
         lambdas_plot = np.where(lambdas == 0, 1e-3, lambdas)
-        ax.semilogx(lambdas_plot, errors, 'o-', markersize=10, lw=2)
-        
-        best_idx = np.argmin(errors)
-        ax.scatter([lambdas_plot[best_idx]], [errors[best_idx]], c='red', s=200, zorder=5, 
-                   label=f'Best: λ={lambdas[best_idx]:.3f}')
+
+        ax.semilogx(lambdas_plot, [r['error'] for r in self.results_eik], 'o-', lw=2, label='Eikonal')
+        ax.semilogx(lambdas_plot, [r['error'] for r in self.results_avbd], 's--', lw=2, label='AVBD')
         
         ax.set_xlabel('Regularization λ')
         ax.set_ylabel('Relative Error')
-        ax.set_title('C7: Regularization Ablation')
+        ax.set_title('C7: Regularization Ablation (Eikonal vs AVBD)')
         ax.legend()
         ax.grid(True, alpha=0.3)
         
@@ -771,7 +780,7 @@ class C8_ObservationDensity(Experiment):
     
     name = "C8_observation_density"
     category = "C_inverse_problem"
-    description = "Recovery error vs observation density (Eikonal only)"
+    description = "Recovery error vs observation density (Eikonal vs AVBD)"
     
     def __init__(self, N: int = 40, n_iter: int = 200):
         super().__init__()
@@ -796,7 +805,7 @@ class C8_ObservationDensity(Experiment):
         solver = EikonalSolver(max_iters=50, tol=1e-5)
         T_obs, _, _ = solver.solve(metric_true, source_coords, (0, N-1, 0, N-1), (N, N))
         
-        results = []
+        results_eik, results_avbd = [], []
         for frac in self.obs_fractions:
             print(f"\n  Fraction: {frac*100:.0f}%")
             
@@ -805,43 +814,53 @@ class C8_ObservationDensity(Experiment):
             else:
                 obs_mask = create_sparse_observation_mask(N, N, frac, source_mask, seed=48)
             
-            lambda_H = 0.01 if frac < 0.5 else 0.001
-            opt = MetricRecoveryOptimizer(N, N, solver_type='eikonal', lambda_H=lambda_H, constrain_isotropic=True)
-            opt.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
-            
-            G_rec, _ = opt.get_G_B()
             interior = get_interior_mask(N, N, 5, source_mask)
-            err_g11, _ = evaluate_recovery(G_true, G_rec, interior)
+            lambda_H = 0.01 if frac < 0.5 else 0.001
+
+            opt_eik = MetricRecoveryOptimizer(N, N, solver_type='eikonal', lambda_H=lambda_H, constrain_isotropic=True)
+            opt_eik.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+            G_rec_eik, _ = opt_eik.get_G_B()
+            err_eik, _ = evaluate_recovery(G_true, G_rec_eik, interior)
+
+            opt_avbd = MetricRecoveryOptimizer(N, N, solver_type='avbd', lambda_H=lambda_H, constrain_isotropic=True)
+            opt_avbd.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+            G_rec_avbd, _ = opt_avbd.get_G_B()
+            err_avbd, _ = evaluate_recovery(G_true, G_rec_avbd, interior)
+
+            results_eik.append({'fraction': frac, 'error': err_eik})
+            results_avbd.append({'fraction': frac, 'error': err_avbd})
+            print(f"    Eikonal: {err_eik:.4f}  |  AVBD: {err_avbd:.4f}")
             
-            results.append({'fraction': frac, 'error': err_g11})
-            print(f"    Error: {err_g11:.4f}")
-            
-        self.results = results
+        self.results_eik = results_eik
+        self.results_avbd = results_avbd
         
         return ExperimentResult(
             name=self.name, category=self.category,
             success=True,
-            metrics={'min_error': min(r['error'] for r in results)},
-            arrays={'fractions': np.array([r['fraction'] for r in results]),
-                   'errors': np.array([r['error'] for r in results])},
+            metrics={
+                'eik_min_error': min(r['error'] for r in results_eik),
+                'avbd_min_error': min(r['error'] for r in results_avbd),
+            },
+            arrays={
+                'fractions': np.array([r['fraction'] for r in results_eik]),
+                'eik_errors': np.array([r['error'] for r in results_eik]),
+                'avbd_errors': np.array([r['error'] for r in results_avbd]),
+            },
             metadata={'N': N}
         )
     
     def visualize(self, save_path: Optional[str] = None) -> plt.Figure:
         fig, ax = plt.subplots(figsize=(8, 5))
         
-        fracs = np.array([r['fraction'] for r in self.results]) * 100
-        errors = np.array([r['error'] for r in self.results])
-        
-        ax.plot(fracs, errors, 'o-', markersize=10, lw=2)
+        fracs = np.array([r['fraction'] for r in self.results_eik]) * 100
+        ax.plot(fracs, [r['error'] for r in self.results_eik], 'o-', lw=2, label='Eikonal')
+        ax.plot(fracs, [r['error'] for r in self.results_avbd], 's--', lw=2, label='AVBD')
         ax.set_xlabel('Observation Density (%)')
         ax.set_ylabel('Relative Error')
-        ax.set_title('C8: Observation Density Study')
+        ax.set_title('C8: Observation Density (Eikonal vs AVBD)')
+        ax.legend()
         ax.grid(True, alpha=0.3)
         
-        for f, e in zip(fracs, errors):
-            ax.annotate(f'{e:.2%}', xy=(f, e), xytext=(5, 5), textcoords='offset points', fontsize=9)
-            
         if save_path:
             fig.savefig(save_path, bbox_inches='tight', dpi=150)
         return fig
@@ -856,7 +875,7 @@ class C9_NoiseRobustness(Experiment):
     
     name = "C9_noise_robustness"
     category = "C_inverse_problem"
-    description = "Recovery error vs noise level (Eikonal only)"
+    description = "Recovery error vs noise level (Eikonal vs AVBD)"
     
     def __init__(self, N: int = 40, n_iter: int = 200):
         super().__init__()
@@ -882,8 +901,9 @@ class C9_NoiseRobustness(Experiment):
         T_clean, _, _ = solver.solve(metric_true, source_coords, (0, N-1, 0, N-1), (N, N))
         
         obs_mask = create_sparse_observation_mask(N, N, 0.1, source_mask, seed=49)
+        interior = get_interior_mask(N, N, 5, source_mask)
         
-        results = []
+        results_eik, results_avbd = [], []
         np.random.seed(50)
         
         for noise in self.noise_levels:
@@ -894,38 +914,49 @@ class C9_NoiseRobustness(Experiment):
                 std = float(jnp.std(T_clean))
                 noise_tensor = noise * std * jnp.array(np.random.randn(N, N))
                 T_obs = T_clean + noise_tensor
+
+            opt_eik = MetricRecoveryOptimizer(N, N, solver_type='eikonal', lambda_H=0.02, constrain_isotropic=True)
+            opt_eik.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+            G_rec_eik, _ = opt_eik.get_G_B()
+            err_eik, _ = evaluate_recovery(G_true, G_rec_eik, interior)
+
+            opt_avbd = MetricRecoveryOptimizer(N, N, solver_type='avbd', lambda_H=0.02, constrain_isotropic=True)
+            opt_avbd.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+            G_rec_avbd, _ = opt_avbd.get_G_B()
+            err_avbd, _ = evaluate_recovery(G_true, G_rec_avbd, interior)
+
+            results_eik.append({'noise': noise, 'error': err_eik})
+            results_avbd.append({'noise': noise, 'error': err_avbd})
+            print(f"    Eikonal: {err_eik:.4f}  |  AVBD: {err_avbd:.4f}")
             
-            opt = MetricRecoveryOptimizer(N, N, solver_type='eikonal', lambda_H=0.02, constrain_isotropic=True)
-            opt.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
-            
-            G_rec, _ = opt.get_G_B()
-            interior = get_interior_mask(N, N, 5, source_mask)
-            err_g11, _ = evaluate_recovery(G_true, G_rec, interior)
-            
-            results.append({'noise': noise, 'error': err_g11})
-            print(f"    Error: {err_g11:.4f}")
-            
-        self.results = results
+        self.results_eik = results_eik
+        self.results_avbd = results_avbd
         
         return ExperimentResult(
             name=self.name, category=self.category,
             success=True,
-            metrics={'clean_error': results[0]['error'], 'noisy_error': results[-1]['error']},
-            arrays={'noise_levels': np.array([r['noise'] for r in results]),
-                   'errors': np.array([r['error'] for r in results])},
+            metrics={
+                'eik_clean_error': results_eik[0]['error'], 'eik_noisy_error': results_eik[-1]['error'],
+                'avbd_clean_error': results_avbd[0]['error'], 'avbd_noisy_error': results_avbd[-1]['error'],
+            },
+            arrays={
+                'noise_levels': np.array([r['noise'] for r in results_eik]),
+                'eik_errors': np.array([r['error'] for r in results_eik]),
+                'avbd_errors': np.array([r['error'] for r in results_avbd]),
+            },
             metadata={'N': N}
         )
     
     def visualize(self, save_path: Optional[str] = None) -> plt.Figure:
         fig, ax = plt.subplots(figsize=(8, 5))
         
-        noise = np.array([r['noise'] for r in self.results]) * 100
-        errors = np.array([r['error'] for r in self.results])
-        
-        ax.plot(noise, errors, 'o-', markersize=10, lw=2)
+        noise = np.array([r['noise'] for r in self.results_eik]) * 100
+        ax.plot(noise, [r['error'] for r in self.results_eik], 'o-', lw=2, label='Eikonal')
+        ax.plot(noise, [r['error'] for r in self.results_avbd], 's--', lw=2, label='AVBD')
         ax.set_xlabel('Noise Level (%)')
         ax.set_ylabel('Relative Error')
-        ax.set_title('C9: Noise Robustness')
+        ax.set_title('C9: Noise Robustness (Eikonal vs AVBD)')
+        ax.legend()
         ax.grid(True, alpha=0.3)
         
         if save_path:
@@ -942,7 +973,7 @@ class C10_MultipleSources(Experiment):
     
     name = "C10_multiple_sources"
     category = "C_inverse_problem"
-    description = "Recovery with multiple ignition points (Eikonal only)"
+    description = "Recovery with multiple ignition points (Eikonal vs AVBD)"
     
     def __init__(self, N: int = 40, n_iter: int = 200):
         super().__init__()
@@ -958,7 +989,7 @@ class C10_MultipleSources(Experiment):
         G_true = G_true.at[2, :, N//2:].set(2.0)
         B_true = jnp.zeros((2, N, N))
         
-        results = []
+        results_eik, results_avbd = [], []
         
         for n_sources, sources in [(1, [[N//2, N//4]]), 
                                    (2, [[N//4, N//4], [3*N//4, N//4]]),
@@ -976,43 +1007,53 @@ class C10_MultipleSources(Experiment):
             T_obs, _, _ = solver.solve(metric_true, source_coords, (0, N-1, 0, N-1), (N, N))
             
             obs_mask = create_sparse_observation_mask(N, N, 0.1, source_mask, seed=51)
-            
-            opt = MetricRecoveryOptimizer(N, N, solver_type='eikonal', lambda_H=0.02, constrain_isotropic=True)
-            opt.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
-            
-            G_rec, _ = opt.get_G_B()
             interior = get_interior_mask(N, N, 5, source_mask)
-            err_g11, _ = evaluate_recovery(G_true, G_rec, interior)
+
+            opt_eik = MetricRecoveryOptimizer(N, N, solver_type='eikonal', lambda_H=0.02, constrain_isotropic=True)
+            opt_eik.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+            G_rec_eik, _ = opt_eik.get_G_B()
+            err_eik, _ = evaluate_recovery(G_true, G_rec_eik, interior)
+
+            opt_avbd = MetricRecoveryOptimizer(N, N, solver_type='avbd', lambda_H=0.02, constrain_isotropic=True)
+            opt_avbd.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+            G_rec_avbd, _ = opt_avbd.get_G_B()
+            err_avbd, _ = evaluate_recovery(G_true, G_rec_avbd, interior)
+
+            results_eik.append({'n_sources': n_sources, 'error': err_eik})
+            results_avbd.append({'n_sources': n_sources, 'error': err_avbd})
+            print(f"    Eikonal: {err_eik:.4f}  |  AVBD: {err_avbd:.4f}")
             
-            results.append({'n_sources': n_sources, 'error': err_g11})
-            print(f"    Error: {err_g11:.4f}")
-            
-        self.results = results
+        self.results_eik = results_eik
+        self.results_avbd = results_avbd
         
         return ExperimentResult(
             name=self.name, category=self.category,
             success=True,
-            metrics={'error_1source': results[0]['error'], 'error_3sources': results[-1]['error']},
-            arrays={'n_sources': np.array([r['n_sources'] for r in results]),
-                   'errors': np.array([r['error'] for r in results])},
+            metrics={
+                'eik_error_1source': results_eik[0]['error'], 'eik_error_3sources': results_eik[-1]['error'],
+                'avbd_error_1source': results_avbd[0]['error'], 'avbd_error_3sources': results_avbd[-1]['error'],
+            },
+            arrays={
+                'n_sources': np.array([r['n_sources'] for r in results_eik]),
+                'eik_errors': np.array([r['error'] for r in results_eik]),
+                'avbd_errors': np.array([r['error'] for r in results_avbd]),
+            },
             metadata={'N': N}
         )
     
     def visualize(self, save_path: Optional[str] = None) -> plt.Figure:
         fig, ax = plt.subplots(figsize=(8, 5))
         
-        n = [r['n_sources'] for r in self.results]
-        errors = [r['error'] for r in self.results]
-        
-        ax.bar(n, errors, color='steelblue', edgecolor='black')
+        n = [r['n_sources'] for r in self.results_eik]
+        ax.plot(n, [r['error'] for r in self.results_eik], 'o-', lw=2, label='Eikonal')
+        ax.plot(n, [r['error'] for r in self.results_avbd], 's--', lw=2, label='AVBD')
         ax.set_xlabel('Number of Sources')
         ax.set_ylabel('Relative Error')
-        ax.set_title('C10: Multiple Sources')
+        ax.set_title('C10: Multiple Sources (Eikonal vs AVBD)')
         ax.set_xticks(n)
+        ax.legend()
+        ax.grid(True, alpha=0.3)
         
-        for i, (ni, ei) in enumerate(zip(n, errors)):
-            ax.annotate(f'{ei:.2%}', xy=(ni, ei), ha='center', va='bottom')
-            
         if save_path:
             fig.savefig(save_path, bbox_inches='tight', dpi=150)
         return fig
@@ -1026,7 +1067,9 @@ ALL_EXPERIMENTS = [
     C1_IsotropicFull,
     C2_IsotropicSparse,
     C3_DiagonalAnisotropic,
+    C4_FullMetricRecovery,
     C5_DriftRecovery,
+    C6_JointMetricDriftRecovery,
     C7_RegularizationAblation,
     C8_ObservationDensity,
     C9_NoiseRobustness,
