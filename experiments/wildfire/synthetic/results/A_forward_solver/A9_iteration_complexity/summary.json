@@ -3,7 +3,7 @@
   "category": "A_forward_solver",
   "success": "True",
   "metrics": {
-    "time_scaling": 1.975041948040276
+    "time_scaling": 1.5734860846225622
   },
   "metadata": {
     "grid_sizes": [
@@ -13,6 +13,6 @@
       400
     ]
   },
-  "runtime_seconds": 8.80401086807251,
-  "timestamp": "2026-05-25T12:40:00.055828"
+  "runtime_seconds": 1.9615297317504883,
+  "timestamp": "2026-05-25T12:50:17.149746"
 }

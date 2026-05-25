@@ -203,7 +203,7 @@ class MetricRecoveryOptimizer:
         opt_state = optimizer.init(eqx.filter(self.model, filter_spec))
 
         @eqx.filter_value_and_grad(has_aux=True)
-        def compute_loss(diff_model: MetricRecoveryModel, static_model: MetricRecoveryModel, current_iter: int):
+        def compute_loss(diff_model: MetricRecoveryModel, static_model: MetricRecoveryModel, current_alpha: jax.Array):
             model = eqx.combine(diff_model, static_model)
             metric = SyntheticZermeloMetric(model.H_grid, model.W_grid)
             
@@ -217,17 +217,6 @@ class MetricRecoveryOptimizer:
                 loss_data = 0.5 * jnp.sum(diff**2)
             else:
                 src = source_coords[0]
-                
-                # Curriculum alpha
-                warmup = int(0.2 * n_iter)
-                ramp = int(0.6 * n_iter)
-                
-                def get_alpha(it):
-                    return jnp.where(it < warmup, 0.0, 
-                           jnp.where(it > warmup + ramp, 1.0, 
-                           (it - warmup) / jnp.maximum(ramp, 1)))
-                           
-                current_alpha = get_alpha(current_iter)
                 loss_data = self.loss_fn(metric, src, obs_coords, T_obs_values, alpha=current_alpha)
                 
             if self.reg_type == 'tv':
@@ -248,9 +237,9 @@ class MetricRecoveryOptimizer:
             return loss, (loss_data, loss_reg)
 
         @eqx.filter_jit
-        def make_step(model, opt_state, current_iter):
+        def make_step(model, opt_state, current_alpha):
             diff_model, static_model = eqx.partition(model, filter_spec)
-            (loss, (loss_data, loss_reg)), grads = compute_loss(diff_model, static_model, current_iter)
+            (loss, (loss_data, loss_reg)), grads = compute_loss(diff_model, static_model, current_alpha)
             updates, opt_state = optimizer.update(grads, opt_state, diff_model)
             diff_model = eqx.apply_updates(diff_model, updates)
             model = eqx.combine(diff_model, static_model)
@@ -266,15 +255,26 @@ class MetricRecoveryOptimizer:
         best_loss = float('inf')
         no_improvement_count = 0
         
-        # Determine when alpha curriculum finishes so we don't early stop during ramp
-        alpha_done_iter = 0
-        if self.solver_type == 'avbd':
-            warmup = int(0.2 * n_iter)
-            ramp = int(0.6 * n_iter)
-            alpha_done_iter = warmup + ramp
-            
+        # 0: Warmup (alpha=0), 1: Ramp-up, 2: Full (alpha=1)
+        curriculum_state = 0 if self.solver_type == 'avbd' else 2
+        ramp_epochs = 20
+        ramp_start_iter = -1
+        
         for it in pbar:
-            self.model, opt_state, loss, loss_data, loss_reg = make_step(self.model, opt_state, it)
+            if curriculum_state == 0:
+                alpha_val = 0.0
+            elif curriculum_state == 1:
+                alpha_val = min((it - ramp_start_iter) / max(ramp_epochs, 1), 1.0)
+                if it >= ramp_start_iter + ramp_epochs:
+                    curriculum_state = 2
+                    alpha_val = 1.0
+                    best_loss = float('inf')
+                    no_improvement_count = 0
+            else:
+                alpha_val = 1.0
+                
+            current_alpha = jnp.array(alpha_val, dtype=jnp.float32)
+            self.model, opt_state, loss, loss_data, loss_reg = make_step(self.model, opt_state, current_alpha)
             
             loss_val = float(loss)
             self.history['loss'].append(loss_val)
@@ -283,11 +283,11 @@ class MetricRecoveryOptimizer:
             
             if verbose:
                 if hasattr(pbar, 'set_postfix'):
-                    pbar.set_postfix(loss=f"{loss_val:.4f}", data=f"{float(loss_data):.4f}")
+                    pbar.set_postfix(loss=f"{loss_val:.4f}", data=f"{float(loss_data):.4f}", a=f"{alpha_val:.2f}")
                 elif it % 50 == 0 or it == n_iter - 1:
-                    print(f"  Iter {it}: loss={loss_val:.4f} (data={float(loss_data):.4f}, reg={float(loss_reg):.4f})")
+                    print(f"  Iter {it}: loss={loss_val:.4f} (data={float(loss_data):.4f}, reg={float(loss_reg):.4f}), alpha={alpha_val:.2f}")
                     
-            if it < alpha_done_iter:
+            if curriculum_state == 1:
                 # Reset best loss continuously while curriculum changes loss landscape
                 best_loss = loss_val
                 no_improvement_count = 0
@@ -299,12 +299,21 @@ class MetricRecoveryOptimizer:
                     no_improvement_count += 1
                 
             if no_improvement_count >= patience:
-                if verbose:
-                    if hasattr(pbar, 'write'):
-                        pbar.write(f"  Early stopping at iteration {it} (no improvement in {patience} iters)")
-                    else:
-                        print(f"  Early stopping at iteration {it} (no improvement in {patience} iters)")
-                break
+                if curriculum_state == 0:
+                    if verbose:
+                        msg = f"  Phase 1 converged at iter {it}. Starting {ramp_epochs}-epoch alpha ramp-up."
+                        if hasattr(pbar, 'write'): pbar.write(msg)
+                        else: print(msg)
+                    curriculum_state = 1
+                    ramp_start_iter = it
+                    best_loss = float('inf')
+                    no_improvement_count = 0
+                else:
+                    if verbose:
+                        msg = f"  Early stopping at iteration {it} (no improvement in {patience} iters)"
+                        if hasattr(pbar, 'write'): pbar.write(msg)
+                        else: print(msg)
+                    break
                 
         return {'final_loss': self.history['loss'][-1], 
                 'final_data': self.history['loss_data'][-1], 

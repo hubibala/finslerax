@@ -3,13 +3,13 @@
   "category": "B_gradient_verification",
   "success": true,
   "metrics": {
-    "G_max": 2.154421091079712,
-    "B_max": 5.491573333740234
+    "G_max": 2.154420852661133,
+    "B_max": 5.4915690422058105
   },
   "metadata": {
     "N": 100,
     "radius": 25
   },
-  "runtime_seconds": 25.68268847465515,
-  "timestamp": "2026-05-25T12:41:01.759361"
+  "runtime_seconds": 3.36594557762146,
+  "timestamp": "2026-05-25T12:50:28.535521"
 }
