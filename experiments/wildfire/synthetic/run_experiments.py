@@ -232,11 +232,11 @@ def run_experiments(phases: List[str] = None,
                 n_error += 1
                 time_str = "N/A"
             elif result.success:
-                status = "✓ PASS"
+                status = "PASS"
                 n_pass += 1
                 time_str = f"{result.runtime_seconds:.1f}s"
             else:
-                status = "✗ FAIL"
+                status = "FAIL"
                 n_fail += 1
                 time_str = f"{result.runtime_seconds:.1f}s"
             

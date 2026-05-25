@@ -3,17 +3,17 @@
   "category": "B_gradient_verification",
   "success": true,
   "metrics": {
-    "pct_good_g11": 80.0,
-    "pct_good_g12": 80.0,
-    "pct_good_g22": 80.0,
-    "mean_err_g11": 0.3899633984375,
-    "mean_err_g12": 0.2282156387837393,
-    "mean_err_g22": 0.45873836805555557
+    "pct_good_g11": 100.0,
+    "pct_good_g12": 100.0,
+    "pct_good_g22": 100.0,
+    "mean_err_g11": 0.0,
+    "mean_err_g12": 0.0,
+    "mean_err_g22": 0.0
   },
   "metadata": {
-    "N": 30,
-    "n_test_points": 10
+    "N": 50,
+    "n_test_points": 15
   },
-  "runtime_seconds": 22.2584331035614,
-  "timestamp": "2026-05-25T10:42:40.947612"
+  "runtime_seconds": 25.625458002090454,
+  "timestamp": "2026-05-25T12:38:23.951003"
 }

@@ -46,15 +46,15 @@ def batched_fd_B(G, B, source_mask, dL_dT, pts_c, pts_i, pts_j, eps, hx, hy, max
         return (L_plus - L_minus) / (2 * eps)
     return jax.vmap(single_fd)(pts_c, pts_i, pts_j)
 
-def evaluate_fd_gradients(G, B, source_mask, dL_dT, test_points, eps, hx=1.0, hy=1.0, max_iters=50, tol=1e-4):
+def evaluate_fd_gradients(G, B, source_mask, dL_dT, test_points, eps, hx=1.0, hy=1.0, max_iters=50, tol=1e-4, G_channels=[0, 2], B_channels=[0, 1]):
     pts_G_c, pts_G_i, pts_G_j = [], [], []
     for i, j in test_points:
-        for c in [0, 2]:
+        for c in G_channels:
             pts_G_c.append(c); pts_G_i.append(i); pts_G_j.append(j)
             
     pts_B_c, pts_B_i, pts_B_j = [], [], []
     for i, j in test_points:
-        for c in [0, 1]:
+        for c in B_channels:
             pts_B_c.append(c); pts_B_i.append(i); pts_B_j.append(j)
             
     fd_G = batched_fd_G(G, B, source_mask, dL_dT, jnp.array(pts_G_c), jnp.array(pts_G_i), jnp.array(pts_G_j), eps, hx, hy, max_iters, tol)
@@ -214,12 +214,13 @@ class B2_FD_Anisotropic(Experiment):
                 test_points.append((i, j))
         
         results = {0: [], 1: [], 2: []}
-        pts = jnp.array(test_points)
-        fd_G_all = batched_fd_G(G, B, source_mask, dL_dT, pts, self.eps)
+        fd_G_all, _ = evaluate_fd_gradients(G, B, source_mask, dL_dT, test_points, self.eps, G_channels=[0, 1, 2])
         
-        for idx, (i, j) in enumerate(test_points):
+        idx_G = 0
+        for i, j in test_points:
             for c in range(3):
-                fd = float(fd_G_all[c, idx])
+                fd = float(fd_G_all[idx_G])
+                idx_G += 1
                 impl = float(dL_dG[c, i, j])
                 rel_err = abs(fd - impl) / abs(fd) if abs(fd) > 1e-10 else abs(impl)
                 results[c].append({'fd': fd, 'impl': impl, 'rel_err': rel_err})
@@ -308,12 +309,13 @@ class B3_FD_Drift(Experiment):
                 test_points.append((i, j))
         
         results = {0: [], 1: []}
-        pts = jnp.array(test_points)
-        fd_B_all = batched_fd_B(G, B, source_mask, dL_dT, pts, self.eps)
+        _, fd_B_all = evaluate_fd_gradients(G, B, source_mask, dL_dT, test_points, self.eps, B_channels=[0, 1])
         
-        for idx, (i, j) in enumerate(test_points):
+        idx_B = 0
+        for i, j in test_points:
             for c in range(2):
-                fd = float(fd_B_all[c, idx])
+                fd = float(fd_B_all[idx_B])
+                idx_B += 1
                 impl = float(dL_dB[c, i, j])
                 rel_err = abs(fd - impl) / abs(fd) if abs(fd) > 1e-10 else abs(impl)
                 results[c].append({'fd': fd, 'impl': impl, 'rel_err': rel_err})
