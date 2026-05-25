@@ -217,7 +217,6 @@ def run_experiments(phases: List[str] = None,
         finally:
             # Clear JAX caches to prevent LLVM OOM when running many heavy PDE loops
             jax.clear_caches()
-            jax.clear_backends()
     
     # Summary
     elapsed = (datetime.now() - start_time).total_seconds()
