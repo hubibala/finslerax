@@ -146,11 +146,11 @@ def sweep_axis(T: jax.Array, G: jax.Array, B: jax.Array, source_mask: jax.Array,
 
     if direction == 1:
         xs = (T[1:], G[0, 1:], G[1, 1:], G[2, 1:], B[0, 1:], B[1, 1:], source_mask[1:])
-        _, T_out = jax.lax.scan(scan_fn, T[0], xs)
+        _, T_out = jax.lax.scan(scan_fn, T[0], xs, unroll=4)
         return jnp.concatenate([T[0:1], T_out], axis=0)
     else:
         xs = (T[:-1], G[0, :-1], G[1, :-1], G[2, :-1], B[0, :-1], B[1, :-1], source_mask[:-1])
-        _, T_out = jax.lax.scan(scan_fn, T[-1], xs, reverse=True)
+        _, T_out = jax.lax.scan(scan_fn, T[-1], xs, reverse=True, unroll=4)
         return jnp.concatenate([T_out, T[-1:]], axis=0)
 
 def sweep_all(T: jax.Array, G: jax.Array, B: jax.Array, source_mask: jax.Array, 
