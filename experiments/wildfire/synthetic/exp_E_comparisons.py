@@ -175,7 +175,7 @@ class E3_RegularizationStrategies(Experiment):
             
             opt = MetricRecoveryOptimizer(N, N, solver_type='eikonal', lambda_H=lam, 
                                           constrain_isotropic=True, reg_type=reg_type)
-            opt.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+            opt.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
             
             G_rec, _ = opt.get_G_B()
             interior = get_interior_mask(N, N, 5, source_mask)
@@ -262,7 +262,7 @@ class E4_OptimizationMethods(Experiment):
             
             opt = MetricRecoveryOptimizer(N, N, solver_type='eikonal', lambda_H=0.01, 
                                           constrain_isotropic=True, optimizer_type=method)
-            opt.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=lr, verbose=False)
+            opt.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=lr, verbose=True)
             
             G_rec, _ = opt.get_G_B()
             interior = get_interior_mask(N, N, 5, source_mask)
@@ -349,10 +349,10 @@ class E5_Scalability(Experiment):
             
             # Forward pass timing (already compiled from fit, but we can time one step)
             # Warmup compilation
-            opt.fit(source_coords, T_obs, obs_mask, n_iter=1, lr=0.01, verbose=False)
+            opt.fit(source_coords, T_obs, obs_mask, n_iter=1, lr=0.01, verbose=True)
             
             start = time.time()
-            opt.fit(source_coords, T_obs, obs_mask, n_iter=5, lr=0.01, verbose=False)
+            opt.fit(source_coords, T_obs, obs_mask, n_iter=5, lr=0.01, verbose=True)
             time_per_step = (time.time() - start) / 5.0
             
             results.append({

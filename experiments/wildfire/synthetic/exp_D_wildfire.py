@@ -373,13 +373,13 @@ class D5_FireLineReconstruction(Experiment):
         print("\n  Training Eikonal Optimizer...")
         opt_eik = MetricRecoveryOptimizer(N, N, solver_type='eikonal', recover_H=True, recover_W=True, 
                                           lambda_H=0.01, lambda_W=0.01, constrain_isotropic=True)
-        opt_eik.fit(source_coords, T_true, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+        opt_eik.fit(source_coords, T_true, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
         H_rec_eik, W_rec_eik = opt_eik.model.H_grid, opt_eik.model.W_grid
         
         print("  Training AVBD Optimizer...")
         opt_avbd = MetricRecoveryOptimizer(N, N, solver_type='avbd', recover_H=True, recover_W=True, 
                                            lambda_H=0.01, lambda_W=0.01, constrain_isotropic=True)
-        opt_avbd.fit(source_coords, T_true, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+        opt_avbd.fit(source_coords, T_true, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
         H_rec_avbd, W_rec_avbd = opt_avbd.model.H_grid, opt_avbd.model.W_grid
         
         # Predict full fields using Eikonal Solver

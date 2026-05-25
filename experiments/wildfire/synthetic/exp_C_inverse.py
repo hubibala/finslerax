@@ -74,13 +74,13 @@ class C1_IsotropicFull(Experiment):
         # Eikonal Optimizer
         print("\n  Training Eikonal Optimizer...")
         opt_eik = MetricRecoveryOptimizer(N, N, solver_type='eikonal', lambda_H=0.005, constrain_isotropic=True)
-        metrics_eik = opt_eik.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+        metrics_eik = opt_eik.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
         G_rec_eik, _ = opt_eik.get_G_B()
         
         # AVBD Optimizer
         print("  Training AVBD Optimizer...")
         opt_avbd = MetricRecoveryOptimizer(N, N, solver_type='avbd', lambda_H=0.005, constrain_isotropic=True)
-        metrics_avbd = opt_avbd.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+        metrics_avbd = opt_avbd.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
         G_rec_avbd, _ = opt_avbd.get_G_B()
         
         interior = get_interior_mask(N, N, 5, source_mask)
@@ -187,12 +187,12 @@ class C2_IsotropicSparse(Experiment):
         
         print("\n  Training Eikonal Optimizer...")
         opt_eik = MetricRecoveryOptimizer(N, N, solver_type='eikonal', lambda_H=0.01, constrain_isotropic=True)
-        opt_eik.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+        opt_eik.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
         G_rec_eik, _ = opt_eik.get_G_B()
         
         print("  Training AVBD Optimizer...")
         opt_avbd = MetricRecoveryOptimizer(N, N, solver_type='avbd', lambda_H=0.01, constrain_isotropic=True)
-        opt_avbd.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+        opt_avbd.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
         G_rec_avbd, _ = opt_avbd.get_G_B()
         
         interior = get_interior_mask(N, N, 5, source_mask)
@@ -285,12 +285,12 @@ class C3_DiagonalAnisotropic(Experiment):
         opt_eik = MetricRecoveryOptimizer(N, N, solver_type='eikonal', lambda_H=0.01, constrain_isotropic=False)
         # Keep g12=0 by nullifying it in the mask? Actually, opt_eik optimizes H. 
         # By default it will recover off-diagonals unless constrained. Let's let it recover all.
-        opt_eik.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+        opt_eik.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
         G_rec_eik, _ = opt_eik.get_G_B()
         
         print("  Training AVBD Optimizer...")
         opt_avbd = MetricRecoveryOptimizer(N, N, solver_type='avbd', lambda_H=0.01, constrain_isotropic=False)
-        opt_avbd.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+        opt_avbd.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
         G_rec_avbd, _ = opt_avbd.get_G_B()
         
         interior = get_interior_mask(N, N, 5, source_mask)
@@ -375,13 +375,13 @@ class C5_DriftRecovery(Experiment):
         opt_eik = MetricRecoveryOptimizer(N, N, solver_type='eikonal', recover_H=False, recover_W=True, lambda_W=0.01)
         opt_eik.model = jax.tree_util.tree_map(lambda x: x, opt_eik.model)
         opt_eik.model = opt_eik.model._replace(H_grid=H_true)
-        opt_eik.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+        opt_eik.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
         _, B_rec_eik = opt_eik.get_G_B()
         
         print("  Training AVBD Optimizer...")
         opt_avbd = MetricRecoveryOptimizer(N, N, solver_type='avbd', recover_H=False, recover_W=True, lambda_W=0.01)
         opt_avbd.model = opt_avbd.model._replace(H_grid=H_true)
-        opt_avbd.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+        opt_avbd.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
         _, B_rec_avbd = opt_avbd.get_G_B()
         
         interior = get_interior_mask(N, N, 5, source_mask)
@@ -467,7 +467,7 @@ class C7_RegularizationAblation(Experiment):
         for lam in self.lambda_values:
             print(f"\n  λ = {lam}")
             opt = MetricRecoveryOptimizer(N, N, solver_type='eikonal', lambda_H=lam, constrain_isotropic=True)
-            opt.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+            opt.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
             
             G_rec, _ = opt.get_G_B()
             interior = get_interior_mask(N, N, 5, source_mask)
@@ -558,7 +558,7 @@ class C8_ObservationDensity(Experiment):
             
             lambda_H = 0.01 if frac < 0.5 else 0.001
             opt = MetricRecoveryOptimizer(N, N, solver_type='eikonal', lambda_H=lambda_H, constrain_isotropic=True)
-            opt.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+            opt.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
             
             G_rec, _ = opt.get_G_B()
             interior = get_interior_mask(N, N, 5, source_mask)
@@ -647,7 +647,7 @@ class C9_NoiseRobustness(Experiment):
                 T_obs = T_clean + noise_tensor
             
             opt = MetricRecoveryOptimizer(N, N, solver_type='eikonal', lambda_H=0.02, constrain_isotropic=True)
-            opt.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+            opt.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
             
             G_rec, _ = opt.get_G_B()
             interior = get_interior_mask(N, N, 5, source_mask)
@@ -729,7 +729,7 @@ class C10_MultipleSources(Experiment):
             obs_mask = create_sparse_observation_mask(N, N, 0.1, source_mask, seed=51)
             
             opt = MetricRecoveryOptimizer(N, N, solver_type='eikonal', lambda_H=0.02, constrain_isotropic=True)
-            opt.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=False)
+            opt.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
             
             G_rec, _ = opt.get_G_B()
             interior = get_interior_mask(N, N, 5, source_mask)

@@ -256,15 +256,24 @@ class MetricRecoveryOptimizer:
             model = model.project(self.constrain_isotropic)
             return model, opt_state, loss, loss_data, loss_reg
 
-        for it in range(n_iter):
+        try:
+            from tqdm.auto import tqdm
+            pbar = tqdm(range(n_iter), desc=f"Training ({self.solver_type})", disable=not verbose, leave=False)
+        except ImportError:
+            pbar = range(n_iter)
+            
+        for it in pbar:
             self.model, opt_state, loss, loss_data, loss_reg = make_step(self.model, opt_state, it)
             
             self.history['loss'].append(float(loss))
             self.history['loss_data'].append(float(loss_data))
             self.history['loss_reg'].append(float(loss_reg))
             
-            if verbose and (it % 50 == 0 or it == n_iter - 1):
-                print(f"  Iter {it}: loss={loss:.4f} (data={loss_data:.4f}, reg={loss_reg:.4f})")
+            if verbose:
+                if hasattr(pbar, 'set_postfix'):
+                    pbar.set_postfix(loss=f"{float(loss):.4f}", data=f"{float(loss_data):.4f}")
+                elif it % 50 == 0 or it == n_iter - 1:
+                    print(f"  Iter {it}: loss={loss:.4f} (data={loss_data:.4f}, reg={loss_reg:.4f})")
                 
         return {'final_loss': self.history['loss'][-1], 
                 'final_data': self.history['loss_data'][-1], 
