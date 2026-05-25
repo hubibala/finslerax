@@ -203,7 +203,7 @@ class MetricRecoveryOptimizer:
         opt_state = optimizer.init(eqx.filter(self.model, filter_spec))
 
         @eqx.filter_value_and_grad(has_aux=True)
-        def compute_loss(diff_model: MetricRecoveryModel, static_model: MetricRecoveryModel, current_iter: int):
+        def compute_loss(diff_model: MetricRecoveryModel, static_model: MetricRecoveryModel, current_alpha: jax.Array):
             model = eqx.combine(diff_model, static_model)
             metric = SyntheticZermeloMetric(model.H_grid, model.W_grid)
             
@@ -217,17 +217,6 @@ class MetricRecoveryOptimizer:
                 loss_data = 0.5 * jnp.sum(diff**2)
             else:
                 src = source_coords[0]
-                
-                # Curriculum alpha
-                warmup = int(0.2 * n_iter)
-                ramp = int(0.6 * n_iter)
-                
-                def get_alpha(it):
-                    return jnp.where(it < warmup, 0.0, 
-                           jnp.where(it > warmup + ramp, 1.0, 
-                           (it - warmup) / jnp.maximum(ramp, 1)))
-                           
-                current_alpha = get_alpha(current_iter)
                 loss_data = self.loss_fn(metric, src, obs_coords, T_obs_values, alpha=current_alpha)
                 
             if self.reg_type == 'tv':
@@ -248,9 +237,9 @@ class MetricRecoveryOptimizer:
             return loss, (loss_data, loss_reg)
 
         @eqx.filter_jit
-        def make_step(model, opt_state, current_iter):
+        def make_step(model, opt_state, current_alpha):
             diff_model, static_model = eqx.partition(model, filter_spec)
-            (loss, (loss_data, loss_reg)), grads = compute_loss(diff_model, static_model, current_iter)
+            (loss, (loss_data, loss_reg)), grads = compute_loss(diff_model, static_model, current_alpha)
             updates, opt_state = optimizer.update(grads, opt_state, diff_model)
             diff_model = eqx.apply_updates(diff_model, updates)
             model = eqx.combine(diff_model, static_model)
@@ -274,7 +263,15 @@ class MetricRecoveryOptimizer:
             alpha_done_iter = warmup + ramp
             
         for it in pbar:
-            self.model, opt_state, loss, loss_data, loss_reg = make_step(self.model, opt_state, it)
+            if it < warmup:
+                alpha_val = 0.0
+            elif it > alpha_done_iter:
+                alpha_val = 1.0
+            else:
+                alpha_val = (it - warmup) / max(ramp, 1)
+                
+            current_alpha = jnp.array(alpha_val, dtype=jnp.float32)
+            self.model, opt_state, loss, loss_data, loss_reg = make_step(self.model, opt_state, current_alpha)
             
             loss_val = float(loss)
             self.history['loss'].append(loss_val)
