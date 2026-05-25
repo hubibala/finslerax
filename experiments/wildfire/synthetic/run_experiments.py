@@ -173,7 +173,7 @@ def run_experiments(phases: List[str] = None,
             cat = exp_id[0].upper()
             if cat in all_experiments:
                 for eid, cls, kwargs, quick_kwargs in all_experiments[cat]:
-                    if eid.upper() == exp_id.upper():
+                    if eid.upper().startswith(exp_id.upper()):
                         to_run.append((eid, cls, quick_kwargs if quick else kwargs))
                         break
     else:
