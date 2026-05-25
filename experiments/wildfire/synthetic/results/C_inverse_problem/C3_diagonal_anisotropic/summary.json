@@ -1,0 +1,16 @@
+{
+  "name": "C3_diagonal_anisotropic",
+  "category": "C_inverse_problem",
+  "success": false,
+  "metrics": {
+    "eik_g11": 0.6254639625549316,
+    "eik_g22": 0.4520226716995239,
+    "avbd_g11": 0.6787314414978027,
+    "avbd_g22": 0.6606905460357666
+  },
+  "metadata": {
+    "N": 40
+  },
+  "runtime_seconds": 621.9124133586884,
+  "timestamp": "2026-05-25T12:29:19.164039"
+}

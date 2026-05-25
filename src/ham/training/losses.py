@@ -632,10 +632,13 @@ class ArrivalTimeLoss(eqx.Module):
             denom = jnp.sqrt(jnp.sum(dp ** 2) * jnp.sum(do ** 2) + 1e-8)
             l_pearson = 1.0 - num / denom
 
-            # --- Relative MSE component (scale-aware, IoU-aligned) ---
-            # Normalise t_pred to [0,1] for Pearson stability but use absolute values
-            # for MSE so the metric correctly learns the target scale.
-            l_relmse = jnp.mean((t_pred - t_obs) ** 2)
+            # --- Normalised MSE component (scale-aware) ---
+            # We divide the error by max(t_obs) so the MSE loss magnitude is
+            # roughly in [0, 1], balancing numerically with the Pearson loss.
+            # However, because we do NOT normalise t_pred, the loss still
+            # correctly forces t_pred to align with the absolute scale of t_obs.
+            t_obs_max = jnp.maximum(jnp.max(t_obs), 1e-6)
+            l_relmse = jnp.mean(((t_pred - t_obs) / t_obs_max) ** 2)
 
             loss = (1.0 - alpha) * l_pearson + alpha * l_relmse
         else:
@@ -687,8 +690,9 @@ class DenseArrivalTimeLoss(eqx.Module):
         denom = jnp.sqrt(jnp.sum(dp ** 2) * jnp.sum(do ** 2) + 1e-8)
         l_pearson = 1.0 - num / denom
         
-        # Absolute MSE component
-        sq_err = jnp.where(mask, (t_pred - t_obs) ** 2, 0.0)
+        # Normalised MSE component
+        t_obs_max = jnp.maximum(jnp.max(jnp.where(mask, t_obs, -jnp.inf)), 1e-6)
+        sq_err = jnp.where(mask, ((t_pred - t_obs) / t_obs_max) ** 2, 0.0)
         l_relmse = jnp.sum(sq_err) / num_valid
         
         loss = (1.0 - alpha) * l_pearson + alpha * l_relmse
