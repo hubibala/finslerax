@@ -257,9 +257,9 @@ class MetricRecoveryOptimizer:
         
         # Determine when alpha curriculum finishes so we don't early stop during ramp
         alpha_done_iter = 0
+        warmup = int(0.2 * n_iter)
+        ramp = int(0.6 * n_iter)
         if self.solver_type == 'avbd':
-            warmup = int(0.2 * n_iter)
-            ramp = int(0.6 * n_iter)
             alpha_done_iter = warmup + ramp
             
         for it in pbar:
