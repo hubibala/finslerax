@@ -2,6 +2,7 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+import equinox as eqx
 from typing import Dict, List, Optional, Tuple
 
 from experiments.wildfire.synthetic.experiment_base import (
@@ -373,14 +374,13 @@ class C5_DriftRecovery(Experiment):
         
         print("\n  Training Eikonal Optimizer...")
         opt_eik = MetricRecoveryOptimizer(N, N, solver_type='eikonal', recover_H=False, recover_W=True, lambda_W=0.01)
-        opt_eik.model = jax.tree_util.tree_map(lambda x: x, opt_eik.model)
-        opt_eik.model = opt_eik.model._replace(H_grid=H_true)
+        opt_eik.model = eqx.tree_at(lambda m: m.H_grid, opt_eik.model, H_true)
         opt_eik.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
         _, B_rec_eik = opt_eik.get_G_B()
         
         print("  Training AVBD Optimizer...")
         opt_avbd = MetricRecoveryOptimizer(N, N, solver_type='avbd', recover_H=False, recover_W=True, lambda_W=0.01)
-        opt_avbd.model = opt_avbd.model._replace(H_grid=H_true)
+        opt_avbd.model = eqx.tree_at(lambda m: m.H_grid, opt_avbd.model, H_true)
         opt_avbd.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
         _, B_rec_avbd = opt_avbd.get_G_B()
         
