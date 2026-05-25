@@ -176,7 +176,8 @@ class MetricRecoveryOptimizer:
         self.history = {'loss': [], 'loss_data': [], 'loss_reg': []}
         
     def fit(self, source_coords: jax.Array, T_obs: jax.Array, obs_mask: jax.Array,
-            n_iter: int = 500, lr: float = 0.1, verbose: bool = True, alpha: float = 0.0) -> Dict:
+            n_iter: int = 500, lr: float = 0.1, verbose: bool = True, alpha: float = 0.0,
+            patience: int = 20, min_delta: float = 1e-4) -> Dict:
         """Fit parameters to observed arrival times."""
         
         # We need continuous coordinates for observations if using AVBD
@@ -262,18 +263,36 @@ class MetricRecoveryOptimizer:
         except ImportError:
             pbar = range(n_iter)
             
+        best_loss = float('inf')
+        no_improvement_count = 0
+            
         for it in pbar:
             self.model, opt_state, loss, loss_data, loss_reg = make_step(self.model, opt_state, it)
             
-            self.history['loss'].append(float(loss))
+            loss_val = float(loss)
+            self.history['loss'].append(loss_val)
             self.history['loss_data'].append(float(loss_data))
             self.history['loss_reg'].append(float(loss_reg))
             
             if verbose:
                 if hasattr(pbar, 'set_postfix'):
-                    pbar.set_postfix(loss=f"{float(loss):.4f}", data=f"{float(loss_data):.4f}")
+                    pbar.set_postfix(loss=f"{loss_val:.4f}", data=f"{float(loss_data):.4f}")
                 elif it % 50 == 0 or it == n_iter - 1:
-                    print(f"  Iter {it}: loss={loss:.4f} (data={loss_data:.4f}, reg={loss_reg:.4f})")
+                    print(f"  Iter {it}: loss={loss_val:.4f} (data={float(loss_data):.4f}, reg={float(loss_reg):.4f})")
+                    
+            if loss_val < best_loss - min_delta:
+                best_loss = loss_val
+                no_improvement_count = 0
+            else:
+                no_improvement_count += 1
+                
+            if no_improvement_count >= patience:
+                if verbose:
+                    if hasattr(pbar, 'write'):
+                        pbar.write(f"  Early stopping at iteration {it} (no improvement in {patience} iters)")
+                    else:
+                        print(f"  Early stopping at iteration {it} (no improvement in {patience} iters)")
+                break
                 
         return {'final_loss': self.history['loss'][-1], 
                 'final_data': self.history['loss_data'][-1], 
