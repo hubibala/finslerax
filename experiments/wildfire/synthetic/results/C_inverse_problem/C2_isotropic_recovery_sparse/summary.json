@@ -4,12 +4,12 @@
   "success": true,
   "metrics": {
     "err_eikonal": 0.12987658381462097,
-    "err_avbd": 0.03854464367032051
+    "err_avbd": 0.0851299837231636
   },
   "metadata": {
     "N": 40,
     "obs_fraction": 0.1
   },
-  "runtime_seconds": 2210.567396402359,
-  "timestamp": "2026-05-25T14:03:19.612397"
+  "runtime_seconds": 19.14024782180786,
+  "timestamp": "2026-05-25T14:37:05.749493"
 }

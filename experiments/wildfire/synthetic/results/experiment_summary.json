@@ -1,13 +1,18 @@
 {
-  "timestamp": "2026-05-25T10:39:14.122653",
+  "timestamp": "2026-05-25T14:37:47.780158",
   "device": "cpu:0",
-  "quick_mode": true,
-  "total_time": 0.606521,
+  "quick_mode": false,
+  "total_time": 22.525621,
   "results": {
-    "C1": {
+    "C3": {
       "success": false,
-      "runtime": 0,
-      "metrics": {}
+      "runtime": 21.616214990615845,
+      "metrics": {
+        "eik_g11": 0.6254639625549316,
+        "eik_g22": 0.4520226716995239,
+        "avbd_g11": 0.5673162341117859,
+        "avbd_g22": 0.37711381912231445
+      }
     }
   }
 }
