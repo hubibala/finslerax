@@ -82,14 +82,17 @@ def get_all_experiments() -> Dict[str, List]:
     # Category C: Inverse Problem
     from experiments.wildfire.synthetic.exp_C_inverse import (
         C1_IsotropicFull, C2_IsotropicSparse, C3_DiagonalAnisotropic,
-        C5_DriftRecovery, C7_RegularizationAblation, C8_ObservationDensity,
+        C4_FullMetricRecovery, C5_DriftRecovery, C6_JointMetricDriftRecovery,
+        C7_RegularizationAblation, C8_ObservationDensity,
         C9_NoiseRobustness, C10_MultipleSources
     )
     experiments['C'] = [
         ('C1', C1_IsotropicFull, {}, {'N': 30, 'n_iter': 100}),
         ('C2', C2_IsotropicSparse, {}, {'N': 30, 'n_iter': 150}),
         ('C3', C3_DiagonalAnisotropic, {}, {'N': 30, 'n_iter': 150}),
+        ('C4', C4_FullMetricRecovery, {}, {'N': 30, 'n_iter': 150}),
         ('C5', C5_DriftRecovery, {}, {'N': 30, 'n_iter': 100}),
+        ('C6', C6_JointMetricDriftRecovery, {}, {'N': 30, 'n_iter': 150}),
         ('C7', C7_RegularizationAblation, {}, {'N': 30, 'n_iter': 100}),
         ('C8', C8_ObservationDensity, {}, {'N': 30, 'n_iter': 100}),
         ('C9', C9_NoiseRobustness, {}, {'N': 30, 'n_iter': 100}),

@@ -336,6 +336,127 @@ class C3_DiagonalAnisotropic(Experiment):
 
 
 # =============================================================================
+# C4: FULL METRIC RECOVERY (ALL 3 COMPONENTS)
+# =============================================================================
+@register_experiment
+class C4_FullMetricRecovery(Experiment):
+    """Recover full anisotropic metric including off-diagonal g12 component."""
+
+    name = "C4_full_metric_recovery"
+    category = "C_inverse_problem"
+    description = "Recover full symmetric metric tensor (g11, g12, g22) without isotropy constraint"
+
+    def __init__(self, N: int = 40, n_iter: int = 300):
+        super().__init__()
+        self.N, self.n_iter = N, n_iter
+
+    def run(self) -> ExperimentResult:
+        N = self.N
+
+        # True metric: rotated anisotropy with non-zero off-diagonal
+        # Corresponds to a 30-degree rotation of a 3:1 anisotropy ratio
+        theta = jnp.pi / 6  # 30 degrees
+        lam1, lam2 = 2.0, 0.5
+        c, s = jnp.cos(theta), jnp.sin(theta)
+        # G = R^T diag(lam1, lam2) R
+        g11_val = lam1 * c**2 + lam2 * s**2
+        g12_val = (lam1 - lam2) * c * s
+        g22_val = lam1 * s**2 + lam2 * c**2
+
+        G_true = jnp.zeros((3, N, N))
+        G_true = G_true.at[0].set(g11_val)
+        G_true = G_true.at[1].set(g12_val)
+        G_true = G_true.at[2].set(g22_val)
+        # Introduce spatial variation: flip anisotropy in right half
+        G_true = G_true.at[0, :, N//2:].set(lam1 * s**2 + lam2 * c**2)
+        G_true = G_true.at[1, :, N//2:].set(-(lam1 - lam2) * c * s)
+        G_true = G_true.at[2, :, N//2:].set(lam1 * c**2 + lam2 * s**2)
+
+        B_true = jnp.zeros((2, N, N))
+
+        source_coords = jnp.array([[N//2, N//4]], dtype=jnp.float32)
+        source_mask = jnp.zeros((N, N), dtype=bool).at[N//2, N//4].set(True)
+
+        H_true, W_true = eikonal_to_zermelo(G_true, B_true)
+        metric_true = SyntheticZermeloMetric(H_true, W_true)
+
+        solver = EikonalSolver(max_iters=50, tol=1e-5)
+        T_obs, _, _ = solver.solve(metric_true, source_coords, (0, N-1, 0, N-1), (N, N))
+
+        obs_mask = create_sparse_observation_mask(N, N, 0.1, source_mask, seed=52)
+
+        print("\n  Training Eikonal Optimizer (full metric)...")
+        opt_eik = MetricRecoveryOptimizer(N, N, solver_type='eikonal',
+                                          lambda_H=0.02, constrain_isotropic=False)
+        opt_eik.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.03, verbose=True)
+        G_rec_eik, _ = opt_eik.get_G_B()
+
+        print("  Training AVBD Optimizer (full metric)...")
+        opt_avbd = MetricRecoveryOptimizer(N, N, solver_type='avbd',
+                                           lambda_H=0.02, constrain_isotropic=False)
+        opt_avbd.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.03, verbose=True)
+        G_rec_avbd, _ = opt_avbd.get_G_B()
+
+        interior = get_interior_mask(N, N, 5, source_mask)
+        eik_g11, eik_g22 = evaluate_recovery(G_true, G_rec_eik, interior)
+        avbd_g11, avbd_g22 = evaluate_recovery(G_true, G_rec_avbd, interior)
+
+        # Also evaluate off-diagonal g12 component
+        eik_g12 = float(jnp.sqrt(jnp.mean((G_true[1][interior] - G_rec_eik[1][interior])**2)))
+        avbd_g12 = float(jnp.sqrt(jnp.mean((G_true[1][interior] - G_rec_avbd[1][interior])**2)))
+
+        print(f"  Eikonal Error: g11={eik_g11:.4f}, g12={eik_g12:.4f}, g22={eik_g22:.4f}")
+        print(f"  AVBD Error:    g11={avbd_g11:.4f}, g12={avbd_g12:.4f}, g22={avbd_g22:.4f}")
+
+        self.G_true = G_true
+        self.G_rec_eik, self.G_rec_avbd = G_rec_eik, G_rec_avbd
+        self.T_obs = T_obs
+
+        return ExperimentResult(
+            name=self.name, category=self.category,
+            success=eik_g11 < 0.35 and avbd_g11 < 0.35,
+            metrics={
+                'eik_g11': eik_g11, 'eik_g12': eik_g12, 'eik_g22': eik_g22,
+                'avbd_g11': avbd_g11, 'avbd_g12': avbd_g12, 'avbd_g22': avbd_g22,
+            },
+            arrays={
+                'G_true': np.array(G_true),
+                'G_eik': np.array(G_rec_eik),
+                'G_avbd': np.array(G_rec_avbd),
+            },
+            metadata={'N': N}
+        )
+
+    def visualize(self, save_path: Optional[str] = None) -> plt.Figure:
+        fig, axes = plt.subplots(3, 3, figsize=(15, 14))
+        component_names = ['g₁₁', 'g₁₂', 'g₂₂']
+
+        for row, (c, name) in enumerate(zip([0, 1, 2], component_names)):
+            vmin = float(min(self.G_true[c].min(), self.G_rec_eik[c].min(), self.G_rec_avbd[c].min()))
+            vmax = float(max(self.G_true[c].max(), self.G_rec_eik[c].max(), self.G_rec_avbd[c].max()))
+            cmap = 'viridis' if c != 1 else 'RdBu_r'
+
+            axes[row, 0].imshow(self.G_true[c], origin='upper', cmap=cmap, vmin=vmin, vmax=vmax)
+            axes[row, 0].set_title(f'True {name}')
+            axes[row, 0].axis('off')
+
+            axes[row, 1].imshow(self.G_rec_eik[c], origin='upper', cmap=cmap, vmin=vmin, vmax=vmax)
+            axes[row, 1].set_title(f'Eikonal {name}')
+            axes[row, 1].axis('off')
+
+            im = axes[row, 2].imshow(self.G_rec_avbd[c], origin='upper', cmap=cmap, vmin=vmin, vmax=vmax)
+            axes[row, 2].set_title(f'AVBD {name}')
+            axes[row, 2].axis('off')
+            plt.colorbar(im, ax=axes[row, 2], fraction=0.046)
+
+        fig.suptitle('C4: Full Anisotropic Metric Recovery (g11, g12, g22)', fontsize=14)
+        plt.tight_layout()
+        if save_path:
+            fig.savefig(save_path, bbox_inches='tight', dpi=150)
+        return fig
+
+
+# =============================================================================
 # C5: DRIFT RECOVERY
 # =============================================================================
 @register_experiment
@@ -419,6 +540,134 @@ class C5_DriftRecovery(Experiment):
             axes[row, 2].set_title(f'AVBD {name}')
             
         fig.suptitle('C5: Drift Recovery', fontsize=14)
+        plt.tight_layout()
+        if save_path:
+            fig.savefig(save_path, bbox_inches='tight', dpi=150)
+        return fig
+
+
+
+# =============================================================================
+# C6: JOINT METRIC + DRIFT RECOVERY
+# =============================================================================
+@register_experiment
+class C6_JointMetricDriftRecovery(Experiment):
+    """Simultaneously recover both the metric H and drift W from arrival times.
+
+    This is the hardest inverse problem: we optimise all 5 unknown fields
+    (g11, g12, g22, b1, b2) jointly, which couples the Riemannian geometry
+    and the Zermelo drift in a single gradient descent.
+    """
+
+    name = "C6_joint_metric_drift_recovery"
+    category = "C_inverse_problem"
+    description = "Joint recovery of metric tensor and drift field simultaneously"
+
+    def __init__(self, N: int = 40, n_iter: int = 350):
+        super().__init__()
+        self.N, self.n_iter = N, n_iter
+
+    def run(self) -> ExperimentResult:
+        N = self.N
+
+        # True metric: moderate anisotropy
+        G_true = jnp.zeros((3, N, N))
+        G_true = G_true.at[0].set(1.5)
+        G_true = G_true.at[2].set(0.7)
+        G_true = G_true.at[0, :, N//2:].set(0.7)
+        G_true = G_true.at[2, :, N//2:].set(1.5)
+
+        # True drift: spatially constant, moderate wind
+        B_true = jnp.zeros((2, N, N))
+        B_true = B_true.at[0].set(0.15)   # b1 (x-component)
+        B_true = B_true.at[1].set(-0.10)  # b2 (y-component)
+
+        source_coords = jnp.array([[N//2, N//4]], dtype=jnp.float32)
+        source_mask = jnp.zeros((N, N), dtype=bool).at[N//2, N//4].set(True)
+
+        H_true, W_true = eikonal_to_zermelo(G_true, B_true)
+        metric_true = SyntheticZermeloMetric(H_true, W_true)
+
+        solver = EikonalSolver(max_iters=50, tol=1e-5)
+        T_obs, _, _ = solver.solve(metric_true, source_coords, (0, N-1, 0, N-1), (N, N))
+
+        obs_mask = create_sparse_observation_mask(N, N, 0.15, source_mask, seed=53)
+
+        print("\n  Training Eikonal Optimizer (joint H+W)...")
+        opt_eik = MetricRecoveryOptimizer(N, N, solver_type='eikonal',
+                                          recover_H=True, recover_W=True,
+                                          lambda_H=0.02, lambda_W=0.01,
+                                          constrain_isotropic=False)
+        opt_eik.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.03, verbose=True)
+        G_rec_eik, B_rec_eik = opt_eik.get_G_B()
+
+        print("  Training AVBD Optimizer (joint H+W)...")
+        opt_avbd = MetricRecoveryOptimizer(N, N, solver_type='avbd',
+                                           recover_H=True, recover_W=True,
+                                           lambda_H=0.02, lambda_W=0.01,
+                                           constrain_isotropic=False)
+        opt_avbd.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.03, verbose=True)
+        G_rec_avbd, B_rec_avbd = opt_avbd.get_G_B()
+
+        interior = get_interior_mask(N, N, 5, source_mask)
+        eik_g11, eik_g22 = evaluate_recovery(G_true, G_rec_eik, interior)
+        avbd_g11, avbd_g22 = evaluate_recovery(G_true, G_rec_avbd, interior)
+        eik_b1, eik_b2 = evaluate_drift(B_true, B_rec_eik, interior)
+        avbd_b1, avbd_b2 = evaluate_drift(B_true, B_rec_avbd, interior)
+
+        print(f"  Eikonal Error: g11={eik_g11:.4f}, g22={eik_g22:.4f} | b1={eik_b1:.4f}, b2={eik_b2:.4f}")
+        print(f"  AVBD Error:    g11={avbd_g11:.4f}, g22={avbd_g22:.4f} | b1={avbd_b1:.4f}, b2={avbd_b2:.4f}")
+
+        self.G_true, self.B_true = G_true, B_true
+        self.G_rec_eik, self.B_rec_eik = G_rec_eik, B_rec_eik
+        self.G_rec_avbd, self.B_rec_avbd = G_rec_avbd, B_rec_avbd
+
+        return ExperimentResult(
+            name=self.name, category=self.category,
+            success=eik_g11 < 0.40 and avbd_g11 < 0.40,
+            metrics={
+                'eik_g11': eik_g11, 'eik_g22': eik_g22,
+                'eik_b1': eik_b1, 'eik_b2': eik_b2,
+                'avbd_g11': avbd_g11, 'avbd_g22': avbd_g22,
+                'avbd_b1': avbd_b1, 'avbd_b2': avbd_b2,
+            },
+            arrays={
+                'G_true': np.array(G_true), 'B_true': np.array(B_true),
+                'G_eik': np.array(G_rec_eik), 'B_eik': np.array(B_rec_eik),
+                'G_avbd': np.array(G_rec_avbd), 'B_avbd': np.array(B_rec_avbd),
+            },
+            metadata={'N': N}
+        )
+
+    def visualize(self, save_path: Optional[str] = None) -> plt.Figure:
+        fig, axes = plt.subplots(2, 4, figsize=(20, 10))
+
+        # Row 0: g11 (metric)
+        for col, (data, title) in enumerate([
+            (self.G_true[0], 'True g₁₁'),
+            (self.G_rec_eik[0], 'Eikonal g₁₁'),
+            (self.G_rec_avbd[0], 'AVBD g₁₁'),
+            (self.G_rec_avbd[0] - self.G_true[0], 'AVBD Error g₁₁'),
+        ]):
+            cmap = 'RdBu_r' if col == 3 else 'viridis'
+            im = axes[0, col].imshow(data, origin='upper', cmap=cmap)
+            axes[0, col].set_title(title)
+            axes[0, col].axis('off')
+            plt.colorbar(im, ax=axes[0, col], fraction=0.046)
+
+        # Row 1: b1 (drift)
+        for col, (data, title) in enumerate([
+            (self.B_true[0], 'True b₁'),
+            (self.B_rec_eik[0], 'Eikonal b₁'),
+            (self.B_rec_avbd[0], 'AVBD b₁'),
+            (self.B_rec_avbd[0] - self.B_true[0], 'AVBD Error b₁'),
+        ]):
+            im = axes[1, col].imshow(data, origin='upper', cmap='RdBu_r')
+            axes[1, col].set_title(title)
+            axes[1, col].axis('off')
+            plt.colorbar(im, ax=axes[1, col], fraction=0.046)
+
+        fig.suptitle('C6: Joint Metric + Drift Recovery', fontsize=14)
         plt.tight_layout()
         if save_path:
             fig.savefig(save_path, bbox_inches='tight', dpi=150)

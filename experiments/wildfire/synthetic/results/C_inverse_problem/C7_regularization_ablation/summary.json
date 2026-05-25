@@ -1,0 +1,15 @@
+{
+  "name": "C7_regularization_ablation",
+  "category": "C_inverse_problem",
+  "success": true,
+  "metrics": {
+    "best_lambda": 0.1,
+    "best_error": 0.1910552680492401,
+    "no_reg_error": 0.24085843563079834
+  },
+  "metadata": {
+    "N": 40
+  },
+  "runtime_seconds": 18.35011577606201,
+  "timestamp": "2026-05-25T14:52:18.423643"
+}
