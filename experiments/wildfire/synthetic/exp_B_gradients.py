@@ -26,22 +26,41 @@ def backward_pass(G, B, source_mask, dL_dT, hx=1.0, hy=1.0, max_iters=50, tol=1e
     loss, grads = val_and_grad_jitted(G, B, source_mask, dL_dT, hx, hy, max_iters, tol)
     return grads[0], grads[1]
 
-def finite_difference_gradient(G, B, source_mask, dL_dT, param, indices, eps=1e-5, hx=1.0, hy=1.0, max_iters=50, tol=1e-4):
-    """Compute gradient via central finite differences."""
-    c, i, j = indices
-    
-    if param == 'G':
+@functools.partial(jax.jit, static_argnames=('hx', 'hy', 'max_iters', 'tol'))
+def batched_fd_G(G, B, source_mask, dL_dT, pts_c, pts_i, pts_j, eps, hx, hy, max_iters, tol):
+    def single_fd(c, i, j):
         G_plus = G.at[c, i, j].add(eps)
         G_minus = G.at[c, i, j].add(-eps)
         L_plus = compute_loss_jitted(G_plus, B, source_mask, dL_dT, hx, hy, max_iters, tol)
         L_minus = compute_loss_jitted(G_minus, B, source_mask, dL_dT, hx, hy, max_iters, tol)
-    else:
+        return (L_plus - L_minus) / (2 * eps)
+    return jax.vmap(single_fd)(pts_c, pts_i, pts_j)
+
+@functools.partial(jax.jit, static_argnames=('hx', 'hy', 'max_iters', 'tol'))
+def batched_fd_B(G, B, source_mask, dL_dT, pts_c, pts_i, pts_j, eps, hx, hy, max_iters, tol):
+    def single_fd(c, i, j):
         B_plus = B.at[c, i, j].add(eps)
         B_minus = B.at[c, i, j].add(-eps)
         L_plus = compute_loss_jitted(G, B_plus, source_mask, dL_dT, hx, hy, max_iters, tol)
         L_minus = compute_loss_jitted(G, B_minus, source_mask, dL_dT, hx, hy, max_iters, tol)
-        
-    return float((L_plus - L_minus) / (2 * eps))
+        return (L_plus - L_minus) / (2 * eps)
+    return jax.vmap(single_fd)(pts_c, pts_i, pts_j)
+
+def evaluate_fd_gradients(G, B, source_mask, dL_dT, test_points, eps, hx=1.0, hy=1.0, max_iters=50, tol=1e-4):
+    pts_G_c, pts_G_i, pts_G_j = [], [], []
+    for i, j in test_points:
+        for c in [0, 2]:
+            pts_G_c.append(c); pts_G_i.append(i); pts_G_j.append(j)
+            
+    pts_B_c, pts_B_i, pts_B_j = [], [], []
+    for i, j in test_points:
+        for c in [0, 1]:
+            pts_B_c.append(c); pts_B_i.append(i); pts_B_j.append(j)
+            
+    fd_G = batched_fd_G(G, B, source_mask, dL_dT, jnp.array(pts_G_c), jnp.array(pts_G_i), jnp.array(pts_G_j), eps, hx, hy, max_iters, tol)
+    fd_B = batched_fd_B(G, B, source_mask, dL_dT, jnp.array(pts_B_c), jnp.array(pts_B_i), jnp.array(pts_B_j), eps, hx, hy, max_iters, tol)
+    
+    return np.array(fd_G), np.array(fd_B)
 
 
 # =============================================================================
@@ -84,15 +103,20 @@ class B1_FD_Isotropic(Experiment):
         
         results_G, results_B = [], []
         
+        fd_G_all, fd_B_all = evaluate_fd_gradients(G, B, source_mask, dL_dT, test_points, self.eps)
+        
+        idx_G, idx_B = 0, 0
         for i, j in test_points:
             for c in [0, 2]:
-                fd = finite_difference_gradient(G, B, source_mask, dL_dT, 'G', (c, i, j), self.eps)
+                fd = float(fd_G_all[idx_G])
+                idx_G += 1
                 impl = float(dL_dG[c, i, j])
                 rel_err = abs(fd - impl) / abs(fd) if abs(fd) > 1e-10 else abs(impl)
                 results_G.append({'fd': fd, 'impl': impl, 'rel_err': rel_err})
             
             for c in [0, 1]:
-                fd = finite_difference_gradient(G, B, source_mask, dL_dT, 'B', (c, i, j), self.eps)
+                fd = float(fd_B_all[idx_B])
+                idx_B += 1
                 impl = float(dL_dB[c, i, j])
                 rel_err = abs(fd - impl) / abs(fd) if abs(fd) > 1e-10 else abs(impl)
                 results_B.append({'fd': fd, 'impl': impl, 'rel_err': rel_err})
