@@ -144,13 +144,17 @@ def sweep_axis(T: jax.Array, G: jax.Array, B: jax.Array, source_mask: jax.Array,
         T_curr_out = jnp.where(s_mask, 0.0, T0_new2)
         return T_curr_out, T_curr_out
 
+    # Unrolling massively speeds up GPU/TPU by reducing scan dispatch overhead, 
+    # but destroys CPU performance by causing instruction cache bloat.
+    unroll_amt = 1 if jax.default_backend() == 'cpu' else 4
+
     if direction == 1:
         xs = (T[1:], G[0, 1:], G[1, 1:], G[2, 1:], B[0, 1:], B[1, 1:], source_mask[1:])
-        _, T_out = jax.lax.scan(scan_fn, T[0], xs, unroll=4)
+        _, T_out = jax.lax.scan(scan_fn, T[0], xs, unroll=unroll_amt)
         return jnp.concatenate([T[0:1], T_out], axis=0)
     else:
         xs = (T[:-1], G[0, :-1], G[1, :-1], G[2, :-1], B[0, :-1], B[1, :-1], source_mask[:-1])
-        _, T_out = jax.lax.scan(scan_fn, T[-1], xs, reverse=True, unroll=4)
+        _, T_out = jax.lax.scan(scan_fn, T[-1], xs, reverse=True, unroll=unroll_amt)
         return jnp.concatenate([T_out, T[-1:]], axis=0)
 
 def sweep_all(T: jax.Array, G: jax.Array, B: jax.Array, source_mask: jax.Array, 
