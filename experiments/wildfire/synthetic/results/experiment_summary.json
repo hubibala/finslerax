@@ -1,0 +1,13 @@
+{
+  "timestamp": "2026-05-25T10:39:14.122653",
+  "device": "cpu:0",
+  "quick_mode": true,
+  "total_time": 0.606521,
+  "results": {
+    "C1": {
+      "success": false,
+      "runtime": 0,
+      "metrics": {}
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "B8_random_directions",
+  "category": "B_gradient_verification",
+  "success": "True",
+  "metrics": {
+    "pct_good": 70.0,
+    "median_err": 0.04535365660244361
+  },
+  "metadata": {
+    "N": 30,
+    "n_directions": 20
+  },
+  "runtime_seconds": 16.1851327419281,
+  "timestamp": "2026-05-25T10:43:22.002894"
+}

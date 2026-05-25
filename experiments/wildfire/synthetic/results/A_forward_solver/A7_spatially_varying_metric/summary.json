@@ -1,0 +1,14 @@
+{
+  "name": "A7_spatially_varying_metric",
+  "category": "A_forward_solver",
+  "success": true,
+  "metrics": {
+    "mean_residual": 0.003916515968739986,
+    "max_residual": 0.017216086387634277
+  },
+  "metadata": {
+    "N": 100
+  },
+  "runtime_seconds": 0.4760727882385254,
+  "timestamp": "2026-05-25T10:41:42.180280"
+}

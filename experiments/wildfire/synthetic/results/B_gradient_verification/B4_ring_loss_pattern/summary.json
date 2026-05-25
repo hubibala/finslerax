@@ -1,0 +1,15 @@
+{
+  "name": "B4_ring_loss_pattern",
+  "category": "B_gradient_verification",
+  "success": true,
+  "metrics": {
+    "G_max": 1.3255798816680908,
+    "B_max": 3.7493064403533936
+  },
+  "metadata": {
+    "N": 40,
+    "radius": 25
+  },
+  "runtime_seconds": 5.277003049850464,
+  "timestamp": "2026-05-25T10:43:02.370634"
+}

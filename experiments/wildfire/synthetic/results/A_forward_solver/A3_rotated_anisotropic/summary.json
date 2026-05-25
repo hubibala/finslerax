@@ -1,0 +1,19 @@
+{
+  "name": "A3_rotated_anisotropic",
+  "category": "A_forward_solver",
+  "success": true,
+  "metrics": {
+    "l1": 0.19475646317005157,
+    "l2": 0.3095853328704834,
+    "linf": 0.785186767578125,
+    "rel_l2": 0.0024323321413248777,
+    "rel_linf": 0.006169009953737259
+  },
+  "metadata": {
+    "theta_deg": 45.0,
+    "lambda1": 4.0,
+    "lambda2": 0.25
+  },
+  "runtime_seconds": 0.5327718257904053,
+  "timestamp": "2026-05-25T10:41:39.369308"
+}

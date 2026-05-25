@@ -289,9 +289,9 @@ class A4_ConstantDrift(Experiment):
         
         T, _, _ = solver.solve(metric, source_coords, grid_extent=(0, N-1, 0, N-1), grid_shape=(N, N))
         
-        # Check asymmetry
-        T_left = float(T[source_i, source_j - 30])
-        T_right = float(T[source_i, source_j + 30])
+        # Check asymmetry along the drift axis (i index)
+        T_left = float(T[source_i - 30, source_j])
+        T_right = float(T[source_i + 30, source_j])
         asymmetry = (T_left - T_right) / (T_left + T_right)
         
         print(f"  T at x=-30: {T_left:.4f}, T at x=+30: {T_right:.4f}")
@@ -313,7 +313,7 @@ class A4_ConstantDrift(Experiment):
         plot_drift_field(np.array(self.B), axes[0], step=15, scale=20)
         
         N = self.N
-        profile = np.array(self.T[N//2, :])
+        profile = np.array(self.T[:, N//2])
         x = np.arange(N) - N//2
         axes[1].plot(x, profile)
         axes[1].axvline(0, color='r', linestyle='--', alpha=0.5)

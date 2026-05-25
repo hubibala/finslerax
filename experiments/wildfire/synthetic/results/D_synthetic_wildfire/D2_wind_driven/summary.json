@@ -1,0 +1,15 @@
+{
+  "name": "D2_wind_driven",
+  "category": "D_synthetic_wildfire",
+  "success": true,
+  "metrics": {
+    "T_max": 53.03303146362305,
+    "T_nowind_max": 42.42641067504883
+  },
+  "metadata": {
+    "wind_speed": 0.25,
+    "wind_dir_deg": 45.0
+  },
+  "runtime_seconds": 0.7114760875701904,
+  "timestamp": "2026-05-25T10:43:38.062039"
+}

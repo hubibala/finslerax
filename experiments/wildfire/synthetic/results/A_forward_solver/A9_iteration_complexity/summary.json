@@ -1,0 +1,17 @@
+{
+  "name": "A9_iteration_complexity",
+  "category": "A_forward_solver",
+  "success": "False",
+  "metrics": {
+    "time_scaling": -0.07260662257609665
+  },
+  "metadata": {
+    "grid_sizes": [
+      50,
+      100,
+      200
+    ]
+  },
+  "runtime_seconds": 3.8352785110473633,
+  "timestamp": "2026-05-25T10:41:47.367749"
+}

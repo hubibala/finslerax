@@ -1,0 +1,14 @@
+{
+  "name": "D1_terrain_driven",
+  "category": "D_synthetic_wildfire",
+  "success": true,
+  "metrics": {
+    "T_max": 101.62992095947266,
+    "slope_max": 2.0187768936157227
+  },
+  "metadata": {
+    "N": 60
+  },
+  "runtime_seconds": 2.3952269554138184,
+  "timestamp": "2026-05-25T10:43:37.069453"
+}
