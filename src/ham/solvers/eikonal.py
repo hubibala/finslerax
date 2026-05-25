@@ -109,12 +109,12 @@ def stencil_update(T1: jax.Array, T2: jax.Array, T0: jax.Array,
 # SWEEPING PASSES
 # =============================================================================
 
-def sweep_axis(T: jax.Array, G: jax.Array, B: jax.Array, source_mask: jax.Array, 
-               hx: float, hy: float, direction: int) -> jax.Array:
+def sweep_y(T: jax.Array, G: jax.Array, B: jax.Array, source_mask: jax.Array, 
+            hx: float, hy: float, direction: int) -> jax.Array:
     """
-    Sweeps along axis 0 (X). 
-    direction=1: left to right.
-    direction=-1: right to left.
+    Sweeps along axis 0 (Y-axis). 
+    direction=1: top to bottom (row i depends on row i-1).
+    direction=-1: bottom to top (row i depends on row i+1).
     """
     def scan_fn(T_prev, xs):
         T_curr, g11, g12, g22, b1, b2, s_mask = xs
@@ -125,18 +125,24 @@ def sweep_axis(T: jax.Array, G: jax.Array, B: jax.Array, source_mask: jax.Array,
         T1_left = padded_T_prev[0:-2]
         T0 = T_curr
         
-        m2x = -direction * hx
-        m2y = 0.0
+        # Vector points from current (i,j) to neighbor (i_nbr, j_nbr)
+        # For Y sweep, neighbor is in Y direction.
+        p = -direction * hy
         
-        m1x_left = -direction * hx
-        m1y_left = -1.0 * hy
+        m2x = 0.0
+        m2y = p
+        
+        # Left neighbor: (i_nbr, j-1)
+        m1x_left = -1.0 * hx
+        m1y_left = p
         
         T0_new1 = stencil_update(T1_left, T2, T0, g11, g12, g22, b1, b2, 
                                  m1x_left, m1y_left, m2x, m2y)
                                  
+        # Right neighbor: (i_nbr, j+1)
         T1_right = padded_T_prev[2:]
-        m1x_right = -direction * hx
-        m1y_right = 1.0 * hy
+        m1x_right = 1.0 * hx
+        m1y_right = p
         
         T0_new2 = stencil_update(T1_right, T2, T0_new1, g11, g12, g22, b1, b2,
                                  m1x_right, m1y_right, m2x, m2y)
@@ -159,21 +165,21 @@ def sweep_axis(T: jax.Array, G: jax.Array, B: jax.Array, source_mask: jax.Array,
 
 def sweep_all(T: jax.Array, G: jax.Array, B: jax.Array, source_mask: jax.Array, 
               hx: float, hy: float) -> jax.Array:
-    """Executes 4 directional sweeps (X+, Y+, X-, Y-)."""
-    # 1. Sweep X +1
-    T = sweep_axis(T, G, B, source_mask, hx, hy, 1)
+    """Executes 4 directional sweeps (Y+, X+, Y-, X-)."""
+    # 1. Sweep Y +1 (top to bottom)
+    T = sweep_y(T, G, B, source_mask, hx, hy, 1)
     
-    # 2. Sweep Y +1
-    # Transpose the domain to run the same X sweep
+    # 2. Sweep X +1 (left to right)
+    # Transpose the domain to run a Y sweep along the X axis
     G_T = jnp.stack([G[2].T, G[1].T, G[0].T], axis=0)
     B_T = jnp.stack([B[1].T, B[0].T], axis=0)
-    T = sweep_axis(T.T, G_T, B_T, source_mask.T, hy, hx, 1).T
+    T = sweep_y(T.T, G_T, B_T, source_mask.T, hx=hy, hy=hx, direction=1).T
     
-    # 3. Sweep X -1
-    T = sweep_axis(T, G, B, source_mask, hx, hy, -1)
+    # 3. Sweep Y -1 (bottom to top)
+    T = sweep_y(T, G, B, source_mask, hx, hy, -1)
     
-    # 4. Sweep Y -1
-    T = sweep_axis(T.T, G_T, B_T, source_mask.T, hy, hx, -1).T
+    # 4. Sweep X -1 (right to left)
+    T = sweep_y(T.T, G_T, B_T, source_mask.T, hx=hy, hy=hx, direction=-1).T
     
     return T
 

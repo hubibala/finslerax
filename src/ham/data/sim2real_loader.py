@@ -178,11 +178,16 @@ class Sim2RealFireLoader:
         """
         mask_files = glob.glob(os.path.join(mask_dir, "out*.jpg"))
 
-        def _get_index(f):
-            basename = os.path.basename(f)
-            return int(basename.replace("out", "").replace(".jpg", ""))
-
-        mask_files = sorted(mask_files, key=_get_index)
+        if mask_files:
+            def _get_index(f):
+                basename = os.path.basename(f)
+                return int(basename.replace("out", "").replace(".jpg", ""))
+            mask_files = sorted(mask_files, key=_get_index)
+        else:
+            # Fallback for real fire data
+            mask_files = glob.glob(os.path.join(mask_dir, "*.png"))
+            mask_files = sorted(mask_files)
+            
         masks = []
         for f in mask_files:
             img = Image.open(f).convert("L")

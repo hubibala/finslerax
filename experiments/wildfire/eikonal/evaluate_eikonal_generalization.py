@@ -117,7 +117,7 @@ def compute_all_metrics_gahtan(pred_T: np.ndarray, true_T: np.ndarray, valid_mas
     
     for frac in [0.25, 0.5, 0.75, 1.0]:
         t_threshold = max_time * frac
-        pred_burned = pred_valid <= t_threshold
+        pred_burned = pred_calibrated <= t_threshold
         true_burned = true_valid <= t_threshold
         intersection = (pred_burned & true_burned).sum()
         union = (pred_burned | true_burned).sum()
@@ -131,10 +131,16 @@ def evaluate_fire_gahtan(metric, solver, scenario):
     bound_metric = bind_scenario_to_metric(metric, scenario).precompute_metric_field()
     source = _ignition_to_world(scenario.ignition_pixel, scenario.pixel_spacing_m)
     grid_shape = scenario.arrival_times.shape
-    grid_extent = (0.0, grid_shape[1] * scenario.pixel_spacing_m, 0.0, grid_shape[0] * scenario.pixel_spacing_m)
+    pixel_spacing_m = scenario.pixel_spacing_m
     
-    pred_dense = _predict_arrivals_dense(bound_metric, solver, source, grid_extent, grid_shape)
-    pred_dense = np.array(pred_dense)
+    # So we must pass the solver a grid of shape (cols, rows).
+    solver_grid_shape = (grid_shape[1], grid_shape[0])
+    solver_grid_extent = (0.0, (grid_shape[1] - 1) * pixel_spacing_m, 
+                          0.0, (grid_shape[0] - 1) * pixel_spacing_m)
+        
+    # 2. Predict arrivals for all pixels
+    pred_dense = _predict_arrivals_dense(bound_metric, solver, source, solver_grid_extent, solver_grid_shape)
+    pred_dense = np.array(pred_dense).T
     true_T = np.array(scenario.arrival_times)
     valid_mask = scenario.burned_mask
     
@@ -155,7 +161,7 @@ def main():
     solver = make_solver(cfg)
     loader = Sim2RealFireLoader(data_root)
     
-    scenes = ["0014_00426", "0005", "0003"]
+    scenes = ["0014_00426"]
     test_scenarios = {}
     
     for eval_scene_short in scenes:
@@ -194,7 +200,7 @@ def main():
         models[scene] = []
         ref_scen = test_scenarios[scene][0] if len(test_scenarios[scene]) > 0 else None
         
-        for seed in [0, 1, 2]:
+        for seed in [0, 1]:
             filepath = os.path.join(checkpoints_dir, f"w1_{scene}_seed{seed}.eqx")
             if os.path.exists(filepath):
                 models[scene].append(load_model(filepath, cfg, key, ref_scen))
@@ -281,13 +287,31 @@ def main():
     flat_models = []
     model_labels = []
     for scene in scenes:
-        for seed in [0,1,2]:
+        for seed in [0,1]:
             flat_models.append(models[scene][seed])
             model_labels.append(f"{scene} s{seed}")
             
     n_models = len(flat_models)
     cka_matrix = np.zeros((n_models, n_models))
     
+    @eqx.filter_jit
+    def get_physical_features(m_bound, indices, cols, spacing, origin):
+        def get_one(idx):
+            row = idx // cols
+            col = idx % cols
+            x_world = jnp.array([col * spacing + origin[0], row * spacing + origin[1]], dtype=jnp.float32)
+            G, b = m_bound._get_params(x_world)
+            return jnp.array([G[0,0], G[0,1], G[1,1], b[0], b[1]])
+        return jax.vmap(get_one)(indices)
+
+    cols = ref_scen.elev_raster.shape[1]
+    rows = ref_scen.elev_raster.shape[0]
+    total_pixels = rows * cols
+    idx = np.random.choice(total_pixels, min(2000, total_pixels), replace=False)
+    idx_jnp = jnp.array(idx, dtype=jnp.int32)
+    spacing = float(ref_scen.pixel_spacing_m)
+    origin = jnp.asarray(ref_scen.origin_xy, dtype=jnp.float32)
+
     for i in range(n_models):
         m1 = flat_models[i]
         m1_bound = m1.bind_scene(
@@ -297,11 +321,12 @@ def main():
             canopy=jnp.asarray(ref_scen.canopy_raster, dtype=jnp.float32),
             fuel_codes=jnp.asarray(ref_scen.fuel_code_raster, dtype=jnp.int32),
             weather_vec=jnp.asarray(ref_scen.weather_vec, dtype=jnp.float32),
-            pixel_spacing_m=float(ref_scen.pixel_spacing_m),
-            origin_xy=jnp.asarray(ref_scen.origin_xy, dtype=jnp.float32),
+            pixel_spacing_m=spacing,
+            origin_xy=origin,
         ).precompute_metric_field()
         
-        feat1 = m1_bound.metric_field.reshape(-1, 5)
+        feat1 = get_physical_features(m1_bound, idx_jnp, cols, spacing, origin)
+        f1 = np.array(feat1)
         
         for j in range(i, n_models):
             m2 = flat_models[j]
@@ -312,15 +337,12 @@ def main():
                 canopy=jnp.asarray(ref_scen.canopy_raster, dtype=jnp.float32),
                 fuel_codes=jnp.asarray(ref_scen.fuel_code_raster, dtype=jnp.int32),
                 weather_vec=jnp.asarray(ref_scen.weather_vec, dtype=jnp.float32),
-                pixel_spacing_m=float(ref_scen.pixel_spacing_m),
-                origin_xy=jnp.asarray(ref_scen.origin_xy, dtype=jnp.float32),
+                pixel_spacing_m=spacing,
+                origin_xy=origin,
             ).precompute_metric_field()
             
-            feat2 = m2_bound.metric_field.reshape(-1, 5)
-            
-            idx = np.random.choice(feat1.shape[0], min(2000, feat1.shape[0]), replace=False)
-            f1 = feat1[idx]
-            f2 = feat2[idx]
+            feat2 = get_physical_features(m2_bound, idx_jnp, cols, spacing, origin)
+            f2 = np.array(feat2)
             
             cka = CKA()
             sim = cka.linear_CKA(f1, f2)

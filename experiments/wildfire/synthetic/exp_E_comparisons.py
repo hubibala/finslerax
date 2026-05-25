@@ -61,21 +61,21 @@ class E1_SolverForwardRuntime(Experiment):
             
             # AVBD (Geodesic BVP)
             solver_avbd = AVBDSolver()
-            obs_coords = jnp.array([[N//4, N//4]], dtype=jnp.float32)
+            obs_coords = jnp.array([N//4, N//4], dtype=jnp.float32)
             
             # Warmup AVBD (evaluating 1 path)
             _ = solver_avbd.solve(metric, source_coords[0], obs_coords)
             
             # AVBD solves for specific points. To compare, we compute paths to N points.
             test_points = jnp.array([[i, j] for i in range(1, N, N//10 + 1) for j in range(1, N, N//10 + 1)], dtype=jnp.float32)
-            vmap_solve = jax.jit(jax.vmap(lambda obs: solver_avbd.solve(metric, source_coords[0], jnp.array([obs]))))
+            vmap_solve = jax.jit(jax.vmap(lambda obs: solver_avbd.solve(metric, source_coords[0], obs)))
             
             # Warmup vmap_solve
             _ = vmap_solve(test_points[:1])
             
             start = time.time()
             paths_avbd = vmap_solve(test_points)
-            paths_avbd[0].block_until_ready()
+            paths_avbd.xs.block_until_ready()
             time_avbd = time.time() - start
             
             # Normalize to estimate full field evaluation time for AVBD
@@ -168,27 +168,33 @@ class E3_RegularizationStrategies(Experiment):
         
         results = {}
         
-        for reg_type in ['none', 'tv', 'tikhonov']:
-            print(f"\n  Regularization: {reg_type}")
-            
-            lam = 0.01 if reg_type != 'none' else 0.0
-            
-            opt = MetricRecoveryOptimizer(N, N, solver_type='eikonal', lambda_H=lam, 
-                                          constrain_isotropic=True, reg_type=reg_type)
-            opt.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
-            
-            G_rec, _ = opt.get_G_B()
-            interior = get_interior_mask(N, N, 5, source_mask)
-            
-            g11_true = G_true[0][interior]
-            g11_rec = G_rec[0][interior]
-            rel_err = float(jnp.sqrt(jnp.mean((g11_true - g11_rec)**2)) / jnp.mean(g11_true))
-            
-            results[reg_type] = {'error': rel_err, 'G': np.array(G_rec)}
-            print(f"    Error: {rel_err:.4f}")
-            
+        for solver_name in ['eikonal', 'avbd']:
+            for reg_type in ['none', 'tv', 'tikhonov']:
+                key = f"{solver_name}_{reg_type}"
+                print(f"\n  Solver: {solver_name}, Regularization: {reg_type}")
+                
+                lam = 0.01 if reg_type != 'none' else 0.0
+                
+                opt = MetricRecoveryOptimizer(N, N, solver_type=solver_name, lambda_H=lam, 
+                                              constrain_isotropic=True, reg_type=reg_type)
+                opt.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=0.05, verbose=True)
+                
+                G_rec, B_rec = opt.get_G_B()
+                
+                # Validate learned metric via Eikonal solver
+                H_rec, W_rec = eikonal_to_zermelo(G_rec, B_rec)
+                metric_rec = SyntheticZermeloMetric(H_rec, W_rec)
+                T_pred, _, _ = solver.solve(metric_rec, source_coords, (0, N-1, 0, N-1), (N, N))
+                
+                valid = jnp.isfinite(T_pred)
+                t_err = float(jnp.sqrt(jnp.mean((T_obs[valid] - T_pred[valid])**2)))
+                
+                results[key] = {'error': t_err, 'G': np.array(G_rec)}
+                print(f"    T Error: {t_err:.4f}")
+                
         self.results = results
         self.G_true = G_true
+        self.T_obs = T_obs
         
         return ExperimentResult(
             name=self.name, category=self.category,
@@ -199,18 +205,24 @@ class E3_RegularizationStrategies(Experiment):
         )
     
     def visualize(self, save_path: Optional[str] = None) -> plt.Figure:
-        fig, axes = plt.subplots(1, 4, figsize=(18, 4))
+        fig, axes = plt.subplots(2, 4, figsize=(18, 8))
         
         vmin, vmax = float(self.G_true[0].min()), float(self.G_true[0].max())
         
-        axes[0].imshow(self.G_true[0], origin='upper', cmap='viridis', vmin=vmin, vmax=vmax)
-        axes[0].set_title('True g₁₁')
+        axes[0, 0].imshow(self.G_true[0], origin='upper', cmap='viridis', vmin=vmin, vmax=vmax)
+        axes[0, 0].set_title('True g₁₁')
+        axes[1, 0].axis('off')
         
-        for ax, (name, res) in zip(axes[1:], self.results.items()):
-            ax.imshow(res['G'][0], origin='upper', cmap='viridis', vmin=vmin, vmax=vmax)
-            ax.set_title(f'{name.upper()} (err={res["error"]:.2%})')
+        for i, reg_type in enumerate(['none', 'tv', 'tikhonov']):
+            res_eik = self.results[f"eikonal_{reg_type}"]
+            axes[0, i+1].imshow(res_eik['G'][0], origin='upper', cmap='viridis', vmin=vmin, vmax=vmax)
+            axes[0, i+1].set_title(f'Eikonal {reg_type.upper()} (T err={res_eik["error"]:.3f})')
+            
+            res_avbd = self.results[f"avbd_{reg_type}"]
+            axes[1, i+1].imshow(res_avbd['G'][0], origin='upper', cmap='viridis', vmin=vmin, vmax=vmax)
+            axes[1, i+1].set_title(f'AVBD {reg_type.upper()} (T err={res_avbd["error"]:.3f})')
         
-        fig.suptitle('E3: Regularization Comparison', fontsize=14)
+        fig.suptitle('E3: Regularization Comparison (Dual Solver)', fontsize=14)
         plt.tight_layout()
         if save_path:
             fig.savefig(save_path, bbox_inches='tight', dpi=150)
@@ -255,25 +267,30 @@ class E4_OptimizationMethods(Experiment):
         
         results = {}
         
-        for method in ['sgd', 'adam']:
-            print(f"\n  Method: {method}")
-            
-            lr = 0.05 if method == 'sgd' else 0.01
-            
-            opt = MetricRecoveryOptimizer(N, N, solver_type='eikonal', lambda_H=0.01, 
-                                          constrain_isotropic=True, optimizer_type=method)
-            opt.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=lr, verbose=True)
-            
-            G_rec, _ = opt.get_G_B()
-            interior = get_interior_mask(N, N, 5, source_mask)
-            
-            g11_true = G_true[0][interior]
-            g11_rec = G_rec[0][interior]
-            rel_err = float(jnp.sqrt(jnp.mean((g11_true - g11_rec)**2)) / jnp.mean(g11_true))
-            
-            results[method] = {'error': rel_err, 'losses': opt.history['loss'], 'G': np.array(G_rec)}
-            print(f"    Final error: {rel_err:.4f}")
-            
+        for solver_name in ['eikonal', 'avbd']:
+            for method in ['sgd', 'adam']:
+                key = f"{solver_name}_{method}"
+                print(f"\n  Solver: {solver_name}, Method: {method}")
+                
+                lr = 0.05 if method == 'sgd' else 0.01
+                
+                opt = MetricRecoveryOptimizer(N, N, solver_type=solver_name, lambda_H=0.01, 
+                                              constrain_isotropic=True, optimizer_type=method)
+                opt.fit(source_coords, T_obs, obs_mask, n_iter=self.n_iter, lr=lr, verbose=True)
+                
+                G_rec, B_rec = opt.get_G_B()
+                
+                # Validate learned metric via Eikonal solver
+                H_rec, W_rec = eikonal_to_zermelo(G_rec, B_rec)
+                metric_rec = SyntheticZermeloMetric(H_rec, W_rec)
+                T_pred, _, _ = solver.solve(metric_rec, source_coords, (0, N-1, 0, N-1), (N, N))
+                
+                valid = jnp.isfinite(T_pred)
+                t_err = float(jnp.sqrt(jnp.mean((T_obs[valid] - T_pred[valid])**2)))
+                
+                results[key] = {'error': t_err, 'losses': opt.history['loss'], 'G': np.array(G_rec)}
+                print(f"    Final T error: {t_err:.4f}")
+                
         self.results = results
         
         return ExperimentResult(
@@ -285,10 +302,13 @@ class E4_OptimizationMethods(Experiment):
         )
     
     def visualize(self, save_path: Optional[str] = None) -> plt.Figure:
-        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
         
-        for method, res in self.results.items():
-            axes[0].semilogy(res['losses'], label=f'{method.upper()} (err={res["error"]:.2%})')
+        colors = {'eikonal_sgd': 'blue', 'eikonal_adam': 'cyan', 
+                  'avbd_sgd': 'red', 'avbd_adam': 'orange'}
+        
+        for key, res in self.results.items():
+            axes[0].semilogy(res['losses'], label=f'{key} (err={res["error"]:.3f})', color=colors[key])
         axes[0].set_xlabel('Iteration')
         axes[0].set_ylabel('Loss')
         axes[0].set_title('Convergence')
@@ -297,11 +317,12 @@ class E4_OptimizationMethods(Experiment):
         
         methods = list(self.results.keys())
         errors = [self.results[m]['error'] for m in methods]
-        axes[1].bar(methods, errors, color=['steelblue', 'coral'])
-        axes[1].set_ylabel('Relative Error')
-        axes[1].set_title('Final Error')
+        axes[1].bar(methods, errors, color=[colors[m] for m in methods])
+        axes[1].set_ylabel('T Error')
+        axes[1].set_title('Final Validation Error')
+        plt.xticks(rotation=45)
         
-        fig.suptitle('E4: Optimization Methods', fontsize=14)
+        fig.suptitle('E4: Optimization Methods Comparison (Dual Solver)', fontsize=14)
         plt.tight_layout()
         if save_path:
             fig.savefig(save_path, bbox_inches='tight', dpi=150)
@@ -322,13 +343,14 @@ class E5_Scalability(Experiment):
     def __init__(self, grid_sizes: List[int] = None):
         super().__init__()
         self.grid_sizes = grid_sizes or [20, 40, 80, 160]
+        self.M_sizes = [10, 50, 100, 200, 500]
         
     def run(self) -> ExperimentResult:
-        results = []
+        results_eik = []
+        results_avbd = []
         
+        print("\n  Eikonal Scaling (fixed M=50, varying N):")
         for N in self.grid_sizes:
-            print(f"  Grid: {N}x{N}")
-            
             G_true = jnp.zeros((3, N, N))
             G_true = G_true.at[0].set(1.0)
             G_true = G_true.at[2].set(1.0)
@@ -339,54 +361,83 @@ class E5_Scalability(Experiment):
             
             opt = MetricRecoveryOptimizer(N, N, solver_type='eikonal')
             
-            # Create synthetic target observation
             H_true, W_true = eikonal_to_zermelo(G_true, B_true)
             metric_true = SyntheticZermeloMetric(H_true, W_true)
             solver = EikonalSolver(max_iters=50, tol=1e-5)
             T_obs, _, _ = solver.solve(metric_true, source_coords, (0, N-1, 0, N-1), (N, N))
             
-            obs_mask = create_sparse_observation_mask(N, N, 0.1, source_mask, seed=59)
+            obs_mask = create_sparse_observation_mask(N, N, 50.0/(N*N), source_mask, seed=59)
             
-            # Forward pass timing (already compiled from fit, but we can time one step)
-            # Warmup compilation
-            opt.fit(source_coords, T_obs, obs_mask, n_iter=1, lr=0.01, verbose=True)
-            
+            # Warmup
+            opt.fit(source_coords, T_obs, obs_mask, n_iter=1, lr=0.01, verbose=False)
             start = time.time()
-            opt.fit(source_coords, T_obs, obs_mask, n_iter=5, lr=0.01, verbose=True)
+            opt.fit(source_coords, T_obs, obs_mask, n_iter=5, lr=0.01, verbose=False)
             time_per_step = (time.time() - start) / 5.0
             
-            results.append({
-                'N': N,
-                'time_per_step': time_per_step
-            })
+            results_eik.append({'N': N, 'time_per_step': time_per_step})
+            print(f"    N={N}: {time_per_step:.4f}s / step")
             
-            print(f"    Avg Time/Step (Fwd+Bwd+Update): {time_per_step:.4f}s")
+        print("\n  AVBD Scaling (fixed N=100, varying M):")
+        N = 100
+        G_true = jnp.zeros((3, N, N)).at[0].set(1.0).at[2].set(1.0)
+        B_true = jnp.zeros((2, N, N))
+        source_coords = jnp.array([[N//2, N//2]], dtype=jnp.float32)
+        source_mask = jnp.zeros((N, N), dtype=bool).at[N//2, N//2].set(True)
+        H_true, W_true = eikonal_to_zermelo(G_true, B_true)
+        metric_true = SyntheticZermeloMetric(H_true, W_true)
+        T_obs, _, _ = solver.solve(metric_true, source_coords, (0, N-1, 0, N-1), (N, N))
             
-        self.results = results
+        for M in self.M_sizes:
+            opt = MetricRecoveryOptimizer(N, N, solver_type='avbd')
+            obs_mask = create_sparse_observation_mask(N, N, M/(N*N), source_mask, seed=60)
+            
+            # Warmup
+            opt.fit(source_coords, T_obs, obs_mask, n_iter=1, lr=0.01, verbose=False)
+            start = time.time()
+            opt.fit(source_coords, T_obs, obs_mask, n_iter=5, lr=0.01, verbose=False)
+            time_per_step = (time.time() - start) / 5.0
+            
+            results_avbd.append({'M': M, 'time_per_step': time_per_step})
+            print(f"    M={M}: {time_per_step:.4f}s / step")
+            
+        self.results_eik = results_eik
+        self.results_avbd = results_avbd
         
         return ExperimentResult(
             name=self.name, category=self.category,
             success=True,
-            metrics={'avg_step_time': np.mean([r['time_per_step'] for r in results])},
-            arrays={'grid_sizes': np.array([r['N'] for r in results]),
-                   'time_per_step': np.array([r['time_per_step'] for r in results])},
+            metrics={'eik_base_time': results_eik[0]['time_per_step']},
+            arrays={'N_sizes': np.array(self.grid_sizes), 'M_sizes': np.array(self.M_sizes)},
             metadata={'grid_sizes': self.grid_sizes}
         )
     
     def visualize(self, save_path: Optional[str] = None) -> plt.Figure:
-        fig, ax = plt.subplots(figsize=(8, 5))
+        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
         
-        N = np.array([r['N'] for r in self.results])
-        t_step = np.array([r['time_per_step'] for r in self.results])
+        N = np.array([r['N'] for r in self.results_eik])
+        t_eik = np.array([r['time_per_step'] for r in self.results_eik])
         
-        ax.loglog(N, t_step, 'o-', label='Forward + Backward + Update', markersize=10)
-        ax.loglog(N, t_step[0] * (N/N[0])**2, 'k--', alpha=0.5, label='O(N²)')
-        ax.set_xlabel('Grid size N')
-        ax.set_ylabel('Time (s)')
-        ax.set_title('E5: Scalability Study (JAX)')
-        ax.legend()
-        ax.grid(True, alpha=0.3)
+        axes[0].loglog(N, t_eik, 'o-', label='Eikonal Step Time', markersize=8)
+        axes[0].loglog(N, t_eik[0] * (N/N[0])**2, 'k--', alpha=0.5, label='O(N²)')
+        axes[0].set_xlabel('Grid size N')
+        axes[0].set_ylabel('Time (s)')
+        axes[0].set_title('Eikonal Scaling with Grid Size N (fixed M=50)')
+        axes[0].legend()
+        axes[0].grid(True, alpha=0.3)
         
+        M = np.array([r['M'] for r in self.results_avbd])
+        t_avbd = np.array([r['time_per_step'] for r in self.results_avbd])
+        
+        axes[1].loglog(M, t_avbd, 's-', color='red', label='AVBD Step Time', markersize=8)
+        axes[1].loglog(M, t_avbd[0] * (M/M[0]), 'k--', alpha=0.5, label='O(M)')
+        axes[1].set_xlabel('Number of observations M')
+        axes[1].set_ylabel('Time (s)')
+        axes[1].set_title('AVBD Scaling with Obs M (fixed N=100)')
+        axes[1].legend()
+        axes[1].grid(True, alpha=0.3)
+        
+        fig.suptitle('E5: Scalability Study (Forward + Backward)', fontsize=14)
+        plt.tight_layout()
         if save_path:
             fig.savefig(save_path, bbox_inches='tight', dpi=150)
         return fig

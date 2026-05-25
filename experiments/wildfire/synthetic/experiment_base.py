@@ -255,8 +255,7 @@ class SyntheticZermeloMetric(AsymmetricMetric):
         alpha_sq = v_h_v / lam_safe
         
         # To make it equivalent to Gahtan's G and B:
-        # F(v) = sqrt( v^T G v + (B^T v)^2 ) - B^T v
-        # where B = -HW/lam, G = (H + (HW)(HW)^T/lam)/lam
+        # F(v) = sqrt( v^T G v ) + B^T v
         B = - jnp.dot(H, W) / lam_safe
         HW = jnp.dot(H, W)
         G = (H + jnp.outer(HW, HW) / lam_safe) / lam_safe
@@ -264,7 +263,7 @@ class SyntheticZermeloMetric(AsymmetricMetric):
         v_G_v = jnp.dot(v, jnp.dot(G, v))
         B_dot_v = jnp.dot(B, v)
         
-        return jnp.sqrt(jnp.maximum(v_G_v + B_dot_v**2, 1e-8)) - B_dot_v
+        return jnp.sqrt(jnp.maximum(v_G_v, 1e-8)) + B_dot_v
 
 
 # =============================================================================
@@ -427,7 +426,7 @@ def plot_drift_field(W: np.ndarray, ax: plt.Axes, step: int = 10,
     M, N = W_np.shape[1], W_np.shape[2]
     X, Y = np.meshgrid(np.arange(N), np.arange(M))
     ax.quiver(X[::step, ::step], Y[::step, ::step],
-              W_np[1, ::step, ::step], W_np[0, ::step, ::step], # Assuming W[0] is y-direction, W[1] is x-direction for quiver
+              W_np[1, ::step, ::step], W_np[0, ::step, ::step],
               color=color, alpha=0.7, scale=scale)
 
 

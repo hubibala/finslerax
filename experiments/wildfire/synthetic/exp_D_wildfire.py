@@ -12,6 +12,7 @@ from experiments.wildfire.synthetic.experiment_base import (
 )
 
 from ham.solvers.eikonal import EikonalSolver
+from ham.solvers.avbd import AVBDSolver
 from experiments.wildfire.synthetic.metric_recovery import (
     MetricRecoveryOptimizer, eikonal_to_zermelo
 )
@@ -62,7 +63,20 @@ class D1_TerrainDriven(Experiment):
         solver = EikonalSolver(max_iters=100, tol=1e-4)
         T, _, _ = solver.solve(metric, source_coords, (0, N-1, 0, N-1), (N, N))
         
+        # Calculate AVBD geodesics to specific targets
+        target_coords = jnp.array([
+            [N//4, 3*N//4], [3*N//4, N//4], [3*N//4, 3*N//4]
+        ], dtype=jnp.float32)
+        avbd = AVBDSolver()
+        
+        # JIT compile the batched AVBD solver
+        paths = []
+        for obs in target_coords:
+            traj = avbd.solve(metric, source_coords[0], obs)
+            paths.append(np.array(traj.xs))
+            
         self.T, self.G, self.elevation = T, G, elevation
+        self.paths = paths
         
         return ExperimentResult(
             name=self.name, category=self.category,
@@ -81,11 +95,17 @@ class D1_TerrainDriven(Experiment):
         
         plot_arrival_time(self.T, ax=axes[1], title='Fire Arrival Time')
         
+        # Overlay AVBD paths
+        paths_np = np.array(self.paths)
+        for i in range(paths_np.shape[0]):
+            axes[1].plot(paths_np[i, :, 1], paths_np[i, :, 0], 'w--', linewidth=2, alpha=0.8)
+            axes[1].plot(paths_np[i, -1, 1], paths_np[i, -1, 0], 'w*', markersize=10)
+        
         im = axes[2].imshow(self.G[0], origin='upper', cmap='hot')
         plt.colorbar(im, ax=axes[2], label='g₁₁')
         axes[2].set_title('Metric (from slope)')
         
-        fig.suptitle('D1: Terrain-Driven Fire Spread', fontsize=14)
+        fig.suptitle('D1: Terrain-Driven Fire Spread with AVBD Geodesics', fontsize=14)
         plt.tight_layout()
         if save_path:
             fig.savefig(save_path, bbox_inches='tight', dpi=150)
@@ -132,7 +152,19 @@ class D2_WindDriven(Experiment):
         T, _, _ = solver.solve(metric_wind, source_coords, (0, N-1, 0, N-1), (N, N))
         T_nowind, _, _ = solver.solve(metric_nowind, source_coords, (0, N-1, 0, N-1), (N, N))
         
+        # Calculate AVBD geodesics to specific targets
+        target_coords = jnp.array([
+            [N//4, N//4], [3*N//4, 3*N//4], [N//4, 3*N//4], [3*N//4, N//4]
+        ], dtype=jnp.float32)
+        avbd = AVBDSolver()
+        
+        paths = []
+        for obs in target_coords:
+            traj = avbd.solve(metric_wind, source_coords[0], obs)
+            paths.append(np.array(traj.xs))
+            
         self.T, self.T_nowind, self.B = T, T_nowind, B
+        self.paths = paths
         
         return ExperimentResult(
             name=self.name, category=self.category,
@@ -150,10 +182,16 @@ class D2_WindDriven(Experiment):
         plot_arrival_time(self.T, ax=axes[1], title='With Wind')
         plot_drift_field(self.B, axes[1], step=15, scale=15, color='white')
         
+        # Overlay AVBD paths
+        paths_np = np.array(self.paths)
+        for i in range(paths_np.shape[0]):
+            axes[1].plot(paths_np[i, :, 1], paths_np[i, :, 0], 'w--', linewidth=2, alpha=0.8)
+            axes[1].plot(paths_np[i, -1, 1], paths_np[i, -1, 0], 'w*', markersize=10)
+        
         diff = self.T - self.T_nowind
         plot_error_map(diff, ax=axes[2], title='Difference (wind effect)')
         
-        fig.suptitle('D2: Wind-Driven Fire Spread', fontsize=14)
+        fig.suptitle('D2: Wind-Driven Fire Spread with AVBD Geodesics', fontsize=14)
         plt.tight_layout()
         if save_path:
             fig.savefig(save_path, bbox_inches='tight', dpi=150)
@@ -463,8 +501,8 @@ class D6_ParameterSensitivity(Experiment):
         
         for pert in self.perturbation_levels:
             G_pert = G_true * (1 + pert * jnp.array(np.random.randn(3, N, N)))
-            G_pert = G_pert.at[0].set(jnp.clip(G_pert[0], a_min=0.1))
-            G_pert = G_pert.at[2].set(jnp.clip(G_pert[2], a_min=0.1))
+            G_pert = G_pert.at[0].set(jnp.clip(G_pert[0], 0.1))
+            G_pert = G_pert.at[2].set(jnp.clip(G_pert[2], 0.1))
             
             H_pert, W_pert = eikonal_to_zermelo(G_pert, B_true)
             metric_pert = SyntheticZermeloMetric(H_pert, W_pert)

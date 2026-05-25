@@ -714,7 +714,7 @@ class C7_RegularizationAblation(Experiment):
         
         results_eik, results_avbd = [], []
         for lam in self.lambda_values:
-            print(f"\n  λ = {lam}")
+            print(f"\n  lambda = {lam}")
             interior = get_interior_mask(N, N, 5, source_mask)
 
             opt_eik = MetricRecoveryOptimizer(N, N, solver_type='eikonal', lambda_H=lam, constrain_isotropic=True)

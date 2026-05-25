@@ -289,9 +289,9 @@ class A4_ConstantDrift(Experiment):
         
         T, _, _ = solver.solve(metric, source_coords, grid_extent=(0, N-1, 0, N-1), grid_shape=(N, N))
         
-        # Check asymmetry along the drift axis (i index)
-        T_left = float(T[source_i - 30, source_j])
-        T_right = float(T[source_i + 30, source_j])
+        # Check asymmetry along the drift axis (j index, which corresponds to B[0])
+        T_left = float(T[source_i, source_j - 30])
+        T_right = float(T[source_i, source_j + 30])
         asymmetry = (T_left - T_right) / (T_left + T_right)
         
         print(f"  T at x=-30: {T_left:.4f}, T at x=+30: {T_right:.4f}")
