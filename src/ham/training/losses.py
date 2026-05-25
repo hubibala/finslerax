@@ -633,13 +633,9 @@ class ArrivalTimeLoss(eqx.Module):
             l_pearson = 1.0 - num / denom
 
             # --- Relative MSE component (scale-aware, IoU-aligned) ---
-            # Normalise t_pred to [0,1] by its own max.  stop_gradient on
-            # the normalizer prevents all-to-all gradient coupling: gradients
-            # flow only through the relative shape of the predictions, not
-            # through the scale-correction term itself.
-            t_max = jax.lax.stop_gradient(jnp.maximum(jnp.max(t_pred), 1e-6))
-            t_pred_norm = t_pred / t_max
-            l_relmse = jnp.mean((t_pred_norm - t_obs) ** 2)
+            # Normalise t_pred to [0,1] for Pearson stability but use absolute values
+            # for MSE so the metric correctly learns the target scale.
+            l_relmse = jnp.mean((t_pred - t_obs) ** 2)
 
             loss = (1.0 - alpha) * l_pearson + alpha * l_relmse
         else:
@@ -691,11 +687,8 @@ class DenseArrivalTimeLoss(eqx.Module):
         denom = jnp.sqrt(jnp.sum(dp ** 2) * jnp.sum(do ** 2) + 1e-8)
         l_pearson = 1.0 - num / denom
         
-        # Relative MSE component
-        t_max = jax.lax.stop_gradient(jnp.maximum(jnp.max(jnp.where(mask, t_pred, -jnp.inf)), 1e-6))
-        t_pred_norm = t_pred / t_max
-        
-        sq_err = jnp.where(mask, (t_pred_norm - t_obs) ** 2, 0.0)
+        # Absolute MSE component
+        sq_err = jnp.where(mask, (t_pred - t_obs) ** 2, 0.0)
         l_relmse = jnp.sum(sq_err) / num_valid
         
         loss = (1.0 - alpha) * l_pearson + alpha * l_relmse
@@ -727,4 +720,4 @@ def curriculum_alpha(epoch: int, warmup_epochs: int, ramp_epochs: int) -> float:
     if epoch < warmup_epochs:
         return 0.0
     progress = (epoch - warmup_epochs) / max(ramp_epochs, 1)
-    return float(0.5)
+    return float(min(progress, 1.0))
