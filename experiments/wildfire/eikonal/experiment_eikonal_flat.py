@@ -105,20 +105,17 @@ def get_config(quick: bool = False) -> dict:
         quick=quick,
         hidden_dim=128,
         fuel_emb_dim=4,
-        cnn_channels=64 if quick else 64,
+        cnn_channels=64,
         n_epochs=50 if quick else 100,
-        curriculum_warmup_epochs=5,
-        curriculum_ramp_epochs=15 if quick else 20,
         lr=1e-3,
-        lr_schedule="cosine",
-        early_stopping_patience=20,
-        batch_size_fires=16,
+        lr_schedule="adam",          # fixed lr Adam (matches Gahtan)
+        grad_clip=1.0,               # matches Gahtan grad_clip=1.0
+        early_stopping_patience=20,  # patience in epochs (applied every val_interval epochs)
+        batch_size_fires=32,         # matches Gahtan batch_size=32
         sequential_fires=False,
-        k_train_obs=100 if quick else 500,
-        k_eval_all=True,
         eikonal_iters=50,
-        lambda_tv_G=0.005,
-        lambda_tv_b=0.005,
+        lambda_tv=0.005,             # single TV weight, matches Gahtan lambda_G=lambda_B=0.005
+        k_train_obs=500,             # obs pixels sampled per fire by the loader (for val_pixels field)
         train_ratio=0.70,
         val_ratio=0.15,
         seed=42,
@@ -228,39 +225,34 @@ def _bilinear_interp_point(grid: jax.Array, pt_pixel: jax.Array) -> jax.Array:
             grid[y1, x0] * (1.0 - fx) * fy +
             grid[y1, x1] * fx * fy)
 
-def compute_sparse_eikonal_loss(
-    bound_metric, solver: EikonalSolver, source_world, obs_world, t_obs, alpha,
-    grid_extent: tuple, grid_shape: tuple, pixel_spacing_m: float
+def compute_dense_gahtan_loss(
+    bound_metric, solver: EikonalSolver, source_world, arrival_times_gt,
+    grid_extent: tuple, grid_shape: tuple
 ):
+    """Computes dense MSE loss and TV regularization on the Randers-Finsler metric.
+    
+    This matches the exact loss formulation of Gahtan's baseline:
+    - Data Loss: MSE = 0.5 * mean( (T_pred - T_gt) ** 2 ) over valid pixels.
+    - Regularisation: TV on G and B parameters.
+    """
     t_pred_dense, _, _ = solver.solve(bound_metric, source_world, grid_extent, grid_shape)
     
-    obs_pixels_rowcol = jnp.stack([obs_world[:, 1], obs_world[:, 0]], axis=1) / pixel_spacing_m
-    t_pred = jax.vmap(_bilinear_interp_point, in_axes=(None, 0))(t_pred_dense, obs_pixels_rowcol)
+    # Valid mask (where GT is finite and pred converged)
+    valid_mask = jnp.isfinite(arrival_times_gt) & (t_pred_dense < 1e5)
+    n_obs = jnp.sum(valid_mask)
     
-    mask = jnp.isfinite(t_obs) & jnp.isfinite(t_pred)
-    t_pred_valid = jnp.where(mask, t_pred, 0.0)
-    t_obs_valid = jnp.where(mask, t_obs, 0.0)
-    num_valid = jnp.sum(mask) + 1e-8
-    
-    mu_p = jnp.sum(t_pred_valid) / num_valid
-    mu_o = jnp.sum(t_obs_valid) / num_valid
-    dp = jnp.where(mask, t_pred_valid - mu_p, 0.0)
-    do = jnp.where(mask, t_obs_valid - mu_o, 0.0)
-    num = jnp.sum(dp * do)
-    denom = jnp.sqrt(jnp.sum(dp ** 2) * jnp.sum(do ** 2) + 1e-8)
-    l_pearson = 1.0 - num / denom
-    
-    t_max = jax.lax.stop_gradient(jnp.maximum(jnp.max(jnp.where(mask, t_pred, -jnp.inf)), 1e-6))
-    t_pred_norm = t_pred / t_max
-    sq_err = jnp.where(mask, (t_pred_norm - t_obs) ** 2, 0.0)
-    l_relmse = jnp.sum(sq_err) / num_valid
+    # Compute MSE data loss
+    diff = t_pred_dense - arrival_times_gt
+    sq_err = jnp.where(valid_mask, diff ** 2, 0.0)
+    data_loss = 0.5 * jnp.sum(sq_err) / jnp.maximum(n_obs, 1.0)
     
     # TV regularization over raw metric parameters (to encourage smooth fields)
     metric_field = bound_metric.metric_field
     tv_loss = jnp.mean(jnp.abs(metric_field[1:, :] - metric_field[:-1, :])) + \
               jnp.mean(jnp.abs(metric_field[:, 1:] - metric_field[:, :-1]))
     
-    return (1.0 - alpha) * l_pearson + alpha * l_relmse + 0.005 * tv_loss
+    return data_loss, tv_loss
+
 
 def make_batched_train_step(
     terrain_metric: CovariateConditionedRanders,
@@ -274,51 +266,23 @@ def make_batched_train_step(
     """Return a JIT-compiled training step over a batch of fires.
 
     All B fires are processed inside a single ``filter_jit`` call.
-    By default (``sequential=False``) ``jax.vmap`` maps the per-fire loss over
-    the batch axis — fast but requires O(B × grid) peak memory.  Set
-    ``sequential=True`` to use ``jax.lax.map`` instead, which processes fires
-    one at a time inside the XLA kernel: peak memory drops to O(grid) at the
-    cost of longer compile and wall-clock time.  Use ``sequential=True`` on
-    memory-constrained devices such as a Colab TPU v2-8.
-
-    Args:
-        terrain_metric: Scene-terrain-bound metric (weather not set).
-        loss_fn:        :class:`~ham.training.losses.ArrivalTimeLoss`.
-        optimizer:      Optax optimizer.
-        sequential:     If ``True``, use ``jax.lax.map`` (low memory) instead
-                        of ``jax.vmap`` (high throughput).
-
-    Returns:
-        ``batched_step(metric, opt_state, weather_batch, source_batch,
-                       obs_world_batch, obs_times_batch, alpha) ->
-          (new_metric, new_opt_state, mean_loss)``
-
-        All ``*_batch`` arrays have a leading batch dimension B.
-        ``obs_world_batch`` shape: ``(B, K, 2)``.
-        ``obs_times_batch`` shape: ``(B, K)``.
     """
     @eqx.filter_jit
     def batched_step(metric, opt_state,
                      weather_batch, source_batch,
-                     obs_world_batch, obs_times_batch,
-                     alpha: jax.Array):
+                     arrival_times_gt_batch):
         """Single JIT dispatch: vmap/lax.map over B fires, then one optimizer update."""
         def total_loss(m):
             def fire_loss(args):
-                w, s, ow, ot = args
+                w, s, gt = args
                 bound = m.bind_weather(w).precompute_metric_field()
-                return compute_sparse_eikonal_loss(bound, solver, s, ow, ot, alpha, grid_extent, grid_shape, pixel_spacing_m)
+                data_l, tv_l = compute_dense_gahtan_loss(bound, solver, s, gt, grid_extent, grid_shape)
+                return data_l + 0.005 * tv_l
 
-            stacked = (weather_batch, source_batch, obs_world_batch, obs_times_batch)
+            stacked = (weather_batch, source_batch, arrival_times_gt_batch)
             if sequential:
-                # O(grid) peak memory: fires processed one-at-a-time inside XLA
                 per_fire_losses = jax.lax.map(fire_loss, stacked)
             else:
-                # O(B × grid) peak memory: all fires in parallel via vmap.
-                # jax.checkpoint rematerialises activations during the backward
-                # pass instead of storing them, cutting the activation buffer
-                # from O(B × grid) to O(grid) while keeping full vmap parallelism
-                # at the cost of ~30-40% extra FLOPs.
                 per_fire_losses = jax.vmap(jax.checkpoint(fire_loss))(stacked)
             return jnp.mean(per_fire_losses)
 
@@ -645,39 +609,59 @@ def evaluate_fire(
 
 
 # ===========================================================================
-# Validation pass (uses obs pixels for speed)
+# Validation pass (dense, matching Gahtan metrics)
 # ===========================================================================
 
-def _val_pearson_r(
+def _val_metrics(
     metric: CovariateConditionedRanders,
     solver: EikonalSolver,
     scenario: WildfireScenario,
-    cfg: dict,
-) -> float:
-    """Fast validation: Pearson r over held-out validation pixels."""
-    val_pixels = scenario.val_pixels
-    val_gt = np.asarray(scenario.val_arrival_times, dtype=np.float32)
+) -> dict:
+    """Dense validation: Pearson r AND relative RMSE over all burned pixels.
 
-    if len(val_pixels) == 0:
-        return 0.0
+    Returns a dict with keys ``pearson_r`` and ``relative_rmse``,
+    matching the per-epoch metrics reported by Gahtan's ``per_scene.py``.
+    """
+    # Build full dense GT arrival time raster (H, W), inf where unburned.
+    gt_full = np.asarray(scenario.arrival_times, dtype=np.float32)  # (H, W)
 
     bound_metric = bind_scenario_to_metric(metric, scenario)
     bound_metric = bound_metric.precompute_metric_field()
     source = _ignition_to_world(scenario.ignition_pixel, scenario.pixel_spacing_m)
 
-    grid_shape = scenario.arrival_times.shape
+    grid_shape = gt_full.shape
     grid_extent = (0.0, grid_shape[1] * scenario.pixel_spacing_m, 0.0, grid_shape[0] * scenario.pixel_spacing_m)
 
-    pred = _predict_arrivals_eval(
-        bound_metric,
-        solver,
-        source,
-        val_pixels,
-        scenario.pixel_spacing_m,
-        grid_extent,
-        grid_shape,
-    )
-    return pearson_r(pred, val_gt)
+    pred_dense = np.array(_predict_arrivals_dense(
+        bound_metric, solver, source, grid_extent, grid_shape
+    ), dtype=np.float32)  # (H, W)
+
+    # Valid mask: GT finite and solver converged (< 1e5)
+    valid = np.isfinite(gt_full) & (pred_dense < 1e5)
+    if valid.sum() < 10:
+        return dict(pearson_r=0.0, relative_rmse=float('inf'))
+
+    pred_v = pred_dense[valid]
+    gt_v = gt_full[valid]
+
+    r = pearson_r(pred_v, gt_v)
+
+    # Relative RMSE = RMSE / max_gt  (Gahtan definition)
+    rmse = float(np.sqrt(np.mean((pred_v - gt_v) ** 2)))
+    max_gt = float(gt_v.max())
+    rel_rmse = rmse / max_gt if max_gt > 1e-6 else float('inf')
+
+    return dict(pearson_r=r, relative_rmse=rel_rmse)
+
+
+def _val_pearson_r(
+    metric: CovariateConditionedRanders,
+    solver: EikonalSolver,
+    scenario: WildfireScenario,
+    cfg: dict = None,
+) -> float:
+    """Backwards-compat wrapper — returns Pearson r only."""
+    return _val_metrics(metric, solver, scenario)["pearson_r"]
 
 
 # ===========================================================================
@@ -821,28 +805,22 @@ def train_scene(
     solver = make_solver(cfg)
 
     n_batches_per_epoch = max(1, len(train_scenarios) // cfg["batch_size_fires"])
-    total_steps = cfg["n_epochs"] * n_batches_per_epoch
-    warmup_steps = min(10 * n_batches_per_epoch, max(1, total_steps // 10))
-    lr_schedule = optax.join_schedules([
-        optax.linear_schedule(
-            init_value=1e-5, end_value=cfg["lr"], transition_steps=warmup_steps
-        ),
-        optax.cosine_decay_schedule(
-            init_value=cfg["lr"], decay_steps=max(1, total_steps - warmup_steps)
-        ),
-    ], boundaries=[warmup_steps])
+    # Adam with fixed lr matching Gahtan; grad clip matches Gahtan's grad_clip=1.0
     optimizer = optax.chain(
-        optax.clip_by_global_norm(1.0),  # guard against IFT gradient spikes
-        optax.adam(lr_schedule),
+        optax.clip_by_global_norm(cfg["grad_clip"]),
+        optax.adam(cfg["lr"]),
     )
     # opt_state is (re-)initialised after binding terrain below
 
-    # Training state
-    best_loss: float = np.inf
+    # Training state — early stopping on val correlation (matches Gahtan)
+    best_val_corr: float = -1.0
     best_metric = metric
     patience_counter: int = 0
     train_loss_history: list = []
+    train_data_loss_history: list = []
+    train_reg_loss_history: list = []
     val_r_history: list = []
+    val_rel_rmse_history: list = []
     epoch_runtimes: list = []
 
     rng = np.random.default_rng(seed)
@@ -869,127 +847,137 @@ def train_scene(
         sequential=use_sequential_fires,
     )
 
-    # Pre-stack all training arrays for fast batch slicing
-    # All fires in the scene share the same K (obs per fire) after stratified
-    # sampling, so stacking is safe.
-    K = cfg["k_train_obs"]
-    _obs_world_all = jnp.asarray(np.stack([
-        _pixels_to_world(sc.obs_pixels[:K], sc.pixel_spacing_m)
-        for sc in train_scenarios
-    ], axis=0), dtype=jnp.float32)   # (N_train, K, 2)
-    _obs_times_all = jnp.asarray(np.stack([
-        sc.obs_arrival_times[:K] for sc in train_scenarios
-    ], axis=0), dtype=jnp.float32)   # (N_train, K)
+    # Pre-stack all training arrays for fast batch slicing.
+    # Dense arrival time rasters are padded to (H, W) and stacked.
+    H_grid, W_grid = grid_shape
+
+    def _pad_arrival(sc):
+        at = np.asarray(sc.arrival_times, dtype=np.float32)
+        # Replace inf with a large sentinel so JAX can handle the stacked array.
+        return np.where(np.isfinite(at), at, np.float32(1e5))
+
+    _arrival_all = jnp.asarray(np.stack([
+        _pad_arrival(sc) for sc in train_scenarios
+    ], axis=0), dtype=jnp.float32)   # (N_train, H, W)
     _sources_all = jnp.asarray(np.stack([
         _ignition_to_world(sc.ignition_pixel, sc.pixel_spacing_m)
         for sc in train_scenarios
     ], axis=0), dtype=jnp.float32)   # (N_train, 2)
     _weather_all = jnp.asarray(np.stack([
         sc.weather_vec for sc in train_scenarios
-    ], axis=0), dtype=jnp.float32)   # (N_train, 4)
+    ], axis=0), dtype=jnp.float32)   # (N_train, weather_dim)
 
     B = cfg["batch_size_fires"]  # vmap batch size
-    print(f"  Batched training: B={B} fires/step, "
-          f"{n_batches_per_epoch} steps/epoch, "
-          f"vmap kernel size={B * K} obs-paths")
+    print(f"  Batched training (dense MSE): B={B} fires/step, "
+          f"{n_batches_per_epoch} steps/epoch, grid={H_grid}×{W_grid}")
 
     for epoch in range(cfg["n_epochs"]):
         t_epoch = time.time()
 
-        # Curriculum blend coefficient: 0 = Pearson-r only → 1 = Relative MSE only
-        alpha_val = curriculum_alpha(
-            epoch,
-            warmup_epochs=cfg["curriculum_warmup_epochs"],
-            ramp_epochs=cfg["curriculum_ramp_epochs"],
-        )
-
-        alpha = jnp.asarray(alpha_val, dtype=jnp.float32)
         # Shuffle training fires
         perm = rng.permutation(len(train_scenarios))
         epoch_losses: list = []
+        epoch_data_losses: list = []
+        epoch_reg_losses: list = []
 
         for batch_start in range(0, len(perm) - B + 1, B):
             batch_idx = perm[batch_start : batch_start + B]
 
-            weather_b  = _weather_all[batch_idx]       # (B, 4)
-            source_b   = _sources_all[batch_idx]        # (B, 2)
-            obs_w_b    = _obs_world_all[batch_idx]      # (B, K, 2)
-            obs_t_b    = _obs_times_all[batch_idx]      # (B, K)
+            weather_b  = _weather_all[batch_idx]    # (B, weather_dim)
+            source_b   = _sources_all[batch_idx]    # (B, 2)
+            arrival_b  = _arrival_all[batch_idx]    # (B, H, W)
 
             metric, opt_state, loss_val = batched_step(
-                metric, opt_state, weather_b, source_b, obs_w_b, obs_t_b, alpha
+                metric, opt_state, weather_b, source_b, arrival_b
             )
+            # The batched loss is data + 0.005*tv; approximate decomposition for logging
             epoch_losses.append(float(loss_val))
 
         mean_loss = float(np.mean(epoch_losses)) if epoch_losses else float("nan")
         train_loss_history.append(mean_loss)
         epoch_runtimes.append(time.time() - t_epoch)
 
-        # Validation pass: run every epoch in full mode, every 5 epochs in quick
-        # mode to avoid N_val sequential JIT dispatches dominating runtime.
-        val_interval = 5 if cfg.get("quick", False) else 1
+        # Validation every 5 epochs (quick) or every epoch (full) — matches Gahtan cadence
+        val_interval = 5 if cfg.get("quick", False) else 5
         if (epoch + 1) % val_interval == 0 or epoch == 0:
-            val_rs = [_val_pearson_r(metric, solver, sc, cfg) for sc in val_scenarios]
-            mean_val_r = float(np.mean(val_rs)) if val_rs else 0.0
-        # else: reuse previous val_r so early-stopping logic is unaffected
+            val_results = [_val_metrics(metric, solver, sc) for sc in val_scenarios]
+            mean_val_r    = float(np.mean([r["pearson_r"]    for r in val_results])) if val_results else 0.0
+            mean_val_rmse = float(np.mean([r["relative_rmse"] for r in val_results])) if val_results else float('inf')
+        # else: reuse previous values so early-stopping logic is unaffected
         val_r_history.append(mean_val_r)
+        val_rel_rmse_history.append(mean_val_rmse)
 
+        # Gahtan-equivalent per-epoch print:
+        #   Epoch  X: loss=Y.Y (data=Y.Y, reg=Y.Y), val_corr=Y.YYY, val_rel_rmse=Y.YYY, lr=Y.Ye-Y
+        current_lr = cfg["lr"]  # fixed Adam lr
         print(
             f"  Epoch {epoch+1:3d}/{cfg['n_epochs']}: "
-            f"loss={mean_loss:.5f}  val_r={mean_val_r:.4f}  "
-            f"alpha={alpha:.2f}  "
-            f"time={epoch_runtimes[-1]:.1f}s"
+            f"loss={mean_loss:.1f}  "
+            f"val_corr={mean_val_r:.3f}  val_rel_rmse={mean_val_rmse:.3f}  "
+            f"lr={current_lr:.1e}  time={epoch_runtimes[-1]:.1f}s"
         )
 
-        # Early stopping based on loss
-        if mean_loss < best_loss:
-            best_loss = mean_loss
+        # Early stopping on val correlation (higher = better), matching Gahtan
+        if mean_val_r > best_val_corr:
+            best_val_corr = mean_val_r
             best_metric = metric
             patience_counter = 0
         else:
-            patience_counter += 1
+            patience_counter += val_interval
             if patience_counter >= cfg["early_stopping_patience"]:
-                print(f"  Early stopping at epoch {epoch+1}  (best_loss={best_loss:.4f})")
+                print(f"  Early stopping at epoch {epoch+1}  (best_val_corr={best_val_corr:.4f})")
                 break
 
-    # Test evaluation — parallelise across fires (each is independent; JAX GIL is released)
-    print(f"\n  Evaluating on {len(test_scenarios)} test fires (dense, n_workers={n_workers})...")
-    test_rs: list       = [0.0] * len(test_scenarios)
-    test_sprs: list     = [0.0] * len(test_scenarios)
-    test_ious: list     = [0.0] * len(test_scenarios)
-    test_coverages: list = [0.0] * len(test_scenarios)
-    with ThreadPoolExecutor(max_workers=n_workers) as pool:
-        futs = {pool.submit(evaluate_fire, best_metric, solver, sc, cfg): i
-                for i, sc in enumerate(test_scenarios)}
-        for fut in as_completed(futs):
-            i = futs[fut]
-            res = fut.result()
-            test_rs[i]        = res["pearson_r"]
-            test_sprs[i]      = res["spearman_r"]
-            test_ious[i]      = res["iou_50"]
-            test_coverages[i] = res["eval_coverage"]
+    # Test evaluation — Gahtan-equivalent metrics
+    print(f"\n  Evaluating on {len(test_scenarios)} test fires...")
+    test_metrics_list: list = []
+    for sc in test_scenarios:
+        res = evaluate_fire(best_metric, solver, sc, cfg)
+        test_metrics_list.append(res)
 
-    test_r_mean   = float(np.mean(test_rs))   if test_rs   else 0.0
-    test_r_std    = float(np.std(test_rs))    if test_rs   else 0.0
-    test_spr_mean = float(np.mean(test_sprs)) if test_sprs else 0.0
-    test_iou50    = float(np.mean(test_ious)) if test_ious else 0.0
-    mean_coverage = float(np.mean(test_coverages)) if test_coverages else 0.0
+    def _safe_mean(vals):
+        vals = [v for v in vals if np.isfinite(v)]
+        return float(np.mean(vals)) if vals else 0.0
+    def _safe_std(vals):
+        vals = [v for v in vals if np.isfinite(v)]
+        return float(np.std(vals)) if len(vals) > 1 else 0.0
+
+    test_rs    = [m["pearson_r"]   for m in test_metrics_list]
+    test_sprs  = [m["spearman_r"]  for m in test_metrics_list]
+    test_ious  = [m["iou_50"]      for m in test_metrics_list]
+    test_coverages = [m["eval_coverage"] for m in test_metrics_list]
+
+    # Relative RMSE from evaluate_fire (needs dense pred — re-run _val_metrics on test set)
+    test_rel_rmses = []
+    for sc in test_scenarios:
+        vm = _val_metrics(best_metric, solver, sc)
+        test_rel_rmses.append(vm["relative_rmse"])
+
+    test_r_mean    = _safe_mean(test_rs)
+    test_r_std     = _safe_std(test_rs)
+    test_spr_mean  = _safe_mean(test_sprs)
+    test_iou50     = _safe_mean(test_ious)
+    mean_coverage  = _safe_mean(test_coverages)
+    test_rel_rmse_mean = _safe_mean(test_rel_rmses)
+    test_rel_rmse_std  = _safe_std(test_rel_rmses)
     runtime_per_epoch = float(np.mean(epoch_runtimes)) if epoch_runtimes else 0.0
 
-    print(
-        f"\n  RESULTS  scene={scene_id}  seed={seed}\n"
-        f"    test Pearson r  = {test_r_mean:.4f} ± {test_r_std:.4f}\n"
-        f"    test Spearman r = {test_spr_mean:.4f}   (Gahtan cross-scene target ≈ 0.695)\n"
-        f"    test IoU@50     = {test_iou50:.4f}   (coverage={mean_coverage:.1%})\n"
-        f"    epoch runtime   = {runtime_per_epoch:.1f} s/epoch\n"
-        f"    total time      = {time.time()-t_scene_start:.1f} s"
-    )
+    # Print in Gahtan summary format
+    print(f"\n  {'='*60}")
+    print(f"  Scene {scene_id} Results:")
+    print(f"    Test correlation:   {test_r_mean:.3f} ± {test_r_std:.3f}")
+    print(f"    Test relative RMSE: {test_rel_rmse_mean:.3f} ± {test_rel_rmse_std:.3f}")
+    print(f"    Test IoU@50:        {test_iou50:.3f}")
+    print(f"    Test Spearman r:    {test_spr_mean:.3f}")
+    print(f"    Best val corr:      {best_val_corr:.3f}")
+    print(f"    Epoch runtime:      {runtime_per_epoch:.1f} s/epoch")
+    print(f"    Total time:         {time.time()-t_scene_start:.1f} s")
 
     ckpt_dir = os.path.join(output_dir, "checkpoints")
     os.makedirs(ckpt_dir, exist_ok=True)
     ckpt_path = os.path.join(ckpt_dir, f"w1_{scene_id}_seed{seed}.eqx")
     eqx.tree_serialise_leaves(ckpt_path, best_metric)
-    print(f"    saved checkpoint to = {ckpt_path}")
+    print(f"    Saved checkpoint: {ckpt_path}")
 
     return dict(
         scene_id=scene_id,
@@ -998,10 +986,14 @@ def train_scene(
         test_pearson_r_mean=test_r_mean,
         test_pearson_r_std=test_r_std,
         test_spearman_r_mean=test_spr_mean,
+        test_relative_rmse_mean=test_rel_rmse_mean,
+        test_relative_rmse_std=test_rel_rmse_std,
         test_iou50=test_iou50,
         eval_coverage=mean_coverage,
+        best_val_corr=best_val_corr,
         train_loss_history=train_loss_history,
         val_r_history=val_r_history,
+        val_rel_rmse_history=val_rel_rmse_history,
         runtime_per_epoch_s=runtime_per_epoch,
     )
 

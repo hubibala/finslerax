@@ -727,4 +727,4 @@ def curriculum_alpha(epoch: int, warmup_epochs: int, ramp_epochs: int) -> float:
     if epoch < warmup_epochs:
         return 0.0
     progress = (epoch - warmup_epochs) / max(ramp_epochs, 1)
-    return float(min(progress, 1.0))
+    return float(0.5)
