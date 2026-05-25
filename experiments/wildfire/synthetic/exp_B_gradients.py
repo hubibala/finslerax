@@ -214,9 +214,12 @@ class B2_FD_Anisotropic(Experiment):
                 test_points.append((i, j))
         
         results = {0: [], 1: [], 2: []}
-        for i, j in test_points:
+        pts = jnp.array(test_points)
+        fd_G_all = batched_fd_G(G, B, source_mask, dL_dT, pts, self.eps)
+        
+        for idx, (i, j) in enumerate(test_points):
             for c in range(3):
-                fd = finite_difference_gradient(G, B, source_mask, dL_dT, 'G', (c, i, j), self.eps)
+                fd = float(fd_G_all[c, idx])
                 impl = float(dL_dG[c, i, j])
                 rel_err = abs(fd - impl) / abs(fd) if abs(fd) > 1e-10 else abs(impl)
                 results[c].append({'fd': fd, 'impl': impl, 'rel_err': rel_err})
@@ -305,9 +308,12 @@ class B3_FD_Drift(Experiment):
                 test_points.append((i, j))
         
         results = {0: [], 1: []}
-        for i, j in test_points:
+        pts = jnp.array(test_points)
+        fd_B_all = batched_fd_B(G, B, source_mask, dL_dT, pts, self.eps)
+        
+        for idx, (i, j) in enumerate(test_points):
             for c in range(2):
-                fd = finite_difference_gradient(G, B, source_mask, dL_dT, 'B', (c, i, j), self.eps)
+                fd = float(fd_B_all[c, idx])
                 impl = float(dL_dB[c, i, j])
                 rel_err = abs(fd - impl) / abs(fd) if abs(fd) > 1e-10 else abs(impl)
                 results[c].append({'fd': fd, 'impl': impl, 'rel_err': rel_err})
