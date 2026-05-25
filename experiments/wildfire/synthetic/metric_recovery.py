@@ -265,6 +265,13 @@ class MetricRecoveryOptimizer:
             
         best_loss = float('inf')
         no_improvement_count = 0
+        
+        # Determine when alpha curriculum finishes so we don't early stop during ramp
+        alpha_done_iter = 0
+        if self.solver_type == 'avbd':
+            warmup = int(0.2 * n_iter)
+            ramp = int(0.6 * n_iter)
+            alpha_done_iter = warmup + ramp
             
         for it in pbar:
             self.model, opt_state, loss, loss_data, loss_reg = make_step(self.model, opt_state, it)
@@ -280,11 +287,16 @@ class MetricRecoveryOptimizer:
                 elif it % 50 == 0 or it == n_iter - 1:
                     print(f"  Iter {it}: loss={loss_val:.4f} (data={float(loss_data):.4f}, reg={float(loss_reg):.4f})")
                     
-            if loss_val < best_loss - min_delta:
+            if it < alpha_done_iter:
+                # Reset best loss continuously while curriculum changes loss landscape
                 best_loss = loss_val
                 no_improvement_count = 0
             else:
-                no_improvement_count += 1
+                if loss_val < best_loss - min_delta:
+                    best_loss = loss_val
+                    no_improvement_count = 0
+                else:
+                    no_improvement_count += 1
                 
             if no_improvement_count >= patience:
                 if verbose:

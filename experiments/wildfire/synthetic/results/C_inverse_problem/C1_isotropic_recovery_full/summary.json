@@ -1,0 +1,17 @@
+{
+  "name": "C1_isotropic_recovery_full",
+  "category": "C_inverse_problem",
+  "success": true,
+  "metrics": {
+    "err_eikonal": 0.11175625026226044,
+    "err_avbd": 0.24284961819648743,
+    "final_loss": 3.4734904766082764,
+    "final_data": 3.4731900691986084,
+    "final_reg": 0.0003003339807037264
+  },
+  "metadata": {
+    "N": 40
+  },
+  "runtime_seconds": 831.3054280281067,
+  "timestamp": "2026-05-25T12:07:16.776251"
+}
