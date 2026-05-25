@@ -66,11 +66,14 @@ class E1_SolverForwardRuntime(Experiment):
             # Warmup AVBD (evaluating 1 path)
             _ = solver_avbd.solve(metric, source_coords[0], obs_coords)
             
-            start = time.time()
             # AVBD solves for specific points. To compare, we compute paths to N points.
             test_points = jnp.array([[i, j] for i in range(1, N, N//10 + 1) for j in range(1, N, N//10 + 1)], dtype=jnp.float32)
             vmap_solve = jax.jit(jax.vmap(lambda obs: solver_avbd.solve(metric, source_coords[0], jnp.array([obs]))))
             
+            # Warmup vmap_solve
+            _ = vmap_solve(test_points[:1])
+            
+            start = time.time()
             paths_avbd = vmap_solve(test_points)
             paths_avbd[0].block_until_ready()
             time_avbd = time.time() - start
@@ -345,7 +348,9 @@ class E5_Scalability(Experiment):
             obs_mask = create_sparse_observation_mask(N, N, 0.1, source_mask, seed=59)
             
             # Forward pass timing (already compiled from fit, but we can time one step)
-            # We'll just run .fit for 5 steps and measure average time per step
+            # Warmup compilation
+            opt.fit(source_coords, T_obs, obs_mask, n_iter=1, lr=0.01, verbose=False)
+            
             start = time.time()
             opt.fit(source_coords, T_obs, obs_mask, n_iter=5, lr=0.01, verbose=False)
             time_per_step = (time.time() - start) / 5.0
