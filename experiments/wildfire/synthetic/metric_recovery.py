@@ -168,7 +168,7 @@ class MetricRecoveryOptimizer:
             self.solver = EikonalSolver(max_iters=50, tol=1e-5)
             self.loss_fn = DenseArrivalTimeLoss(weight=1.0)
         elif self.solver_type == 'avbd':
-            self.solver = AVBDSolver(step_size=0.1, iterations=40)
+            self.solver = AVBDSolver(step_size=0.1, iterations=40, parallel=True)
             self.loss_fn = ArrivalTimeLoss(solver=self.solver, solver_steps=20, weight=1.0)
         else:
             raise ValueError(f"Unknown solver_type: {solver_type}")

@@ -1,21 +1,23 @@
 {
   "name": "A1_isotropic_convergence",
   "category": "A_forward_solver",
-  "success": false,
+  "success": true,
   "metrics": {
-    "rate_l2": 0.649017626583789,
-    "rate_linf": 0.6403112346528725,
-    "r2_l2": 0.9992293684128912,
-    "r2_linf": 0.9980233109910847,
-    "max_rel_error": 0.008428432047367096
+    "rate_l2": 0.6989634680064076,
+    "rate_linf": 0.688506224764292,
+    "r2_l2": 0.9982038702459107,
+    "r2_linf": 0.9983174815457646,
+    "max_rel_error": 0.008428426459431648
   },
   "metadata": {
     "grid_sizes": [
       25,
       50,
-      100
+      100,
+      200,
+      400
     ]
   },
-  "runtime_seconds": 7.201061964035034,
-  "timestamp": "2026-05-25T10:41:37.439527"
+  "runtime_seconds": 6.496107339859009,
+  "timestamp": "2026-05-25T11:51:59.282843"
 }

@@ -1,17 +1,18 @@
 {
   "name": "A9_iteration_complexity",
   "category": "A_forward_solver",
-  "success": "False",
+  "success": "True",
   "metrics": {
-    "time_scaling": -0.07260662257609665
+    "time_scaling": 1.5748062300597454
   },
   "metadata": {
     "grid_sizes": [
       50,
       100,
-      200
+      200,
+      400
     ]
   },
-  "runtime_seconds": 3.8352785110473633,
-  "timestamp": "2026-05-25T10:41:47.367749"
+  "runtime_seconds": 1.9483914375305176,
+  "timestamp": "2026-05-25T11:52:07.147945"
 }

@@ -6,8 +6,8 @@
     "speed_in_slow": 2.0
   },
   "metadata": {
-    "N": 100
+    "N": 200
   },
-  "runtime_seconds": 0.39818644523620605,
-  "timestamp": "2026-05-25T10:41:41.496373"
+  "runtime_seconds": 0.06082415580749512,
+  "timestamp": "2026-05-25T11:52:03.476546"
 }

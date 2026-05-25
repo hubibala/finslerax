@@ -1,15 +1,15 @@
 {
   "name": "A4_constant_drift",
   "category": "A_forward_solver",
-  "success": false,
+  "success": true,
   "metrics": {
-    "T_left": 30.0,
-    "T_right": 30.0,
-    "asymmetry": 0.0
+    "T_left": 38.9999885559082,
+    "T_right": 21.000003814697266,
+    "asymmetry": 0.2999997838337941
   },
   "metadata": {
     "drift_magnitude": 0.3
   },
-  "runtime_seconds": 0.42385363578796387,
-  "timestamp": "2026-05-25T10:41:40.215245"
+  "runtime_seconds": 0.05684995651245117,
+  "timestamp": "2026-05-25T11:52:01.723471"
 }

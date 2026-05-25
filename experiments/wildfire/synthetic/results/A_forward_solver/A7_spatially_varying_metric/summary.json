@@ -3,12 +3,12 @@
   "category": "A_forward_solver",
   "success": true,
   "metrics": {
-    "mean_residual": 0.003916515968739986,
-    "max_residual": 0.017216086387634277
+    "mean_residual": 0.0022106394171714783,
+    "max_residual": 0.012839198112487793
   },
   "metadata": {
-    "N": 100
+    "N": 200
   },
-  "runtime_seconds": 0.4760727882385254,
-  "timestamp": "2026-05-25T10:41:42.180280"
+  "runtime_seconds": 0.13559484481811523,
+  "timestamp": "2026-05-25T11:52:03.861824"
 }
