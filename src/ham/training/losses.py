@@ -632,14 +632,13 @@ class ArrivalTimeLoss(eqx.Module):
             denom = jnp.sqrt(jnp.sum(dp ** 2) * jnp.sum(do ** 2) + 1e-8)
             l_pearson = 1.0 - num / denom
 
-            # --- Relative MSE component (scale-aware, IoU-aligned) ---
-            # Normalise t_pred to [0,1] by its own max.  stop_gradient on
-            # the normalizer prevents all-to-all gradient coupling: gradients
-            # flow only through the relative shape of the predictions, not
-            # through the scale-correction term itself.
-            t_max = jax.lax.stop_gradient(jnp.maximum(jnp.max(t_pred), 1e-6))
-            t_pred_norm = t_pred / t_max
-            l_relmse = jnp.mean((t_pred_norm - t_obs) ** 2)
+            # --- Normalised MSE component (scale-aware) ---
+            # We divide the error by max(t_obs) so the MSE loss magnitude is
+            # roughly in [0, 1], balancing numerically with the Pearson loss.
+            # However, because we do NOT normalise t_pred, the loss still
+            # correctly forces t_pred to align with the absolute scale of t_obs.
+            t_obs_max = jnp.maximum(jnp.max(t_obs), 1e-6)
+            l_relmse = jnp.mean(((t_pred - t_obs) / t_obs_max) ** 2)
 
             loss = (1.0 - alpha) * l_pearson + alpha * l_relmse
         else:
@@ -647,6 +646,57 @@ class ArrivalTimeLoss(eqx.Module):
             t_obs_ref = jnp.maximum(jnp.abs(t_obs[0]), 1e-6)
             loss = jnp.mean((t_pred / t_obs_ref - 1.0) ** 2)
 
+        return loss * self.weight
+
+
+class DenseArrivalTimeLoss(eqx.Module):
+    """Dense scale-invariant arrival-time loss for eikonal solver full-field metric recovery.
+    
+    Computes loss between predicted full-field arrival times and target satellite data
+    using relative MSE or Pearson-r.
+    
+    Args:
+        weight: Loss weight multiplier.
+    """
+    weight: float = eqx.field(static=True)
+    name: str = eqx.field(static=True)
+
+    def __init__(self, weight: float = 1.0):
+        self.weight = weight
+        self.name = "DenseArrivalTime"
+
+    def __call__(self, t_pred, t_obs, alpha: float = 0.0):
+        """
+        Args:
+            t_pred: Full field predicted arrival times, shape (nx, ny).
+            t_obs: Full field observed arrival times, shape (nx, ny).
+                   Points where t_obs is invalid can be masked by setting t_obs to nan,
+                   or by using a valid_mask. Here we assume all points are valid or masked.
+        """
+        mask = jnp.isfinite(t_obs) & jnp.isfinite(t_pred)
+        
+        t_pred_valid = jnp.where(mask, t_pred, 0.0)
+        t_obs_valid = jnp.where(mask, t_obs, 0.0)
+        num_valid = jnp.sum(mask) + 1e-8
+        
+        # Pearson-r component
+        mu_p = jnp.sum(t_pred_valid) / num_valid
+        mu_o = jnp.sum(t_obs_valid) / num_valid
+        
+        dp = jnp.where(mask, t_pred_valid - mu_p, 0.0)
+        do = jnp.where(mask, t_obs_valid - mu_o, 0.0)
+        
+        num = jnp.sum(dp * do)
+        denom = jnp.sqrt(jnp.sum(dp ** 2) * jnp.sum(do ** 2) + 1e-8)
+        l_pearson = 1.0 - num / denom
+        
+        # Normalised MSE component
+        t_obs_max = jnp.maximum(jnp.max(jnp.where(mask, t_obs, -jnp.inf)), 1e-6)
+        sq_err = jnp.where(mask, ((t_pred - t_obs) / t_obs_max) ** 2, 0.0)
+        l_relmse = jnp.sum(sq_err) / num_valid
+        
+        loss = (1.0 - alpha) * l_pearson + alpha * l_relmse
+        
         return loss * self.weight
 
 

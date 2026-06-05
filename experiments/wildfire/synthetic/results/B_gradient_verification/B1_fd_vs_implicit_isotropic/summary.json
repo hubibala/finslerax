@@ -1,0 +1,17 @@
+{
+  "name": "B1_fd_vs_implicit_isotropic",
+  "category": "B_gradient_verification",
+  "success": true,
+  "metrics": {
+    "pct_good_G": 100.0,
+    "pct_good_B": 100.0,
+    "mean_err_G": 0.0,
+    "mean_err_B": 0.0
+  },
+  "metadata": {
+    "N": 50,
+    "n_test": 20
+  },
+  "runtime_seconds": 4.380974292755127,
+  "timestamp": "2026-05-25T12:50:21.694421"
+}
