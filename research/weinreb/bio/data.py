@@ -60,6 +60,22 @@ class DataLoader:
                     scv.tl.velocity(self.adata, mode="stochastic")
                 except Exception:
                     pass
+
+            # Project gene-space RNA velocity into PCA latent coordinates.
+            # scvelo writes velocity into a gene-space layer, NOT into
+            # obsm['velocity_pca']; without this linear projection the
+            # downstream Finsler wind signal V is silently all-zeros and the
+            # directional (Randers) metric degenerates to a symmetric
+            # Riemannian one.  The PCA basis is a linear map, so the velocity
+            # transforms by the same loadings: V_pca = V_gene @ PCs.
+            if 'velocity' in self.adata.layers and 'PCs' in self.adata.varm:
+                Vg = np.asarray(self.adata.layers['velocity'])
+                if hasattr(Vg, "toarray"):
+                    Vg = Vg.toarray()
+                # Genes without a velocity fit carry NaN; treat as zero drift.
+                Vg = np.nan_to_num(Vg, nan=0.0, posinf=0.0, neginf=0.0)
+                self.adata.obsm['velocity_pca'] = Vg @ self.adata.varm['PCs']
+
         return self
 
     def extract_lineage_pairs(self) -> jnp.ndarray:

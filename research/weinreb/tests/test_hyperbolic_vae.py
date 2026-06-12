@@ -103,6 +103,35 @@ class TestHyperbolicVAE(unittest.TestCase):
             self.assertAlmostEqual(norm_sq, -1.0, places=5)
             self.assertGreater(z[i, 0], 0.0)
 
+    def test_kl_regularizes_mean(self):
+        """KL must penalize the posterior mean (geodesic distance from origin).
+
+        Regression test for the missing location term: at unit scale the KL of
+        the prior mean (the pole) is ~0 and grows monotonically with the
+        geodesic distance of the mean from the origin.
+        """
+        scale = jnp.array([1.0, 1.0])  # unit scale -> scale term is zero
+        origin = jnp.array([1.0, 0.0, 0.0])
+        near = self.manifold.project(jnp.array([1.0, 0.05, 0.0]))
+        far = self.manifold.project(jnp.array([1.0, 2.0, 0.0]))
+
+        kl_o = float(WrappedNormal(origin, scale, self.manifold).kl_divergence_std_normal())
+        kl_n = float(WrappedNormal(near, scale, self.manifold).kl_divergence_std_normal())
+        kl_f = float(WrappedNormal(far, scale, self.manifold).kl_divergence_std_normal())
+
+        self.assertAlmostEqual(kl_o, 0.0, places=4)
+        self.assertLess(kl_o, kl_n)
+        self.assertLess(kl_n, kl_f)
+
+    def test_kl_reduces_to_euclidean(self):
+        """On flat space the KL must equal the standard diagonal-Gaussian form."""
+        from ham.geometry.manifolds import EuclideanSpace
+        manifold = EuclideanSpace(3)
+        mu = jnp.array([0.3, -0.7, 1.1])
+        kl = float(WrappedNormal(mu, jnp.ones(3), manifold).kl_divergence_std_normal())
+        expected = 0.5 * float(jnp.sum(mu**2))  # 0.5||mu||^2 at unit scale
+        self.assertAlmostEqual(kl, expected, places=5)
+
     def test_vae_forward_pass(self):
         """
         Test the full GeometricVAE forward pass using modular losses.

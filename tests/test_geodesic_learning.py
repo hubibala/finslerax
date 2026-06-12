@@ -374,7 +374,7 @@ class TestGeodesicLearning(unittest.TestCase):
 
         final_loss = float(eval_loss(trained, dataset.starts, dataset.ends))
 
-        print(f"[LossCheck] Initial: {initial_loss:.4f} → Final: {final_loss:.4f}")
+        print(f"[LossCheck] Initial: {initial_loss:.4f} -> Final: {final_loss:.4f}")
         self.assertLess(final_loss, initial_loss * 0.5,
                         "Loss should decrease significantly during training")
 

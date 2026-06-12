@@ -41,13 +41,12 @@ import numpy as np
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from ham.data.wildfire import WildfireScenario
 from ham.geometry.curvature import flag_curvature_sample
-
-# config.update("jax_enable_x64", True)
+from ham.data.wildfire import WildfireScenario
 from ham.geometry.manifolds import EuclideanSpace
 from ham.models.wildfire import CovariateConditionedRanders
 from ham.solvers.avbd import AVBDSolver
+
 
 FIG_DIR = "results/phaseEikonal2/figs"
 
