@@ -11,6 +11,7 @@ import jax.numpy as jnp
 from ham.geometry.mesh_adjacency import MeshAdjacency
 from ham.geometry.metric import AsymmetricMetric
 from ham.solvers.eikonal import (
+    T_INF,
     compute_one_point_update,
     compute_two_point_update,
     sharp_min,
@@ -44,34 +45,45 @@ def _triangle_update(
     return steady_state_min(T0, t0_candidate)
 
 
-def _vertex_update(
-    v_idx: jax.Array,
-    T: jax.Array,
-    adj_data: jax.Array,
+def build_stencil_data(
     vertices: jax.Array,
+    adjacency: jax.Array,
     G_faces: jax.Array,
     B_faces: jax.Array,
-    source_mask: jax.Array,
-) -> jax.Array:
-    """Updates a single vertex by checking all its adjacent triangles."""
-    T = jnp.asarray(T)
-    vertices = jnp.asarray(vertices)
-    G_faces = jnp.asarray(G_faces)
-    B_faces = jnp.asarray(B_faces)
+) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array, jax.Array, jax.Array]:
+    """Precomputes per-(vertex, adjacent-face) stencil data.
 
-    # adj_data: (max_adj, 4) -> (center, v1, v2, face_idx)
-    T0 = T[v_idx]
+    The local 2D basis, donor offsets and projected metric/drift components
+    depend only on the mesh and the per-face tensors — they are invariant
+    across sweeps, so they are hoisted out of the fixed-point loop (XLA
+    cannot move computation out of a ``while_loop`` body).
 
-    def process_face(T0_curr, face_data):
+    This function is plain differentiable JAX: gradients flow through
+    ``g_loc``/``b_loc`` back to ``G_faces``/``B_faces``.
+
+    Args:
+        vertices: Vertex coordinates, shape ``(V, D)``.
+        adjacency: Per-vertex face table ``(V, max_adj, 4)`` with rows
+            ``(center, v1, v2, face_idx)``; padding has ``face_idx = -1``.
+        G_faces: Per-face primal Randers tensors, shape ``(F, D, D)``.
+        B_faces: Per-face primal drift vectors, shape ``(F, D)``.
+
+    Returns:
+        Tuple ``(nbr1, nbr2, valid, m_loc, g_loc, b_loc)`` with shapes
+        ``(V, max_adj)`` (int donor indices), ``(V, max_adj)`` (bool),
+        ``(V, max_adj, 4)`` for ``(m1x, m1y, m2x, m2y)``,
+        ``(V, max_adj, 3)`` for ``(g11, g12, g22)`` and
+        ``(V, max_adj, 2)`` for ``(b1, b2)``.
+    """
+    num_vertices = adjacency.shape[0]
+
+    def per_pair(v_idx, face_data):
         v1_idx = face_data[1]
         v2_idx = face_data[2]
         face_idx = face_data[3]
 
         # Valid face mask
         is_valid = face_idx >= 0
-
-        T1 = jnp.where(is_valid, T[v1_idx], 1e5)
-        T2 = jnp.where(is_valid, T[v2_idx], 1e5)
 
         # Vectors from target (v_idx) to donors (v1, v2)
         target_pt = vertices[v_idx]
@@ -94,7 +106,7 @@ def _vertex_update(
 
         # 2D coordinates of the edges in the (u1, u2) basis
         m1x = norm1
-        m1y = 0.0
+        m1y = jnp.zeros_like(norm1)
         m2x = proj
         m2y = jnp.sum(m2 * u2)
 
@@ -111,14 +123,56 @@ def _vertex_update(
         b1 = jnp.dot(u1, B_face)
         b2 = jnp.dot(u2, B_face)
 
-        # If valid, compute update, else return 1e5
+        return (
+            v1_idx,
+            v2_idx,
+            is_valid,
+            jnp.stack([m1x, m1y, m2x, m2y]),
+            jnp.stack([g11, g12, g22]),
+            jnp.stack([b1, b2]),
+        )
+
+    def per_vertex(v_idx, adj_rows):
+        return jax.vmap(lambda fd: per_pair(v_idx, fd))(adj_rows)
+
+    return jax.vmap(per_vertex)(jnp.arange(num_vertices), adjacency)
+
+
+def _vertex_update(
+    v_idx: jax.Array,
+    T: jax.Array,
+    nbr1: jax.Array,
+    nbr2: jax.Array,
+    valid: jax.Array,
+    m_loc: jax.Array,
+    g_loc: jax.Array,
+    b_loc: jax.Array,
+    source_mask: jax.Array,
+) -> jax.Array:
+    """Updates a single vertex by checking all its adjacent triangles.
+
+    Consumes the precomputed stencil data of :func:`build_stencil_data`;
+    only the donor arrival-time gathers happen per sweep.
+    """
+    T0 = T[v_idx]
+
+    def process_face(T0_curr, xs):
+        v1_idx, v2_idx, is_valid, m, g, b = xs
+
+        T1 = jnp.where(is_valid, T[v1_idx], T_INF)
+        T2 = jnp.where(is_valid, T[v2_idx], T_INF)
+
         T0_new = _triangle_update(
-            T1, T2, T0_curr, g11, g12, g22, b1, b2, m1x, m1y, m2x, m2y
+            T1, T2, T0_curr, g[0], g[1], g[2], b[0], b[1], m[0], m[1], m[2], m[3]
         )
         T0_new = jnp.where(is_valid, T0_new, T0_curr)
         return T0_new, None
 
-    T0_final, _ = jax.lax.scan(process_face, T0, adj_data)
+    T0_final, _ = jax.lax.scan(
+        process_face,
+        T0,
+        (nbr1[v_idx], nbr2[v_idx], valid[v_idx], m_loc[v_idx], g_loc[v_idx], b_loc[v_idx]),
+    )
 
     # Enforce boundary condition: source nodes remain 0
     return jnp.where(source_mask[v_idx], 0.0, T0_final)
@@ -127,10 +181,12 @@ def _vertex_update(
 def sweep_mesh(
     T: jax.Array,
     orderings: jax.Array,
-    adjacency: jax.Array,
-    vertices: jax.Array,
-    G_faces: jax.Array,
-    B_faces: jax.Array,
+    nbr1: jax.Array,
+    nbr2: jax.Array,
+    valid: jax.Array,
+    m_loc: jax.Array,
+    g_loc: jax.Array,
+    b_loc: jax.Array,
     source_mask: jax.Array,
 ) -> jax.Array:
     """Executes all topological sweeps over the mesh."""
@@ -139,13 +195,7 @@ def sweep_mesh(
         def update_step(T_state, v_idx):
             # Update the vertex
             T_new_val = _vertex_update(
-                v_idx,
-                T_state,
-                adjacency[v_idx],
-                vertices,
-                G_faces,
-                B_faces,
-                source_mask,
+                v_idx, T_state, nbr1, nbr2, valid, m_loc, g_loc, b_loc, source_mask
             )
             # Write it back into the state array
             T_state = T_state.at[v_idx].set(T_new_val)
@@ -159,9 +209,15 @@ def sweep_mesh(
 
 
 @jax.custom_vjp
-def _fast_mesh_solve(
-    G_faces, B_faces, source_mask, orderings, adjacency, vertices, max_iters, tol
+def _fast_mesh_solve_local(
+    g_loc, b_loc, source_mask, orderings, nbr1, nbr2, valid, m_loc, max_iters, tol
 ):
+    """Fixed-point fast sweeping solve on precomputed stencil data.
+
+    Differentiable w.r.t. the projected components ``g_loc``/``b_loc`` via the
+    implicit adjoint fixed-point iteration in the custom VJP.
+    """
+
     def cond_fun(val):
         _T, max_diff, iters = val
         return (max_diff > tol) & (iters < max_iters)
@@ -169,32 +225,33 @@ def _fast_mesh_solve(
     def body_fun(val):
         T, _, iters = val
         T_new = sweep_mesh(
-            T, orderings, adjacency, vertices, G_faces, B_faces, source_mask
+            T, orderings, nbr1, nbr2, valid, m_loc, g_loc, b_loc, source_mask
         )
         diff = jnp.abs(T_new - T)
         max_diff = jnp.max(jnp.where(jnp.isnan(diff), 0.0, diff))
         return T_new, max_diff, iters + 1
 
-    source_mask.shape[0]
-    T_init = jnp.where(source_mask, 0.0, 1e5)
-    final_val = jax.lax.while_loop(cond_fun, body_fun, (T_init, jnp.array(1e5), 0))
+    T_init = jnp.where(source_mask, 0.0, T_INF)
+    final_val = jax.lax.while_loop(cond_fun, body_fun, (T_init, jnp.array(T_INF), 0))
     return final_val[0]
 
 
 def _solve_fwd(
-    G_faces, B_faces, source_mask, orderings, adjacency, vertices, max_iters, tol
+    g_loc, b_loc, source_mask, orderings, nbr1, nbr2, valid, m_loc, max_iters, tol
 ):
-    T_final = _fast_mesh_solve(
-        G_faces, B_faces, source_mask, orderings, adjacency, vertices, max_iters, tol
+    T_final = _fast_mesh_solve_local(
+        g_loc, b_loc, source_mask, orderings, nbr1, nbr2, valid, m_loc, max_iters, tol
     )
     return T_final, (
         T_final,
-        G_faces,
-        B_faces,
+        g_loc,
+        b_loc,
         source_mask,
         orderings,
-        adjacency,
-        vertices,
+        nbr1,
+        nbr2,
+        valid,
+        m_loc,
         max_iters,
     )
 
@@ -202,19 +259,23 @@ def _solve_fwd(
 def _solve_bwd(res, g_T):
     (
         T_final,
-        G_faces,
-        B_faces,
+        g_loc,
+        b_loc,
         source_mask,
         orderings,
-        adjacency,
-        vertices,
+        nbr1,
+        nbr2,
+        valid,
+        m_loc,
         max_iters,
     ) = res
 
-    def single_sweep(T_in, G_in, B_in):
-        return sweep_mesh(T_in, orderings, adjacency, vertices, G_in, B_in, source_mask)
+    def single_sweep(T_in, g_in, b_in):
+        return sweep_mesh(
+            T_in, orderings, nbr1, nbr2, valid, m_loc, g_in, b_in, source_mask
+        )
 
-    _, vjp_fn = jax.vjp(single_sweep, T_final, G_faces, B_faces)
+    _, vjp_fn = jax.vjp(single_sweep, T_final, g_loc, b_loc)
 
     def cond_fun(val):
         x_curr, x_prev, iters = val
@@ -230,15 +291,33 @@ def _solve_bwd(res, g_T):
     x_prev = jnp.full_like(g_T, 1e9)
     x_final, _, _ = jax.lax.while_loop(cond_fun, body_fun, (x_init, x_prev, 0))
 
-    _, dG, dB = vjp_fn(x_final)
+    _, dg_loc, db_loc = vjp_fn(x_final)
 
-    dG = jnp.where(jnp.isnan(dG), 0.0, dG)
-    dB = jnp.where(jnp.isnan(dB), 0.0, dB)
+    dg_loc = jnp.where(jnp.isnan(dg_loc), 0.0, dg_loc)
+    db_loc = jnp.where(jnp.isnan(db_loc), 0.0, db_loc)
 
-    return dG, dB, None, None, None, None, None, None
+    return dg_loc, db_loc, None, None, None, None, None, None, None, None
 
 
-_fast_mesh_solve.defvjp(_solve_fwd, _solve_bwd)
+_fast_mesh_solve_local.defvjp(_solve_fwd, _solve_bwd)
+
+
+def _fast_mesh_solve(
+    G_faces, B_faces, source_mask, orderings, adjacency, vertices, max_iters, tol
+):
+    """Solves the mesh Eikonal PDE from per-face tensors.
+
+    Thin differentiable wrapper: projects the per-face ``G``/``B`` onto the
+    per-(vertex, face) stencil data once (outside the fixed-point loop), then
+    runs :func:`_fast_mesh_solve_local`. Gradients w.r.t. ``G_faces`` and
+    ``B_faces`` flow through the projection automatically.
+    """
+    nbr1, nbr2, valid, m_loc, g_loc, b_loc = build_stencil_data(
+        vertices, adjacency, G_faces, B_faces
+    )
+    return _fast_mesh_solve_local(
+        g_loc, b_loc, source_mask, orderings, nbr1, nbr2, valid, m_loc, max_iters, tol
+    )
 
 
 class MeshEikonalSolver(eqx.Module):
@@ -284,7 +363,7 @@ class MeshEikonalSolver(eqx.Module):
             mesh_adj: Precomputed topological adjacency containing the sorted sweep orderings.
             vertices: Coordinates of mesh vertices. Shape ``(V, D)`` where D is 2, 3, or N.
             faces: Triangular connectivity array. Shape ``(F, 3)``.
-            source_coords: Initial fire ignition points. Shape ``(S, D)``.
+            source_coords: Source points (e.g. ignition sites). Shape ``(S, D)``.
 
         Returns:
             T: Global arrival times for each vertex. Shape ``(V,)``.
@@ -295,14 +374,7 @@ class MeshEikonalSolver(eqx.Module):
         """
 
         # 1. Map source points to closest vertices
-        def dist_to_src(v):
-            return jnp.min(jnp.sum((source_coords - v) ** 2, axis=-1))
-
-        jax.vmap(dist_to_src)(vertices)
-
-        # Find the vertices closest to the sources
-        # We assign source_mask = True for the absolute closest vertex to each source
-        # To do this safely for multiple sources, we can iterate over sources
+        # We assign source_mask = True for the closest vertex to each source.
         def get_closest_v(src):
             return jnp.argmin(jnp.sum((vertices - src) ** 2, axis=-1))
 

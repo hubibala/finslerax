@@ -18,6 +18,7 @@ See also: spec/ARCH_SPEC.md § 4.2.
 
 
 import jax.numpy as jnp
+import numpy as np
 
 __all__ = [
     "chain_coloring",
@@ -116,9 +117,9 @@ def mesh_vertex_coloring(
         List of JAX arrays, one per color, each containing the vertex
         indices assigned to that color.
     """
-    # Build adjacency from faces
+    # Build adjacency from faces (host-side; device arrays iterate slowly)
     adjacency: dict[int, set[int]] = {v: set() for v in range(n_vertices)}
-    faces_np = faces if hasattr(faces, "__iter__") else faces.tolist()
+    faces_np = np.asarray(faces)
 
     for face in faces_np:
         f = [int(face[0]), int(face[1]), int(face[2])]

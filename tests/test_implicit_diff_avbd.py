@@ -243,3 +243,130 @@ class TestArrivalTimeLossImplicit:
             f"Unrolled loss {l_u:.4f} vs implicit loss {l_i:.4f} "
             f"differ by {rel*100:.1f}% — solver may not have converged"
         )
+
+
+# ---------------------------------------------------------------------------
+# 5. Constrained and curved-manifold gradient consistency
+#    (regression for the IFT adjoint fixes of 2026-06: constraint Hessian in
+#    the block Jacobian, tangent-projected residual, transposed solve)
+# ---------------------------------------------------------------------------
+
+
+class _DiagMetricFn2(eqx.Module):
+    """diag(1, s) metric field with a learnable y-weight."""
+
+    s: jax.Array
+
+    def __call__(self, x):
+        return jnp.diag(jnp.array([1.0, 0.0]) + jnp.array([0.0, 1.0]) * self.s)
+
+
+class _DiagMetricFn3(eqx.Module):
+    """diag(1, 1, s) ambient metric field with a learnable z-weight."""
+
+    s: jax.Array
+
+    def __call__(self, x):
+        return jnp.diag(
+            jnp.array([1.0, 1.0, 0.0]) + jnp.array([0.0, 0.0, 1.0]) * self.s
+        )
+
+
+class TestConstrainedAndCurvedGradients:
+    """FD agreement beyond the unconstrained-Euclidean case."""
+
+    def test_fd_agreement_constrained(self):
+        """IFT gradient with an active constraint tracks finite differences.
+
+        Tolerance note: the backward pass treats the converged multipliers
+        and stiffness as constants (their theta-sensitivity is dropped), so
+        agreement is approximate; 20% guards the order of magnitude and the
+        sign, which the pre-fix adjoint (missing the penalty Hessian) failed
+        by >100x.
+        """
+        from ham.geometry.zoo import Riemannian
+
+        manifold = EuclideanSpace(2)
+        solver = AVBDSolver(
+            step_size=0.05, iterations=300, energy_tol=1e-12, implicit_diff=True
+        )
+        p0 = jnp.array([0.0, 0.0])
+        p1 = jnp.array([0.8, 0.0])
+        constraints = [lambda x: x[1] - 0.1]
+
+        def path_energy(s):
+            m = Riemannian(manifold, _DiagMetricFn2(s))
+            traj = solver.solve(m, p0, p1, n_steps=6, constraints=constraints)
+            return traj.energy
+
+        s0 = jnp.array(1.3)
+        grad_ift = jax.grad(path_energy)(s0)
+
+        eps = 1e-3
+        fd = (path_energy(s0 + eps) - path_energy(s0 - eps)) / (2 * eps)
+
+        rel_err = jnp.abs(grad_ift - fd) / (jnp.abs(fd) + 1e-8)
+        assert float(rel_err) < 0.20, (
+            f"IFT grad {float(grad_ift):.6f} vs FD {float(fd):.6f} "
+            f"(rel err = {float(rel_err):.4f})"
+        )
+
+    def test_fd_agreement_sphere(self):
+        """IFT gradients on a curved manifold (sphere) track FD."""
+        from ham.geometry import Sphere
+        from ham.geometry.zoo import Riemannian
+
+        sphere = Sphere()
+        p0 = jnp.array([1.0, 0.0, 0.0])
+        p1 = jnp.array([0.0, 1.0, 0.2])
+        p1 = p1 / jnp.linalg.norm(p1)
+
+        solver = AVBDSolver(
+            step_size=0.05, iterations=300, energy_tol=1e-12, implicit_diff=True
+        )
+
+        def path_energy(s):
+            m = Riemannian(sphere, _DiagMetricFn3(s))
+            traj = solver.solve(m, p0, p1, n_steps=6)
+            return traj.energy
+
+        s0 = jnp.array(1.4)
+        grad_ift = jax.grad(path_energy)(s0)
+
+        # eps below ~3e-3 is dominated by float32 noise in the energy
+        # differences; 1e-2 sits in the stable central-difference window.
+        eps = 1e-2
+        fd = (path_energy(s0 + eps) - path_energy(s0 - eps)) / (2 * eps)
+
+        rel_err = jnp.abs(grad_ift - fd) / (jnp.abs(fd) + 1e-8)
+        assert float(rel_err) < 0.10, (
+            f"IFT grad {float(grad_ift):.6f} vs FD {float(fd):.6f} "
+            f"(rel err = {float(rel_err):.4f})"
+        )
+
+    def test_constrained_solve_stays_converged(self):
+        """Long constrained runs must not destabilize after convergence.
+
+        Regression for the ALM schedule fix: unconditional stiffness growth
+        plus per-sweep dual updates used to blow the solve up *after* it had
+        converged (violation 0.8 at 300 iterations vs 1e-4 at 25).
+        """
+        from ham.geometry.zoo import Riemannian
+
+        manifold = EuclideanSpace(2)
+        m = Riemannian(manifold, _DiagMetricFn2(jnp.array(1.3)))
+        p0 = jnp.array([0.0, 0.0])
+        p1 = jnp.array([0.8, 0.0])
+        constraints = [lambda x: x[1] - 0.1]
+
+        solver = AVBDSolver(
+            step_size=0.05, beta=1.2, iterations=300, energy_tol=1e-12,
+            implicit_diff=False,
+        )
+        traj = solver.solve(
+            m, p0, p1, n_steps=6, constraints=constraints, train_mode=True
+        )
+        assert float(traj.constraint_violation) < 5e-4, (
+            f"violation {float(traj.constraint_violation):.2e} after 300 sweeps"
+        )
+        assert float(traj.energy) < 0.1

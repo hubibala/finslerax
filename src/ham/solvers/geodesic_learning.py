@@ -16,6 +16,11 @@ class GeodesicLearningSolver(eqx.Module):
 
     Finds the energy-minimizing path by optimizing the entire discrete path
     simultaneously using the optax.adam optimizer.
+
+    Note:
+        Adam moment estimates are accumulated across iterations without
+        parallel transport between the (moving) tangent spaces; this is the
+        common practical simplification rather than full Riemannian Adam.
     """
 
     step_size: float = eqx.field(static=True, default=1e-2)
@@ -31,6 +36,11 @@ class GeodesicLearningSolver(eqx.Module):
         train_mode: bool = True,
         key: Optional[jax.Array] = None,
     ) -> Trajectory:
+        if constraints is not None and len(constraints) > 0:
+            raise NotImplementedError(
+                "GeodesicLearningSolver does not support constraints; "
+                "use AVBDSolver for constrained geodesics."
+            )
 
         t = jnp.linspace(0, 1, n_steps + 1)[:, None]
         linear_path = (1 - t) * p_start + t * p_end
@@ -68,14 +78,12 @@ class GeodesicLearningSolver(eqx.Module):
 
             return (new_inner, new_opt_s), loss
 
-        if train_mode:
-            (final_inner, _), _ = jax.lax.scan(
-                step_fn, (init_inner, opt_state), None, length=self.iterations
-            )
-        else:
-            (final_inner, _), _ = jax.lax.scan(
-                step_fn, (init_inner, opt_state), None, length=self.iterations
-            )
+        # train_mode is accepted for interface parity with AVBDSolver; both
+        # modes run the same fixed-length scan (no early stopping here).
+        del train_mode
+        (final_inner, _), _ = jax.lax.scan(
+            step_fn, (init_inner, opt_state), None, length=self.iterations
+        )
 
         full_xs = jnp.concatenate(
             [p_start[None, :], final_inner, p_end[None, :]], axis=0

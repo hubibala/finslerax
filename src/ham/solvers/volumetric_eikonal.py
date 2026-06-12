@@ -3,178 +3,276 @@ Volumetric Cartesian Eikonal Solver for 3D grids.
 
 This module provides the :class:`VolumetricEikonalSolver` which evaluates the
 Eikonal PDE over dense three-dimensional Cartesian grids using the Fast Sweeping
-Method. It implements the full 3D anisotropic Godunov numerical Hamiltonian and
-alternates sweeps across all 6 cardinal directions to guarantee global causality
-for arbitrary spatial metrics and wind drifts.
-"""
+Method. It implements the full 3D anisotropic Godunov numerical Hamiltonian for
+the dual Randers (Zermelo) arrival-time PDE
 
+    (grad T - B)^T Q (grad T - B) = 1,    T(source) = 0,
+
+where ``Q = lam * (H^{-1} - W W^T)`` is the *dual* (inverse) metric tensor and
+``B = -H W / lam`` the dual drift, both derived from the Zermelo navigation
+data ``(H, W, lam)``. The stencil enumerates all signed upwind donor
+configurations per axis, which is required for correctness whenever the drift
+``B`` or the off-diagonal couplings ``Q_ij`` are non-zero.
+
+The solver alternates Gauss-Seidel sweeps across all 6 cardinal directions to
+guarantee global causality for arbitrary spatial metrics and wind drifts.
+"""
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 
 from ham.geometry.metric import FinslerMetric
+from ham.solvers.eikonal import T_INF, safe_sqrt, sharp_min, steady_state_min
 
-
-def sharp_min(a, b):
-    return jnp.where(a <= b, a, b)
-
-
-def steady_state_min(t_old, t_new):
-    return jnp.where(jnp.isnan(t_new), t_old, sharp_min(t_old, t_new))
+# =============================================================================
+# SIGNED GODUNOV STENCIL UPDATES
+# =============================================================================
+#
+# Convention: each donor sits at a signed displacement ``s_i = sigma_i * h_i``
+# along axis i from the update target, and ``v_i = 1 / s_i = sigma_i / h_i``.
+# The upwind gradient approximation is ``xi_i ~ (T_i - t) / s_i``, so with
+# ``c_i = T_i * v_i - B_i`` the PDE residual becomes the quadratic
+#
+#     sum_ij Q_ij (t v_i - c_i)(t v_j - c_j) = 1,
+#
+# whose *larger* root is the causal candidate. Tracking the sign of ``v_i``
+# (instead of folding +/- neighbors with a min) is what keeps the drift terms
+# and the cross-couplings Q_ij consistent.
 
 
 def compute_three_point_update(
-    T1, T2, T3, Q11, Q22, Q33, Q12, Q13, Q23, B1, B2, B3, dx, dy, dz, eps=1e-12
+    T1, T2, T3, Q11, Q22, Q33, Q12, Q13, Q23, B1, B2, B3, v1, v2, v3, eps=1e-12
 ):
-    vx, vy, vz = 1.0 / dx, 1.0 / dy, 1.0 / dz
-    c1 = T1 * vx + B1
-    c2 = T2 * vy + B2
-    c3 = T3 * vz + B3
+    """3-point Godunov update; ``v_i`` are the signed inverse offsets."""
+    c1 = T1 * v1 - B1
+    c2 = T2 * v2 - B2
+    c3 = T3 * v3 - B3
 
     a = (
-        Q11 * vx**2
-        + Q22 * vy**2
-        + Q33 * vz**2
-        + 2 * Q12 * vx * vy
-        + 2 * Q13 * vx * vz
-        + 2 * Q23 * vy * vz
+        Q11 * v1**2
+        + Q22 * v2**2
+        + Q33 * v3**2
+        + 2 * (Q12 * v1 * v2 + Q13 * v1 * v3 + Q23 * v2 * v3)
     )
 
-    b_half = -(
-        vx * (Q11 * c1 + Q12 * c2 + Q13 * c3)
-        + vy * (Q12 * c1 + Q22 * c2 + Q23 * c3)
-        + vz * (Q13 * c1 + Q23 * c2 + Q33 * c3)
+    Qc1 = Q11 * c1 + Q12 * c2 + Q13 * c3
+    Qc2 = Q12 * c1 + Q22 * c2 + Q23 * c3
+    Qc3 = Q13 * c1 + Q23 * c2 + Q33 * c3
+
+    b_half = -(v1 * Qc1 + v2 * Qc2 + v3 * Qc3)
+    cc = c1 * Qc1 + c2 * Qc2 + c3 * Qc3 - 1.0
+
+    desc = b_half**2 - a * cc
+    T_cand = (-b_half + safe_sqrt(desc)) / jnp.maximum(a, eps)
+
+    # Upwind (simplex) condition: every donor must carry nonnegative weight
+    # d t / d T_k = v_k [Q (t v - c)]_k / (v^T Q (t v - c)) >= 0.
+    r1 = Q11 * (T_cand * v1 - c1) + Q12 * (T_cand * v2 - c2) + Q13 * (T_cand * v3 - c3)
+    r2 = Q12 * (T_cand * v1 - c1) + Q22 * (T_cand * v2 - c2) + Q23 * (T_cand * v3 - c3)
+    r3 = Q13 * (T_cand * v1 - c1) + Q23 * (T_cand * v2 - c2) + Q33 * (T_cand * v3 - c3)
+    upwind = (v1 * r1 >= 0) & (v2 * r2 >= 0) & (v3 * r3 >= 0)
+
+    causal = (
+        (desc >= 0)
+        & (T_cand >= T1)
+        & (T_cand >= T2)
+        & (T_cand >= T3)
+        & upwind
     )
-
-    c = (
-        c1 * (Q11 * c1 + Q12 * c2 + Q13 * c3)
-        + c2 * (Q12 * c1 + Q22 * c2 + Q23 * c3)
-        + c3 * (Q13 * c1 + Q23 * c2 + Q33 * c3)
-    ) - 1.0
-
-    desc = b_half**2 - a * c
-    valid = desc >= 0
-
-    T_cand = (-b_half + jnp.sqrt(jnp.maximum(desc, 0.0))) / jnp.maximum(a, eps)
-    causal = valid & (T_cand >= T1) & (T_cand >= T2) & (T_cand >= T3)
-    return jnp.where(causal, T_cand, 1e5)
+    return jnp.where(causal, T_cand, T_INF)
 
 
-def compute_two_point_update_3d(T1, T2, Q11, Q22, Q12, B1, B2, dx, dy, eps=1e-12):
-    vx, vy = 1.0 / dx, 1.0 / dy
-    c1 = T1 * vx + B1
-    c2 = T2 * vy + B2
+def compute_two_point_update_3d(T1, T2, Q11, Q22, Q12, B1, B2, v1, v2, eps=1e-12):
+    """2-point Godunov update on the (i, j) coordinate plane; signed ``v``."""
+    c1 = T1 * v1 - B1
+    c2 = T2 * v2 - B2
 
-    a = Q11 * vx**2 + Q22 * vy**2 + 2 * Q12 * vx * vy
-    b_half = -(vx * (Q11 * c1 + Q12 * c2) + vy * (Q12 * c1 + Q22 * c2))
-    c = (c1 * (Q11 * c1 + Q12 * c2) + c2 * (Q12 * c1 + Q22 * c2)) - 1.0
+    a = Q11 * v1**2 + Q22 * v2**2 + 2 * Q12 * v1 * v2
 
-    desc = b_half**2 - a * c
-    valid = desc >= 0
+    Qc1 = Q11 * c1 + Q12 * c2
+    Qc2 = Q12 * c1 + Q22 * c2
 
-    T_cand = (-b_half + jnp.sqrt(jnp.maximum(desc, 0.0))) / jnp.maximum(a, eps)
-    causal = valid & (T_cand >= T1) & (T_cand >= T2)
-    return jnp.where(causal, T_cand, 1e5)
+    b_half = -(v1 * Qc1 + v2 * Qc2)
+    cc = c1 * Qc1 + c2 * Qc2 - 1.0
 
+    desc = b_half**2 - a * cc
+    T_cand = (-b_half + safe_sqrt(desc)) / jnp.maximum(a, eps)
 
-def compute_one_point_update_3d(T1, Q11, B1, dx, eps=1e-12):
-    vx = 1.0 / dx
-    c1 = T1 * vx + B1
+    r1 = Q11 * (T_cand * v1 - c1) + Q12 * (T_cand * v2 - c2)
+    r2 = Q12 * (T_cand * v1 - c1) + Q22 * (T_cand * v2 - c2)
+    upwind = (v1 * r1 >= 0) & (v2 * r2 >= 0)
 
-    a = Q11 * vx**2
-    b_half = -(vx * Q11 * c1)
-    c = (c1 * Q11 * c1) - 1.0
-
-    desc = b_half**2 - a * c
-    valid = desc >= 0
-
-    T_cand = (-b_half + jnp.sqrt(jnp.maximum(desc, 0.0))) / jnp.maximum(a, eps)
-    causal = valid & (T_cand >= T1)
-    return jnp.where(causal, T_cand, 1e5)
+    causal = (desc >= 0) & (T_cand >= T1) & (T_cand >= T2) & upwind
+    return jnp.where(causal, T_cand, T_INF)
 
 
-def voxel_update(T0, Tx, Ty, Tz, Q11, Q22, Q33, Q12, Q13, Q23, B1, B2, B3, hx, hy, hz):
-    t3 = compute_three_point_update(
-        Tx, Ty, Tz, Q11, Q22, Q33, Q12, Q13, Q23, B1, B2, B3, hx, hy, hz
-    )
+def compute_one_point_update_3d(T1, Q11, B1, v1, eps=1e-12):
+    """1-point (axis-aligned) update; signed ``v1``."""
+    c1 = T1 * v1 - B1
 
-    t2_xy = compute_two_point_update_3d(Tx, Ty, Q11, Q22, Q12, B1, B2, hx, hy)
-    t2_xz = compute_two_point_update_3d(Tx, Tz, Q11, Q33, Q13, B1, B3, hx, hz)
-    t2_yz = compute_two_point_update_3d(Ty, Tz, Q22, Q33, Q23, B2, B3, hy, hz)
-    t2 = sharp_min(t2_xy, sharp_min(t2_xz, t2_yz))
+    a = Q11 * v1**2
+    b_half = -(v1 * Q11 * c1)
+    cc = c1 * Q11 * c1 - 1.0
 
-    t1_x = compute_one_point_update_3d(Tx, Q11, B1, hx)
-    t1_y = compute_one_point_update_3d(Ty, Q22, B2, hy)
-    t1_z = compute_one_point_update_3d(Tz, Q33, B3, hz)
-    t1 = sharp_min(t1_x, sharp_min(t1_y, t1_z))
+    desc = b_half**2 - a * cc
+    T_cand = (-b_half + safe_sqrt(desc)) / jnp.maximum(a, eps)
 
-    t_cand = sharp_min(t3, sharp_min(t2, t1))
+    causal = (desc >= 0) & (T_cand >= T1)
+    return jnp.where(causal, T_cand, T_INF)
+
+
+def voxel_update(
+    T0,
+    Tx_m,
+    Tx_p,
+    Ty_m,
+    Ty_p,
+    Tz,
+    Q11,
+    Q22,
+    Q33,
+    Q12,
+    Q13,
+    Q23,
+    B1,
+    B2,
+    B3,
+    hx,
+    hy,
+    hz,
+    sz,
+):
+    """Godunov update of one z-plane.
+
+    ``Tx_m/Tx_p`` (``Ty_m/Ty_p``) are the in-plane donor values on the -/+
+    side along x (y); ``Tz`` is the donor plane along the sweep axis whose
+    side is fixed by ``sz`` (+1 or -1). All signed donor configurations are
+    enumerated and the minimum causal candidate is taken.
+    """
+    vz = sz / hz
+
+    t_cand = compute_one_point_update_3d(Tz, Q33, B3, vz)
+
+    for sx, Tx in ((-1.0, Tx_m), (1.0, Tx_p)):
+        vx = sx / hx
+        t_cand = sharp_min(t_cand, compute_one_point_update_3d(Tx, Q11, B1, vx))
+        t_cand = sharp_min(
+            t_cand,
+            compute_two_point_update_3d(Tx, Tz, Q11, Q33, Q13, B1, B3, vx, vz),
+        )
+        for sy, Ty in ((-1.0, Ty_m), (1.0, Ty_p)):
+            vy = sy / hy
+            t_cand = sharp_min(
+                t_cand,
+                compute_two_point_update_3d(Tx, Ty, Q11, Q22, Q12, B1, B2, vx, vy),
+            )
+            t_cand = sharp_min(
+                t_cand,
+                compute_three_point_update(
+                    Tx, Ty, Tz, Q11, Q22, Q33, Q12, Q13, Q23, B1, B2, B3, vx, vy, vz
+                ),
+            )
+
+    for sy, Ty in ((-1.0, Ty_m), (1.0, Ty_p)):
+        vy = sy / hy
+        t_cand = sharp_min(t_cand, compute_one_point_update_3d(Ty, Q22, B2, vy))
+        t_cand = sharp_min(
+            t_cand,
+            compute_two_point_update_3d(Ty, Tz, Q22, Q33, Q23, B2, B3, vy, vz),
+        )
+
     return steady_state_min(T0, t_cand)
+
+
+# =============================================================================
+# SWEEPING PASSES
+# =============================================================================
 
 
 def sweep_axis_z(T, Q, B, source_mask, hx, hy, hz, direction):
     """
-    Sweeps along Z axis. T is (nx, ny, nz). Q is (6, nx, ny, nz). B is (3, nx, ny, nz).
+    Sweeps along the z axis (axis 2). T is (nx, ny, nz). Q is (6, nx, ny, nz).
+    B is (3, nx, ny, nz). Q layout: (Q11, Q22, Q33, Q12, Q13, Q23).
     """
-    _nx, _ny, _nz = T.shape
+    # lax.scan unstacks along the leading axis, so move z to the front.
+    Tm = jnp.moveaxis(T, 2, 0)  # (nz, nx, ny)
+    Qm = jnp.moveaxis(Q, 3, 1)  # (6, nz, nx, ny)
+    Bm = jnp.moveaxis(B, 3, 1)  # (3, nz, nx, ny)
+    Sm = jnp.moveaxis(source_mask, 2, 0)
+
+    # The donor plane sits -direction steps along z.
+    sz = -float(direction)
 
     def scan_fn(T_prev, xs):
         T_curr, q11, q22, q33, q12, q13, q23, b1, b2, b3, s_mask = xs
 
-        # We need neighbors in X and Y from T_curr (or T_prev depending on causality)
-        # But to avoid complex intra-plane dependencies in JAX, we do Jacobi inside the plane
-        # by using the old T_curr for X and Y neighbors, and T_prev for Z.
-        # This matches the vectorized parallel sweeps.
-
-        T_x_p = jnp.pad(T_curr[1:, :], ((0, 1), (0, 0)), constant_values=1e5)
-        T_x_m = jnp.pad(T_curr[:-1, :], ((1, 0), (0, 0)), constant_values=1e5)
-        T_y_p = jnp.pad(T_curr[:, 1:], ((0, 0), (0, 1)), constant_values=1e5)
-        T_y_m = jnp.pad(T_curr[:, :-1], ((0, 0), (1, 0)), constant_values=1e5)
-
-        T_x = sharp_min(T_x_p, T_x_m)
-        T_y = sharp_min(T_y_p, T_y_m)
-        T_z = T_prev
+        # In-plane donors use the not-yet-updated plane values (Jacobi within
+        # the plane); the scanned-axis donor is the freshly updated previous
+        # plane (Gauss-Seidel across planes).
+        T_x_m = jnp.pad(T_curr[:-1, :], ((1, 0), (0, 0)), constant_values=T_INF)
+        T_x_p = jnp.pad(T_curr[1:, :], ((0, 1), (0, 0)), constant_values=T_INF)
+        T_y_m = jnp.pad(T_curr[:, :-1], ((0, 0), (1, 0)), constant_values=T_INF)
+        T_y_p = jnp.pad(T_curr[:, 1:], ((0, 0), (0, 1)), constant_values=T_INF)
 
         T_new = voxel_update(
-            T_curr, T_x, T_y, T_z, q11, q22, q33, q12, q13, q23, b1, b2, b3, hx, hy, hz
+            T_curr,
+            T_x_m,
+            T_x_p,
+            T_y_m,
+            T_y_p,
+            T_prev,
+            q11,
+            q22,
+            q33,
+            q12,
+            q13,
+            q23,
+            b1,
+            b2,
+            b3,
+            hx,
+            hy,
+            hz,
+            sz,
         )
         T_out = jnp.where(s_mask, 0.0, T_new)
         return T_out, T_out
 
-    # Q layout: Q11, Q22, Q33, Q12, Q13, Q23
     if direction == 1:
         xs = (
-            T[:, :, 1:],
-            Q[0, :, :, 1:],
-            Q[1, :, :, 1:],
-            Q[2, :, :, 1:],
-            Q[3, :, :, 1:],
-            Q[4, :, :, 1:],
-            Q[5, :, :, 1:],
-            B[0, :, :, 1:],
-            B[1, :, :, 1:],
-            B[2, :, :, 1:],
-            source_mask[:, :, 1:],
+            Tm[1:],
+            Qm[0, 1:],
+            Qm[1, 1:],
+            Qm[2, 1:],
+            Qm[3, 1:],
+            Qm[4, 1:],
+            Qm[5, 1:],
+            Bm[0, 1:],
+            Bm[1, 1:],
+            Bm[2, 1:],
+            Sm[1:],
         )
-        _, T_out = jax.lax.scan(scan_fn, T[:, :, 0], xs)
-        return jnp.concatenate([T[:, :, 0:1], T_out], axis=2)
+        _, T_out = jax.lax.scan(scan_fn, Tm[0], xs)
+        Tm_new = jnp.concatenate([Tm[0:1], T_out], axis=0)
     else:
         xs = (
-            T[:, :, :-1],
-            Q[0, :, :, :-1],
-            Q[1, :, :, :-1],
-            Q[2, :, :, :-1],
-            Q[3, :, :, :-1],
-            Q[4, :, :, :-1],
-            Q[5, :, :, :-1],
-            B[0, :, :, :-1],
-            B[1, :, :, :-1],
-            B[2, :, :, :-1],
-            source_mask[:, :, :-1],
+            Tm[:-1],
+            Qm[0, :-1],
+            Qm[1, :-1],
+            Qm[2, :-1],
+            Qm[3, :-1],
+            Qm[4, :-1],
+            Qm[5, :-1],
+            Bm[0, :-1],
+            Bm[1, :-1],
+            Bm[2, :-1],
+            Sm[:-1],
         )
-        _, T_out = jax.lax.scan(scan_fn, T[:, :, -1], xs, reverse=True)
-        return jnp.concatenate([T_out, T[:, :, -1:]], axis=2)
+        _, T_out = jax.lax.scan(scan_fn, Tm[-1], xs, reverse=True)
+        Tm_new = jnp.concatenate([T_out, Tm[-1:]], axis=0)
+
+    return jnp.moveaxis(Tm_new, 0, 2)
 
 
 def sweep_all(T, Q, B, source_mask, hx, hy, hz):
@@ -182,7 +280,7 @@ def sweep_all(T, Q, B, source_mask, hx, hy, hz):
     T = sweep_axis_z(T, Q, B, source_mask, hx, hy, hz, 1)
     T = sweep_axis_z(T, Q, B, source_mask, hx, hy, hz, -1)
 
-    # Sweep Y (Transpose Y and Z)
+    # Sweep Y (swap the roles of Y and Z)
     T_y = jnp.transpose(T, (0, 2, 1))
     Q_y = jnp.stack([Q[0], Q[2], Q[1], Q[4], Q[3], Q[5]], axis=0).transpose(
         (0, 1, 3, 2)
@@ -194,7 +292,7 @@ def sweep_all(T, Q, B, source_mask, hx, hy, hz):
     T_y = sweep_axis_z(T_y, Q_y, B_y, S_y, hx, hz, hy, -1)
     T = jnp.transpose(T_y, (0, 2, 1))
 
-    # Sweep X (Transpose X and Z)
+    # Sweep X (swap the roles of X and Z)
     T_x = jnp.transpose(T, (2, 1, 0))
     Q_x = jnp.stack([Q[2], Q[1], Q[0], Q[5], Q[4], Q[3]], axis=0).transpose(
         (0, 3, 2, 1)
@@ -207,6 +305,11 @@ def sweep_all(T, Q, B, source_mask, hx, hy, hz):
     T = jnp.transpose(T_x, (2, 1, 0))
 
     return T
+
+
+# =============================================================================
+# SOLVER & IMPLICIT GRADIENTS
+# =============================================================================
 
 
 @jax.custom_vjp
@@ -222,8 +325,8 @@ def _volumetric_solve(Q, B, source_mask, hx, hy, hz, max_iters, tol):
         max_diff = jnp.max(jnp.where(jnp.isnan(diff), 0.0, diff))
         return T_new, max_diff, iters + 1
 
-    T_init = jnp.where(source_mask, 0.0, 1e5)
-    final_val = jax.lax.while_loop(cond_fun, body_fun, (T_init, jnp.array(1e5), 0))
+    T_init = jnp.where(source_mask, 0.0, T_INF)
+    final_val = jax.lax.while_loop(cond_fun, body_fun, (T_init, jnp.array(T_INF), 0))
     return final_val[0]
 
 
@@ -271,9 +374,11 @@ class VolumetricEikonalSolver(eqx.Module):
 
     This solver extends the classical Fast Sweeping Method to 3D volumes. It
     propagates wavefronts by alternating Gauss-Seidel sweeps across the $X, Y$,
-    and $Z$ axes (6 directional sweeps in total). The underlying numerical scheme
-    is the fully anisotropic 3D Godunov stencil, which correctly evaluates the
-    full $3 \\times 3$ Zermelo spatial metric tensor $G(x)$ and 3D drift $W(x)$.
+    and $Z$ axes (6 directional sweeps in total). The underlying numerical
+    scheme is the fully anisotropic 3D Godunov stencil with signed upwind
+    donor enumeration, evaluating the dual tensor
+    $Q(x) = \\lambda (H^{-1} - W W^T)$ and dual drift $B(x) = -H W / \\lambda$
+    derived from the Zermelo navigation data.
 
     The backward pass is implemented implicitly via `jax.custom_vjp` to
     provide $O(1)$ memory gradients with respect to the continuous metric.
@@ -312,14 +417,15 @@ class VolumetricEikonalSolver(eqx.Module):
         Returns:
             A tuple ``(T, Q, B)``:
             - **T**: Steady-state arrival time volume. Shape ``(nx, ny, nz)``.
-            - **Q**: Extracted $3 \\times 3$ inverse metric tensor field (flattened symmetric).
-            - **B**: Extracted 3D drift vector field.
+            - **Q**: Dual (inverse) metric tensor field ``lam * (H^-1 - W W^T)``,
+              flattened symmetric layout ``(6, nx, ny, nz)``.
+            - **B**: Dual drift vector field ``-H W / lam``. Shape ``(3, nx, ny, nz)``.
         """
         xmin, xmax, ymin, ymax, zmin, zmax = grid_extent
         nx, ny, nz = grid_shape
-        hx = (xmax - xmin) / (nx - 1)
-        hy = (ymax - ymin) / (ny - 1)
-        hz = (zmax - zmin) / (nz - 1)
+        hx = (xmax - xmin) / max(1, nx - 1)
+        hy = (ymax - ymin) / max(1, ny - 1)
+        hz = (zmax - zmin) / max(1, nz - 1)
 
         x_coords = jnp.linspace(xmin, xmax, nx)
         y_coords = jnp.linspace(ymin, ymax, ny)
@@ -332,13 +438,13 @@ class VolumetricEikonalSolver(eqx.Module):
 
         H, W, lam = jax.vmap(jax.vmap(jax.vmap(get_zermelo)))(pts)
 
-        # B = - H * W / lam
-        # H is (..., 3, 3), W is (..., 3)
+        # Dual drift: B = -H W / lam
         B_vec = -jnp.einsum("...ij,...j->...i", H, W) / lam[..., None]
 
-        HW = jnp.einsum("...ij,...j->...i", H, W)
-        HW_outer = jnp.einsum("...i,...j->...ij", HW, HW)
-        Q_mat = (H + HW_outer / lam[..., None, None]) / lam[..., None, None]
+        # Dual (inverse) metric: Q = lam * (H^-1 - W W^T)
+        H_inv = jnp.linalg.inv(H)
+        WW = jnp.einsum("...i,...j->...ij", W, W)
+        Q_mat = lam[..., None, None] * (H_inv - WW)
 
         B_comp = jnp.stack([B_vec[..., 0], B_vec[..., 1], B_vec[..., 2]], axis=0)
         Q_comp = jnp.stack(

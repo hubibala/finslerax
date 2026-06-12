@@ -2,7 +2,7 @@
 
 Implements the Finslerian exponential map by integrating the Spray ODE
 ddot{x}^i + 2G^i(x, dot{x}) = 0 (see spec/MATH_SPEC.md § 2.1) via a standard
-Runge-Kutta 4 scheme with manifold projection.
+Runge-Kutta 4 scheme with manifold projection after each step.
 
 Classes:
     GeodesicState: Integration state (position, velocity).
@@ -11,6 +11,7 @@ Classes:
 See also: spec/ARCH_SPEC.md § 4.4.
 """
 
+import math
 from typing import NamedTuple
 
 import equinox as eqx
@@ -41,8 +42,11 @@ class ExponentialMap(eqx.Module):
     Solves the Spray ODE for geodesics:
         ddot{x}^i + 2G^i(x, dot{x}) = 0
     where G^i are the geodesic spray coefficients (see spec/MATH_SPEC.md § 2.1).
-    Integration is performed via RK4 with manifold projection at each stage
-    to counteract numerical drift and maintain 4th-order accuracy.
+    Integration is performed via RK4; after each composite step the position
+    is projected back to the manifold (and the velocity to its tangent space)
+    to counteract numerical drift. Note this projected-RK4 scheme controls
+    constraint drift to step-size accuracy but is not a 4th-order structure-
+    preserving integrator on the embedded manifold.
 
     Attributes:
         max_steps: Number of integration steps per trajectory.
@@ -74,7 +78,7 @@ class ExponentialMap(eqx.Module):
             self.max_steps = max_steps
         else:
             # Derive steps from step_size assuming t_max=1.0
-            self.max_steps = int(jnp.ceil(1.0 / step_size))
+            self.max_steps = math.ceil(1.0 / step_size)
 
         self.max_velocity = max_velocity
         self.max_accel = max_accel
@@ -85,10 +89,12 @@ class ExponentialMap(eqx.Module):
         """Standard Runge-Kutta 4 integration step for the Spray ODE.
 
         Numerical safeguards:
-            - Velocity is clipped to max_velocity to prevent ODE blow-up.
+            - Velocity is clipped to max_velocity inside the dynamics (the
+              stored state velocity itself is not clipped).
             - Acceleration is clipped to max_accel.
-            - Position is projected to the manifold at each RK4 stage to
-              maintain integration fidelity on curved submanifolds.
+            - After the composite step, the position is projected back to the
+              manifold and the velocity to its tangent space to counteract
+              numerical drift on curved submanifolds.
 
         Args:
             metric: The FinslerMetric defining the geometry.
