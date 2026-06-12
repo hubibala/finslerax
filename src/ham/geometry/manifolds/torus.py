@@ -1,16 +1,18 @@
 """Torus manifold implementation."""
+
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
 
 from ham.geometry.manifold import Manifold
 from ham.utils import NORM_EPS, TAYLOR_EPS, safe_norm
 
+
 class Torus(Manifold):
     """The 2-torus T^2 embedded in R^3.
 
-    Parametrized by major radius R (distance from center to tube center) and 
-    minor radius r (tube radius): 
+    Parametrized by major radius R (distance from center to tube center) and
+    minor radius r (tube radius):
     (x, y, z) = ((R + r cos v) cos u, (R + r cos v) sin u, r sin v).
 
     Args:
@@ -18,9 +20,10 @@ class Torus(Manifold):
         minor_r: Minor radius r. Default: 1.0.
 
     Note:
-        `log_map` uses an approximate angular parameterization. No exact closed-form 
+        `log_map` uses an approximate angular parameterization. No exact closed-form
         Riemannian inverse exponential map is implemented.
     """
+
     R: float = eqx.field(static=True)
     r: float = eqx.field(static=True)
 
@@ -99,12 +102,17 @@ class Torus(Manifold):
         dv = (vy - vx + jnp.pi) % (2 * jnp.pi) - jnp.pi
         sin_u, cos_u = jnp.sin(ux), jnp.cos(ux)
         sin_v, cos_v = jnp.sin(vx), jnp.cos(vx)
-        e_u = jnp.stack([-(self.R + self.r * cos_v) * sin_u, 
-                          (self.R + self.r * cos_v) * cos_u, 
-                          jnp.zeros_like(ux)], axis=-1)
-        e_v = jnp.stack([-self.r * sin_v * cos_u, 
-                         -self.r * sin_v * sin_u, 
-                          self.r * cos_v], axis=-1)
+        e_u = jnp.stack(
+            [
+                -(self.R + self.r * cos_v) * sin_u,
+                (self.R + self.r * cos_v) * cos_u,
+                jnp.zeros_like(ux),
+            ],
+            axis=-1,
+        )
+        e_v = jnp.stack(
+            [-self.r * sin_v * cos_u, -self.r * sin_v * sin_u, self.r * cos_v], axis=-1
+        )
         return du[..., None] * e_u + dv[..., None] * e_v
 
     def parallel_transport(self, x: jax.Array, y: jax.Array, v: jax.Array) -> jax.Array:

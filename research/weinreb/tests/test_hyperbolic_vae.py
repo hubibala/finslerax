@@ -1,20 +1,24 @@
 import unittest
+
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
-from jax import config
+from bio.vae import GeometricVAE, WrappedNormal
 
 # Enable 64-bit precision for robust gradient checks
 # config.update("jax_enable_x64", True)
-
 from ham.geometry import Hyperboloid, Riemannian
 from ham.geometry.metric import AsymmetricMetric
-from bio.vae import GeometricVAE, WrappedNormal
-from ham.training.losses import ReconstructionLoss, KLDivergenceLoss, ZermeloAlignmentLoss
+from ham.training.losses import (
+    KLDivergenceLoss,
+    ReconstructionLoss,
+    ZermeloAlignmentLoss,
+)
+
 
 class MockMetric(Riemannian, AsymmetricMetric):
     """Simple Euclidean-like metric for testing VAE integration."""
-    
+
     # We override __init__ to make it easier to instantiate in tests
     def __init__(self, manifold):
         # Pass a dummy network to the parent class to satisfy Equinox requirements
@@ -22,21 +26,22 @@ class MockMetric(Riemannian, AsymmetricMetric):
         super().__init__(manifold, dummy_net)
 
     def inner_product(self, x, u, v=None, w=None):
-        if v is None: v = u
+        if v is None:
+            v = u
         # Simple Euclidean dot product in ambient space for testing
         return jnp.sum(u * v, axis=-1)
-    
+
     def spray(self, x, v):
         # Zero spray = Geodesics are straight lines (in chart/ambient)
         return jnp.zeros_like(v)
-        
+
     def zermelo_data(self, x):
         # Mock wind field: returns (H=Identity, W=zeros, lambda=1.0)
         dim = x.shape[-1]
         return jnp.eye(dim), jnp.zeros(dim), 1.0
 
+
 class TestHyperbolicVAE(unittest.TestCase):
-    
     def setUp(self):
         self.key = jax.random.PRNGKey(42)
         self.dim = 2
@@ -49,16 +54,16 @@ class TestHyperbolicVAE(unittest.TestCase):
         Check if gradients propagate through the exponential map.
         L = sum(Exp_x(v)^2)
         """
-        x = jnp.array([1.0, 0.0, 0.0]) # Origin
-        v = jnp.array([0.0, 0.5, 0.5]) # Tangent vector
-        
+        x = jnp.array([1.0, 0.0, 0.0])  # Origin
+        v = jnp.array([0.0, 0.5, 0.5])  # Tangent vector
+
         def loss_fn(v_in):
             z = self.manifold.exp_map(x, v_in)
             return jnp.sum(z**2)
-            
+
         grad_fn = jax.grad(loss_fn)
         grads = grad_fn(v)
-        
+
         self.assertTrue(jnp.all(jnp.isfinite(grads)))
         self.assertFalse(jnp.all(grads == 0))
 
@@ -67,18 +72,18 @@ class TestHyperbolicVAE(unittest.TestCase):
         Check if gradients propagate through parallel transport.
         """
         x = jnp.array([1.0, 0.0, 0.0])
-        y_raw = jnp.array([2.0, 1.0, 0.0]) # Random point
+        y_raw = jnp.array([2.0, 1.0, 0.0])  # Random point
         y = self.manifold.project(y_raw)
         v = jnp.array([0.0, 0.5, 0.5])
-        
+
         def loss_fn(y_in):
             # Transport v from x to y_in
             v_trans = self.manifold.parallel_transport(x, y_in, v)
             return jnp.sum(v_trans**2)
-            
+
         grad_fn = jax.grad(loss_fn)
         grads = grad_fn(y)
-        
+
         self.assertTrue(jnp.all(jnp.isfinite(grads)))
 
     def test_wrapped_normal_sampling(self):
@@ -86,12 +91,12 @@ class TestHyperbolicVAE(unittest.TestCase):
         Verify that WrappedNormal samples lie on the manifold.
         """
         mean = jnp.array([1.0, 0.0, 0.0])
-        scale = jnp.array([0.5, 0.5]) # intrinsic dim = 2
+        scale = jnp.array([0.5, 0.5])  # intrinsic dim = 2
         dist = WrappedNormal(mean, scale, self.manifold)
-        
+
         # Sample
         z = dist.sample(self.key, (10,))
-        
+
         # Check manifold constraints
         for i in range(10):
             norm_sq = self.manifold._minkowski_dot(z[i], z[i])
@@ -105,21 +110,21 @@ class TestHyperbolicVAE(unittest.TestCase):
         data_dim = 5
         latent_dim = 2
         vae = GeometricVAE(data_dim, latent_dim, self.metric, self.key)
-        
+
         x = jax.random.normal(self.key, (data_dim,))
         v_rna = jax.random.normal(self.key, (data_dim,))
-        
+
         # Test individual loss components (replaces monolithic loss_fn)
         recon_loss = ReconstructionLoss(weight=1.0)
         kl_loss = KLDivergenceLoss(weight=1e-4)
         align_loss = ZermeloAlignmentLoss(weight=0.1)
-        
+
         batch = (x, v_rna)
-        
+
         r = recon_loss(vae, batch, self.key)
         k = kl_loss(vae, batch, self.key)
         a = align_loss(vae, batch, self.key)
-        
+
         self.assertTrue(jnp.isfinite(r))
         self.assertTrue(jnp.isfinite(k))
         self.assertTrue(jnp.isfinite(a))
@@ -131,25 +136,24 @@ class TestHyperbolicVAE(unittest.TestCase):
         data_dim = 5
         latent_dim = 2
         vae = GeometricVAE(data_dim, latent_dim, self.metric, self.key)
-        
+
         x = jax.random.normal(self.key, (data_dim,))
         v_rna = jax.random.normal(self.key, (data_dim,))
         batch = (x, v_rna)
-        
+
         recon_loss = ReconstructionLoss(weight=1.0)
-        
+
         def loss_wrapper(model):
             return recon_loss(model, batch, self.key)
-            
+
         grads = eqx.filter_grad(loss_wrapper)(vae)
-        
+
         # Check that at least some gradients are non-zero and finite
         is_finite = jax.tree_util.tree_reduce(
-            lambda x, y: x and jnp.all(jnp.isfinite(y)), 
-            grads, 
-            True
+            lambda x, y: x and jnp.all(jnp.isfinite(y)), grads, True
         )
         self.assertTrue(is_finite)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

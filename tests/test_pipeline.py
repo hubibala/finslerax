@@ -9,14 +9,14 @@ Covers:
   - Gradient flow through unfrozen parameters only
 """
 import unittest
+
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
 import optax
 
-from ham.training.pipeline import TrainingPhase, HAMPipeline
 from ham.training.losses import LossComponent
-
+from ham.training.pipeline import HAMPipeline, TrainingPhase
 
 # ---------------------------------------------------------------------------
 # Fixtures

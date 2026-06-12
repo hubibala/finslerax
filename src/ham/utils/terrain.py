@@ -9,29 +9,30 @@ Mathematical reference: spec/MATH_SPEC.md §§ 1–2, 5.
 Architecture reference: spec/ARCH_SPEC.md § 5.
 """
 
+
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
-from typing import Tuple
 
 from ham.geometry.mesh import TriangularMesh
-from ham.geometry.metric import FinslerMetric, AsymmetricMetric
-from ham.models.wildfire import project_spd, project_b_norm
-from ham.utils.math import GRAD_EPS
+from ham.geometry.metric import AsymmetricMetric
+from ham.models.wildfire import project_b_norm, project_spd
+from ham.utils.math import GRAD_EPS, safe_norm
 
 __all__ = [
+    "CovariateMeshRanders",
+    "compute_face_normals",
+    "compute_face_slopes_aspects",
     "dem_to_mesh",
     "interpolate_covariates_to_vertices",
     "pixel_to_world_3d",
-    "compute_face_normals",
-    "compute_face_slopes_aspects",
-    "CovariateMeshRanders",
 ]
 
 
 # ---------------------------------------------------------------------------
 # DEM → mesh
 # ---------------------------------------------------------------------------
+
 
 def dem_to_mesh(
     elevation_raster: jnp.ndarray,
@@ -64,7 +65,7 @@ def dem_to_mesh(
     # Build vertex grid: k = i*W + j → (x, y, z)
     i_idx = jnp.arange(H)
     j_idx = jnp.arange(W)
-    jj, ii = jnp.meshgrid(j_idx, i_idx)   # (H, W) each
+    jj, ii = jnp.meshgrid(j_idx, i_idx)  # (H, W) each
     xs = jj * pixel_spacing_m
     ys = ii * pixel_spacing_m
     zs = elevation_raster
@@ -73,7 +74,7 @@ def dem_to_mesh(
     # Build faces
     i_f = jnp.arange(H - 1)
     j_f = jnp.arange(W - 1)
-    jj_f, ii_f = jnp.meshgrid(j_f, i_f)   # (H-1, W-1) each
+    jj_f, ii_f = jnp.meshgrid(j_f, i_f)  # (H-1, W-1) each
     ii_f = ii_f.ravel()
     jj_f = jj_f.ravel()
 
@@ -82,8 +83,8 @@ def dem_to_mesh(
     k01 = ii_f * W + jj_f + 1
     k11 = (ii_f + 1) * W + jj_f + 1
 
-    tri_lo = jnp.stack([k00, k10, k01], axis=-1)   # lower-left
-    tri_hi = jnp.stack([k11, k01, k10], axis=-1)   # upper-right
+    tri_lo = jnp.stack([k00, k10, k01], axis=-1)  # lower-left
+    tri_hi = jnp.stack([k11, k01, k10], axis=-1)  # upper-right
     faces = jnp.concatenate([tri_lo, tri_hi], axis=0).astype(jnp.int32)
 
     return TriangularMesh(vertices.astype(jnp.float32), faces)
@@ -92,6 +93,7 @@ def dem_to_mesh(
 # ---------------------------------------------------------------------------
 # Covariate interpolation
 # ---------------------------------------------------------------------------
+
 
 def interpolate_covariates_to_vertices(
     mesh: TriangularMesh,
@@ -119,19 +121,20 @@ def interpolate_covariates_to_vertices(
     """
     if mesh.vertices.shape[0] != H * W:
         raise ValueError(
-            f"Mesh has {mesh.vertices.shape[0]} vertices but H*W={H*W}. "
+            f"Mesh has {mesh.vertices.shape[0]} vertices but H*W={H * W}. "
             "Ensure the mesh was created from the same raster dimensions."
         )
     channels = []
-    for name, raster in raster_dict.items():
+    for _name, raster in raster_dict.items():
         flat = jnp.asarray(raster).reshape(H * W)
         channels.append(flat)
-    return jnp.stack(channels, axis=-1)   # (H*W, num_covariates)
+    return jnp.stack(channels, axis=-1)  # (H*W, num_covariates)
 
 
 # ---------------------------------------------------------------------------
 # Coordinate helpers
 # ---------------------------------------------------------------------------
+
 
 def pixel_to_world_3d(
     i_row,
@@ -157,6 +160,7 @@ def pixel_to_world_3d(
 # Face normals / slope / aspect
 # ---------------------------------------------------------------------------
 
+
 def compute_face_normals(mesh: TriangularMesh) -> jnp.ndarray:
     """Compute per-face unit outward normals.
 
@@ -169,19 +173,19 @@ def compute_face_normals(mesh: TriangularMesh) -> jnp.ndarray:
     Reference:
         spec/MATH_SPEC.md § 5 (terrain geometry).
     """
-    v0 = mesh.triangles[:, 0, :]   # (F, 3)
+    v0 = mesh.triangles[:, 0, :]  # (F, 3)
     v1 = mesh.triangles[:, 1, :]
     v2 = mesh.triangles[:, 2, :]
     e1 = v1 - v0
     e2 = v2 - v0
-    normals = jnp.cross(e1, e2)    # (F, 3)
-    norms = jnp.sqrt(jnp.sum(normals ** 2, axis=-1, keepdims=True) + 1e-12)
+    normals = jnp.cross(e1, e2)  # (F, 3)
+    norms = safe_norm(normals, axis=-1, keepdims=True)
     return normals / norms
 
 
 def compute_face_slopes_aspects(
     mesh: TriangularMesh,
-) -> Tuple[jnp.ndarray, jnp.ndarray]:
+) -> tuple[jnp.ndarray, jnp.ndarray]:
     """Compute slope and aspect angles for each mesh face.
 
     * slope  = arccos(|n_z|) — deviation from horizontal (radians),
@@ -204,7 +208,7 @@ def compute_face_slopes_aspects(
     # upward-oriented normal.
     n_z_abs = jnp.abs(normals[:, 2])
     # Flip sign of x/y components when n_z < 0 to get the upward normal.
-    sign = jnp.sign(normals[:, 2] + 1e-12)   # +1 if n_z >= 0, else -1
+    sign = jnp.sign(normals[:, 2] + 1e-12)  # +1 if n_z >= 0, else -1
     slopes = jnp.arccos(jnp.clip(n_z_abs, 0.0, 1.0))
     aspects = jnp.arctan2(sign * normals[:, 1], sign * normals[:, 0])
     return slopes, aspects
@@ -213,6 +217,7 @@ def compute_face_slopes_aspects(
 # ---------------------------------------------------------------------------
 # CovariateMeshRanders
 # ---------------------------------------------------------------------------
+
 
 class CovariateMeshRanders(AsymmetricMetric):
     """Randers metric on a TriangularMesh with per-face covariate conditioning.
@@ -256,8 +261,8 @@ class CovariateMeshRanders(AsymmetricMetric):
     global_mlp: eqx.nn.MLP
     local_mlp: eqx.nn.MLP
     fuel_embedding: jax.Array
-    face_covariates: jax.Array    # (F, 5+fuel_emb_dim) precomputed
-    weather_vec: jax.Array        # (4,)
+    face_covariates: jax.Array  # (F, 5+fuel_emb_dim) precomputed
+    weather_vec: jax.Array  # (4,)
     eps_G: float = eqx.field(static=True)
     max_G: float = eqx.field(static=True)
     max_b_norm: float = eqx.field(static=True)
@@ -341,9 +346,7 @@ class CovariateMeshRanders(AsymmetricMetric):
             ),
         )
 
-    def _get_face_params(
-        self, face_idx: jax.Array
-    ) -> Tuple[jax.Array, jax.Array]:
+    def _get_face_params(self, face_idx: jax.Array) -> tuple[jax.Array, jax.Array]:
         """Compute the Randers parameters (G_f, b_f) for a single face.
 
         Args:
@@ -353,7 +356,9 @@ class CovariateMeshRanders(AsymmetricMetric):
             Tuple ``(G_f, b_f)`` where ``G_f`` is (2, 2) SPD and ``b_f``
             is (2,).
         """
-        local_feat = jax.lax.stop_gradient(self.face_covariates)[face_idx]   # (5+fuel_emb_dim,)
+        local_feat = jax.lax.stop_gradient(self.face_covariates)[
+            face_idx
+        ]  # (5+fuel_emb_dim,)
         raw_global = self.global_mlp(jax.lax.stop_gradient(self.weather_vec))
         raw_local = self.local_mlp(local_feat)
         raw = raw_global + raw_local
@@ -403,31 +408,31 @@ class CovariateMeshRanders(AsymmetricMetric):
         Reference:
             spec/MATH_SPEC.md § 5 (Zermelo navigation formula).
         """
-        v_sq_raw = jnp.sum(v ** 2)
+        v_sq_raw = jnp.sum(v**2)
         is_zero = v_sq_raw < GRAD_EPS
         v_safe = jnp.where(is_zero, v + jnp.sqrt(GRAD_EPS), v)
 
         # Identify nearest face
-        weights = self.manifold.get_face_weights(x)           # (F,)
+        weights = self.manifold.get_face_weights(x)  # (F,)
         face_idx = jnp.argmax(weights)
 
         # Face geometry
-        tri = self.manifold.triangles[face_idx]               # (3, 3)
+        tri = self.manifold.triangles[face_idx]  # (3, 3)
         v0_tri, v1_tri, v2_tri = tri[0], tri[1], tri[2]
 
         # Orthonormal face frame via Gram-Schmidt
         e1_raw = v1_tri - v0_tri
         e2_raw = v2_tri - v0_tri
-        norm_e1 = jnp.sqrt(jnp.sum(e1_raw ** 2) + 1e-12)
+        norm_e1 = safe_norm(e1_raw)
         u1 = e1_raw / norm_e1
 
         e2_orth = e2_raw - jnp.dot(e2_raw, u1) * u1
-        norm_e2 = jnp.sqrt(jnp.sum(e2_orth ** 2) + 1e-12)
+        norm_e2 = safe_norm(e2_orth)
         u2 = e2_orth / norm_e2
 
         # Face normal and tangent projection
         normal = jnp.cross(u1, u2)
-        normal = normal / jnp.sqrt(jnp.sum(normal ** 2) + 1e-12)
+        normal = normal / safe_norm(normal)
         v_tan = v_safe - jnp.dot(v_safe, normal) * normal
 
         # Randers parameters for this face
@@ -441,20 +446,18 @@ class CovariateMeshRanders(AsymmetricMetric):
 
         # Zermelo navigation formula in 3D with isotropic G = g_iso * I
         # b_Ginv_b = ||b_3d||^2 / g_iso
-        b_norm_sq = jnp.sum(b_3d ** 2)
+        b_norm_sq = jnp.sum(b_3d**2)
         b_Ginv_b = b_norm_sq / jnp.maximum(g_iso, 1e-8)
         lam = jnp.maximum(1.0 - b_Ginv_b, 1e-6)
 
-        v_sq_h = g_iso * jnp.sum(v_tan ** 2)
+        v_sq_h = g_iso * jnp.sum(v_tan**2)
         bdotv = jnp.dot(b_3d, v_tan)
 
-        disc = lam * v_sq_h + bdotv ** 2
+        disc = lam * v_sq_h + bdotv**2
         cost = (jnp.sqrt(jnp.maximum(disc, GRAD_EPS)) - bdotv) / lam
         return jnp.where(is_zero, 0.0, cost)
 
-    def zermelo_data(
-        self, x: jax.Array
-    ) -> tuple[jax.Array, jax.Array, jax.Array]:
+    def zermelo_data(self, x: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array]:
         """Return Zermelo triple ``(H_3d, W_3d, lambda)`` at position x.
 
         Implements the :class:`~ham.geometry.metric.AsymmetricMetric` interface.
@@ -476,10 +479,10 @@ class CovariateMeshRanders(AsymmetricMetric):
         v0_tri, v1_tri, v2_tri = tri[0], tri[1], tri[2]
         e1_raw = v1_tri - v0_tri
         e2_raw = v2_tri - v0_tri
-        norm_e1 = jnp.sqrt(jnp.sum(e1_raw ** 2) + 1e-12)
+        norm_e1 = safe_norm(e1_raw)
         u1 = e1_raw / norm_e1
         e2_orth = e2_raw - jnp.dot(e2_raw, u1) * u1
-        norm_e2 = jnp.sqrt(jnp.sum(e2_orth ** 2) + 1e-12)
+        norm_e2 = safe_norm(e2_orth)
         u2 = e2_orth / norm_e2
 
         G_f, b_f = self._get_face_params(face_idx)
@@ -487,7 +490,7 @@ class CovariateMeshRanders(AsymmetricMetric):
         b_3d = b_f[0] * u1 + b_f[1] * u2
 
         H_3d = g_iso * jnp.eye(3, dtype=G_f.dtype)
-        b_norm_sq = jnp.sum(b_3d ** 2)
+        b_norm_sq = jnp.sum(b_3d**2)
         b_Ginv_b = b_norm_sq / jnp.maximum(g_iso, 1e-8)
         lam = jnp.maximum(1.0 - b_Ginv_b, 1e-6)
         return H_3d, b_3d, lam

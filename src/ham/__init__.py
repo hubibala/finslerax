@@ -18,10 +18,19 @@ nn       : Neural network building blocks (VectorField, PSDMatrixField)
 __version__ = "1.1.0"
 
 # Core geometry
+from ham.geometry import (
+    DiscreteRanders,
+    Euclidean,
+    EuclideanSpace,
+    Hyperboloid,
+    Paraboloid,
+    Randers,
+    Riemannian,
+    Sphere,
+    Torus,
+)
 from ham.geometry.manifold import Manifold
 from ham.geometry.metric import FinslerMetric
-from ham.geometry import Euclidean, Riemannian, Randers, DiscreteRanders
-from ham.geometry import Sphere, Hyperboloid, Torus, Paraboloid, EuclideanSpace
 from ham.geometry.transport import BerwaldConnection
 
 # Solvers
@@ -29,12 +38,22 @@ from ham.solvers.avbd import AVBDSolver, Trajectory
 from ham.solvers.geodesic import ExponentialMap
 
 __all__ = [
-    "__version__",
-    # Geometry
-    "Manifold", "FinslerMetric",
-    "Euclidean", "Riemannian", "Randers", "DiscreteRanders",
-    "Sphere", "Hyperboloid", "Torus", "Paraboloid", "EuclideanSpace",
-    "BerwaldConnection",
     # Solvers
-    "AVBDSolver", "Trajectory", "ExponentialMap",
+    "AVBDSolver",
+    "BerwaldConnection",
+    "DiscreteRanders",
+    "Euclidean",
+    "EuclideanSpace",
+    "ExponentialMap",
+    "FinslerMetric",
+    "Hyperboloid",
+    # Geometry
+    "Manifold",
+    "Paraboloid",
+    "Randers",
+    "Riemannian",
+    "Sphere",
+    "Torus",
+    "Trajectory",
+    "__version__",
 ]

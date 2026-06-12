@@ -1,3 +1,12 @@
-from .networks import RandomFourierFeatures, VectorField, PSDMatrixField
+from .ebm import PseudotimePotential, ScalarEnergyField
+from .kde import GaussianKDEEnergy
+from .networks import PSDMatrixField, RandomFourierFeatures, VectorField
 
-__all__ = ["RandomFourierFeatures", "VectorField", "PSDMatrixField"]
+__all__ = [
+    "GaussianKDEEnergy",
+    "PSDMatrixField",
+    "PseudotimePotential",
+    "RandomFourierFeatures",
+    "ScalarEnergyField",
+    "VectorField",
+]

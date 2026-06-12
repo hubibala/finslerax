@@ -8,20 +8,16 @@ Verifies that:
  5. ArrivalTimeLoss works end-to-end with the implicit solver.
 """
 
-import pytest
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
-from jax import config
 
 # config.update("jax_enable_x64", True)
-
 from ham.geometry.manifolds import EuclideanSpace
 from ham.geometry.zoo import Riemannian
 from ham.models.learned import NeuralRanders
 from ham.solvers.avbd import AVBDSolver
 from ham.training.losses import ArrivalTimeLoss
-
 
 # ---------------------------------------------------------------------------
 # Shared fixtures

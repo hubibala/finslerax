@@ -8,20 +8,18 @@ Covers:
   - metric_fn: positivity, 1-homogeneity, Riemannian limit, JIT/vmap, gradients
 """
 
-import pytest
 import jax
 import jax.numpy as jnp
-from jax import config
 import numpy as np
+import pytest
 
 # config.update("jax_enable_x64", True)
-
 from ham.geometry.manifolds import EuclideanSpace
 from ham.models.wildfire import (
     CovariateConditionedRanders,
     LocalTerrainCNN,
-    project_spd,
     project_b_norm,
+    project_spd,
 )
 
 # ---------------------------------------------------------------------------

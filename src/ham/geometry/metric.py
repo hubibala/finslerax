@@ -15,41 +15,43 @@ See Also:
     ham.geometry.transport : Berwald parallel transport built on this class.
 """
 
+from abc import abstractmethod
+
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
-from abc import abstractmethod
-from typing import Tuple
 
 from ham.geometry.manifold import Manifold
 from ham.utils.math import PSD_EPS
+
 
 class FinslerMetric(eqx.Module):
     """
     Abstract base class for all Finsler metrics.
 
-    Defines the geometry of a manifold via the fundamental cost function $F(x, v)$ 
-    and its derived energy $E = \\tfrac{1}{2}F^2$. All downstream geometry 
-    (geodesic spray, curvature, parallel transport) is auto-differentiated from 
+    Defines the geometry of a manifold via the fundamental cost function $F(x, v)$
+    and its derived energy $E = \\tfrac{1}{2}F^2$. All downstream geometry
+    (geodesic spray, curvature, parallel transport) is auto-differentiated from
     `metric_fn`. Inherits from `eqx.Module` so subclasses are valid JAX PyTrees.
-    
+
     Implementations may be vmapped externally; methods operate on single points.
     """
+
     manifold: Manifold
     spray_reg: float = eqx.field(static=True, default=PSD_EPS)
 
     @abstractmethod
     def metric_fn(self, x: jax.Array, v: jax.Array) -> jax.Array:
-        """
+        r"""
         Computes the fundamental Finsler cost function F(x, v).
 
         The metric must be positively 1-homogeneous in v, meaning F(x, λv) = λF(x, v) for λ > 0.
         Implementations must be gradient-safe at v = 0 (e.g., using `safe_norm`).
-        
+
         Args:
             x: Position vector on the manifold.
             v: Tangent vector at position x.
-            
+
         Returns:
             Scalar Finsler cost $F(x, v) \geq 0$. Shape: `()`.
         """
@@ -73,10 +75,11 @@ class FinslerMetric(eqx.Module):
         Reference:
             spec/MATH_SPEC.md § 1.2.
         """
-        return 0.5 * self.metric_fn(x, v)**2
+        return 0.5 * self.metric_fn(x, v) ** 2
 
-    def inner_product(self, x: jax.Array, v: jax.Array,
-                      w1: jax.Array, w2: jax.Array) -> jax.Array:
+    def inner_product(
+        self, x: jax.Array, v: jax.Array, w1: jax.Array, w2: jax.Array
+    ) -> jax.Array:
         """
         Finsler inner product <w1, w2>_v using the fundamental tensor g_ij(x, v).
 
@@ -124,17 +127,17 @@ class FinslerMetric(eqx.Module):
             See spec/MATH_SPEC.md § 6.1.
         """
         grad_v_fn = jax.grad(self.energy, argnums=1)
-        
+
         # We need grad_x(E) and Jac_x(grad_v E) * v
         # Using JVP for the mixed term is efficient
         grad_x = jax.grad(self.energy, argnums=0)(x, v)
-        
+
         def d_dv_fixed_v(pos):
             return grad_v_fn(pos, v)
-            
+
         _, mixed_term = jax.jvp(d_dv_fixed_v, (x,), (v,))
         rhs = grad_x - mixed_term
-        
+
         hess_v = jax.hessian(self.energy, argnums=1)(x, v)
 
         # Trace-scaled Tikhonov regularisation: ε·(tr(H)/D)·I instead of a
@@ -192,7 +195,7 @@ class FinslerMetric(eqx.Module):
             v = x2 - x1
             midpoint = self.manifold.project(0.5 * (x1 + x2))
             return self.metric_fn(midpoint, v)
-            
+
         return jnp.sum(jax.vmap(segment_length)(gamma[:-1], gamma[1:]))
 
 
@@ -210,9 +213,7 @@ class AsymmetricMetric(FinslerMetric):
     """
 
     @abstractmethod
-    def zermelo_data(
-        self, x: jax.Array
-    ) -> Tuple[jax.Array, jax.Array, jax.Array]:
+    def zermelo_data(self, x: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array]:
         """Return the Zermelo navigation triple ``(H, W, lambda)`` at position x.
 
         Args:
@@ -224,4 +225,3 @@ class AsymmetricMetric(FinslerMetric):
             lambda: Causality scalar ``1 - ||W||²_H``, shape ``()``.
         """
         pass
-

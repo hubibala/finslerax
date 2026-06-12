@@ -1,14 +1,15 @@
 """Manifold implementations."""
-from .sphere import Sphere
-from .hyperboloid import Hyperboloid
-from .torus import Torus
-from .paraboloid import Paraboloid
+
 from .euclidean_space import EuclideanSpace
+from .hyperboloid import Hyperboloid
+from .paraboloid import Paraboloid
+from .sphere import Sphere
+from .torus import Torus
 
 __all__ = [
-    "Sphere",
-    "Hyperboloid",
-    "Torus",
-    "Paraboloid",
     "EuclideanSpace",
+    "Hyperboloid",
+    "Paraboloid",
+    "Sphere",
+    "Torus",
 ]

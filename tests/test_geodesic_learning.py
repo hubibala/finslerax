@@ -17,20 +17,17 @@ Original intent preserved:
 """
 
 import unittest
-from functools import partial
-from typing import Callable, Tuple, NamedTuple
+from typing import NamedTuple
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import numpy as np
-import equinox as eqx
 import optax
 
 from ham.geometry import EuclideanSpace, Hyperboloid, Sphere
-from ham.geometry.metric import FinslerMetric
 from ham.models.learned import NeuralRanders
 from ham.training.losses import LossComponent
-from ham.training.pipeline import TrainingPhase, HAMPipeline
+from ham.training.pipeline import HAMPipeline, TrainingPhase
 from ham.utils.math import safe_norm
 
 # ──────────────────────────────────────────────────────────

@@ -1,21 +1,22 @@
 import unittest
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 from jax.test_util import check_grads
-from jax import config
+
+from ham.geometry import Torus
 
 # config.update("jax_enable_x64", True)
-
 from ham.geometry.manifold import Manifold, _safe_norm_ratio
-from ham.geometry import Torus
+
 
 class MockManifold(Manifold):
     """A minimal concrete manifold for testing default methods."""
     @property
     def ambient_dim(self) -> int:
         return 3
-    
+
     @property
     def intrinsic_dim(self) -> int:
         return 2
@@ -48,11 +49,11 @@ class TestManifold(unittest.TestCase):
         x = jnp.array([3.0, 4.0]) # norm 5
         y = jnp.array([1.0, 0.0]) # norm 1
         np.testing.assert_allclose(_safe_norm_ratio(x, y), jnp.array([5.0]), atol=1e-5)
-        
+
         # y is zero vector
         y_zero = jnp.array([0.0, 0.0])
         np.testing.assert_allclose(_safe_norm_ratio(x, y_zero), jnp.array([1.0]), atol=1e-5)
-        
+
         # Both zero
         x_zero = jnp.array([0.0, 0.0])
         np.testing.assert_allclose(_safe_norm_ratio(x_zero, y_zero), jnp.array([1.0]), atol=1e-5)
@@ -62,14 +63,14 @@ class TestManifold(unittest.TestCase):
         # We check a normal case.
         x = jnp.array([1.0, 2.0, 3.0])
         y = jnp.array([4.0, 5.0, 6.0])
-        
+
         # Test normal case
         check_grads(_safe_norm_ratio, (x, y), order=1, modes=['fwd'])
 
         # Test edge case x=0, y!=0
         x_zero = jnp.array([0.0, 0.0, 0.0])
         # Numerically, diff at x=0 is undefined (conical point), but the JVP should handle it gracefully without NaNs.
-        # check_grads might fail finite diff at strict zero due to non-differentiability, 
+        # check_grads might fail finite diff at strict zero due to non-differentiability,
         # so we just test that jax.jacfwd doesn't produce NaNs.
         J_x = jax.jacfwd(lambda x_: _safe_norm_ratio(x_, y))(x_zero)
         self.assertFalse(jnp.any(jnp.isnan(J_x)))
@@ -92,7 +93,7 @@ class TestManifold(unittest.TestCase):
         x = jnp.array([3.0, 0.0, 0.0])
         # Displace radially outward (purely normal to the surface)
         y = jnp.array([4.0, 0.0, 0.0])
-        
+
         v = torus.log_map(x, y)
         # Since displacement is purely normal, tangent projection is zero.
         # log_map should handle this and return zero, avoiding division by zero.
@@ -104,12 +105,12 @@ class TestManifold(unittest.TestCase):
         k1, k2 = jax.random.split(self.key)
         xs = self.manifold.random_sample(k1, (batch_size,))
         ys = self.manifold.random_sample(k2, (batch_size,))
-        
+
         # vmap
         vmap_log = jax.vmap(self.manifold.log_map)
         vs = vmap_log(xs, ys)
         self.assertEqual(vs.shape, (batch_size, 3))
-        
+
         # jit
         jit_vmap_log = jax.jit(vmap_log)
         vs_jit = jit_vmap_log(xs, ys)

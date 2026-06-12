@@ -1,15 +1,15 @@
 import unittest
+
 import jax
 import jax.numpy as jnp
-from jax import config
 import numpy as np
 
-# config.update("jax_enable_x64", True)
-
-from ham.solvers.coloring import chain_coloring, greedy_coloring, mesh_vertex_coloring
-from ham.solvers.avbd import AVBDSolver
 from ham.geometry import Sphere
 from ham.geometry.zoo import Euclidean, Randers
+from ham.solvers.avbd import AVBDSolver
+
+# config.update("jax_enable_x64", True)
+from ham.solvers.coloring import chain_coloring, greedy_coloring, mesh_vertex_coloring
 
 
 class TestChainColoring(unittest.TestCase):

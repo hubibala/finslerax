@@ -1,10 +1,10 @@
 """Augmented Vertex Block Descent (AVBD) boundary-value geodesic solver.
 
-This module implements a differentiable BVP solver that finds energy-minimizing 
-geodesics between two points. It operates by optimizing a discretized path of 
+This module implements a differentiable BVP solver that finds energy-minimizing
+geodesics between two points. It operates by optimizing a discretized path of
 vertices using randomized Gauss-Seidel sweeps (Block Descent) on the manifold.
 
-The solver supports arbitrary Finsler metrics and equality constraints via 
+The solver supports arbitrary Finsler metrics and equality constraints via
 an Augmented Lagrangian Method (ALM).
 
 An optional **graph-coloring parallel mode** (``parallel=True``) replaces the
@@ -27,17 +27,18 @@ Classes:
 See also: spec/ARCH_SPEC.md § 4.2.
 """
 
-import functools
+from typing import Callable, NamedTuple, Optional
+
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
-from typing import NamedTuple, List, Callable, Optional
 
 from ham.geometry.metric import FinslerMetric
-from ham.utils.math import safe_norm, GRAD_EPS
 from ham.solvers.coloring import chain_coloring
+from ham.utils.math import GRAD_EPS, safe_norm
 
-__all__ = ["Trajectory", "AVBDSolver"]
+__all__ = ["AVBDSolver", "Trajectory"]
+
 
 class Trajectory(NamedTuple):
     """Result of a geodesic solver.
@@ -50,12 +51,14 @@ class Trajectory(NamedTuple):
         lambdas: Lagrange multipliers for constraints at convergence, shape (T-1, C).
         stiffness: Penalty parameters for constraints at convergence, shape (T-1, C).
     """
+
     xs: jax.Array
     vs: jax.Array
     energy: jax.Array
     constraint_violation: jax.Array
     lambdas: jax.Array
     stiffness: jax.Array
+
 
 class SolverState(NamedTuple):
     """Internal state for the iterative AVBD solver.
@@ -69,6 +72,7 @@ class SolverState(NamedTuple):
         prev_energy: Total path energy from the previous iteration.
         curr_energy: Total path energy from the current iteration.
     """
+
     path: jax.Array
     lambdas: jax.Array
     stiffness: jax.Array
@@ -80,7 +84,7 @@ class SolverState(NamedTuple):
 
 def get_differentiable_mask(obj):
     """Generate a PyTree of booleans matching the structure of obj.
-    
+
     Returns True for trainable/differentiable inexact arrays, and False for
     non-differentiable arrays (e.g. terrain rasters, manifold, pixel spacing, scene origin)
     and static fields.
@@ -91,17 +95,27 @@ def get_differentiable_mask(obj):
         if not eqx.is_inexact_array(leaf):
             mask_flat.append(False)
             continue
-        
+
         # Check if the path indicates a raster or non-trainable field
         is_static_field = False
         for entry in path:
-            name = getattr(entry, 'name', None) or str(entry)
-            if any(k in name for k in ['raster', 'pixel_spacing', 'origin', 'manifold', 'covariates', 'weather']):
+            name = getattr(entry, "name", None) or str(entry)
+            if any(
+                k in name
+                for k in [
+                    "raster",
+                    "pixel_spacing",
+                    "origin",
+                    "manifold",
+                    "covariates",
+                    "weather",
+                ]
+            ):
                 is_static_field = True
                 break
-        
+
         mask_flat.append(not is_static_field)
-        
+
     return jax.tree_util.tree_unflatten(treedef, mask_flat)
 
 
@@ -109,27 +123,28 @@ def get_differentiable_mask(obj):
 def _el_residual(inner_path, metric, p_start, p_end, constraints, lambdas, stiffness):
     """Discrete Euler-Lagrange residual of the Lagrangian for inner nodes.
 
-    Calculates the Euclidean gradient of the total path Lagrangian (energy + constraints) 
+    Calculates the Euclidean gradient of the total path Lagrangian (energy + constraints)
     and projects it onto the manifold tangent space to satisfy $G(x^*) = 0$.
 
     Returns flat array of shape (n_inner * D,).
     """
+
     def total_lagrangian(inner):
         full = jnp.concatenate([p_start[None], inner, p_end[None]], axis=0)
         vs = jax.vmap(metric.manifold.log_map)(full[:-1], full[1:])
         energy = jnp.sum(jax.vmap(metric.energy)(full[:-1], vs))
-        
+
         penalty = 0.0
         if constraints is not None and len(constraints) > 0:
             # Evaluate constraints across all inner vertices -> shape: (n_inner, C)
             c_vals = jnp.stack([jax.vmap(c)(inner) for c in constraints], axis=-1)
             penalty = jnp.sum(lambdas * c_vals + 0.5 * stiffness * (c_vals**2))
-            
+
         return energy + penalty
 
     # Differentiate wrt inner vertices
     grad_euc = jax.grad(total_lagrangian)(inner_path)
-    
+
     # Project the Euclidean residual onto the tangent space
     grad_tan = jax.vmap(metric.manifold.to_tangent)(inner_path, grad_euc)
     return grad_tan.ravel()
@@ -142,8 +157,7 @@ def _implicit_forward_pass(vjp_args, n_steps, constraints, key):
     # Sever all gradient tracking during the forward solver execution to prevent nested tracer leaks.
     # The custom VJP's backward pass analytical IFT adjoint handles all gradient computations.
     metric_sg = jax.tree_util.tree_map(
-        lambda x: jax.lax.stop_gradient(x) if eqx.is_array(x) else x,
-        metric
+        lambda x: jax.lax.stop_gradient(x) if eqx.is_array(x) else x, metric
     )
     p_start_sg = jax.lax.stop_gradient(p_start)
     p_end_sg = jax.lax.stop_gradient(p_end)
@@ -155,22 +169,34 @@ def _implicit_forward_pass(vjp_args, n_steps, constraints, key):
         n_steps=n_steps,
         constraints=constraints,
         train_mode=False,  # O(1) memory mapping, relies entirely on analytical adjoint
-        key=key
+        key=key,
     )
     return traj.xs[1:-1], traj.lambdas, traj.stiffness
 
 
 @_implicit_forward_pass.def_fwd
 def _implicit_forward_pass_fwd(perturbed, vjp_args, n_steps, constraints, key):
-    inner, lambdas, stiffness = _implicit_forward_pass(vjp_args, n_steps, constraints, key)
-    return (inner, lambdas, stiffness), (inner, lambdas, stiffness, vjp_args, n_steps, constraints, key)
+    inner, lambdas, stiffness = _implicit_forward_pass(
+        vjp_args, n_steps, constraints, key
+    )
+    return (inner, lambdas, stiffness), (
+        inner,
+        lambdas,
+        stiffness,
+        vjp_args,
+        n_steps,
+        constraints,
+        key,
+    )
 
 
 @_implicit_forward_pass.def_bwd
-def _implicit_forward_pass_bwd(res, g_out, perturbed, vjp_args, n_steps, constraints, key):
-    inner, lambdas, stiffness, vjp_args, n_steps, constraints, key = res
+def _implicit_forward_pass_bwd(
+    res, g_out, perturbed, vjp_args, n_steps, constraints, key
+):
+    inner, lambdas, stiffness, vjp_args, _n_steps, constraints, _key = res
     solver, metric, p_start, p_end = vjp_args
-    g_inner, g_lambdas, g_stiffness = g_out
+    g_inner, _g_lambdas, _g_stiffness = g_out
 
     # Project outgoing loss gradients onto the tangent space so they map correctly to the Hessian
     g_inner_tan = jax.vmap(metric.manifold.to_tangent)(inner, g_inner)
@@ -226,11 +252,12 @@ def _implicit_forward_pass_bwd(res, g_out, perturbed, vjp_args, n_steps, constra
                 v_in = metric.manifold.log_map(xp_, xc__)
                 v_out = metric.manifold.log_map(xc__, xn_)
                 return metric.energy(xp_, v_in) + metric.energy(xc__, v_out)
+
             return jax.grad(E_loc)(xc_)
 
-        A_k = jax.jacobian(lambda xp_: G_k(xp_, xc, xn))(xp)   # dG_k/dx_{k-1}
-        B_k = jax.jacobian(lambda xc_: G_k(xp, xc_, xn))(xc)   # dG_k/dx_k
-        C_k = jax.jacobian(lambda xn_: G_k(xp, xc, xn_))(xn)   # dG_k/dx_{k+1}
+        A_k = jax.jacobian(lambda xp_: G_k(xp_, xc, xn))(xp)  # dG_k/dx_{k-1}
+        B_k = jax.jacobian(lambda xc_: G_k(xp, xc_, xn))(xc)  # dG_k/dx_k
+        C_k = jax.jacobian(lambda xn_: G_k(xp, xc, xn_))(xn)  # dG_k/dx_{k+1}
         return A_k, B_k, C_k
 
     A_blocks, B_blocks, C_blocks = jax.vmap(get_ABC)(ks)  # each (N, D, D)
@@ -255,15 +282,15 @@ def _implicit_forward_pass_bwd(res, g_out, perturbed, vjp_args, n_steps, constra
 
     if n_inner > 1:
         fwd_inputs = (
-            A_blocks[1:],        # A[1..N-1],  (N-1, D, D)
-            B_blocks[1:],        # B[1..N-1]
-            C_blocks[:-1],       # C[0..N-2]
-            g_rhs[1:],           # g[1..N-1],  (N-1, D)
+            A_blocks[1:],  # A[1..N-1],  (N-1, D, D)
+            B_blocks[1:],  # B[1..N-1]
+            C_blocks[:-1],  # C[0..N-2]
+            g_rhs[1:],  # g[1..N-1],  (N-1, D)
         )
         (_, _), (B_prime_rest, g_prime_rest) = jax.lax.scan(
             fwd_step, (B0_reg, g_rhs[0]), fwd_inputs
         )
-        B_prime = jnp.concatenate([B0_reg[None], B_prime_rest], axis=0)   # (N, D, D)
+        B_prime = jnp.concatenate([B0_reg[None], B_prime_rest], axis=0)  # (N, D, D)
         g_prime = jnp.concatenate([g_rhs[0][None], g_prime_rest], axis=0)  # (N, D)
     else:
         B_prime = B0_reg[None]
@@ -281,9 +308,9 @@ def _implicit_forward_pass_bwd(res, g_out, perturbed, vjp_args, n_steps, constra
 
     if n_inner > 1:
         bwd_inputs = (
-            B_prime[:-1][::-1],    # B'[N-2..0]  reversed (N-1, D, D)
-            g_prime[:-1][::-1],    # g'[N-2..0]  reversed (N-1, D)
-            C_blocks[:-1][::-1],   # C[N-2..0]   reversed (N-1, D, D)
+            B_prime[:-1][::-1],  # B'[N-2..0]  reversed (N-1, D, D)
+            g_prime[:-1][::-1],  # g'[N-2..0]  reversed (N-1, D)
+            C_blocks[:-1][::-1],  # C[N-2..0]   reversed (N-1, D, D)
         )
         _, lam_rest_rev = jax.lax.scan(bwd_step, lam_last, bwd_inputs)
         # lam_rest_rev is (N-1, D) in reversed order [lam_{N-2}, ..., lam_0]
@@ -308,12 +335,16 @@ def _implicit_forward_pass_bwd(res, g_out, perturbed, vjp_args, n_steps, constra
     grad_arr, grad_p_start, grad_p_end = vjp_fn(-lam_flat)[0:3]
 
     grad_m = eqx.combine(grad_arr, jax.tree_util.tree_map(lambda _: None, m_static))
-    
+
     # Return gradients for all non-static arguments (solver, metric, p_start, p_end)
     s_mask = get_differentiable_mask(solver)
     s_arr, s_static = eqx.partition(solver, s_mask)
-    grad_s_arr = jax.tree_util.tree_map(lambda x: jnp.zeros_like(x) if eqx.is_inexact_array(x) else None, s_arr)
-    grad_solver = eqx.combine(grad_s_arr, jax.tree_util.tree_map(lambda _: None, s_static))
+    grad_s_arr = jax.tree_util.tree_map(
+        lambda x: jnp.zeros_like(x) if eqx.is_inexact_array(x) else None, s_arr
+    )
+    grad_solver = eqx.combine(
+        grad_s_arr, jax.tree_util.tree_map(lambda _: None, s_static)
+    )
 
     return (grad_solver, grad_m, grad_p_start, grad_p_end)
 
@@ -321,13 +352,13 @@ def _implicit_forward_pass_bwd(res, g_out, perturbed, vjp_args, n_steps, constra
 class AVBDSolver(eqx.Module):
     """Augmented Vertex Block Descent (AVBD) Geodesic Solver.
 
-    Finds the energy-minimizing path between two boundary points by directly 
-    optimizing discretized path vertices. The solver is fully JAX-compatible 
+    Finds the energy-minimizing path between two boundary points by directly
+    optimizing discretized path vertices. The solver is fully JAX-compatible
     and differentiable with respect to metric parameters.
 
     Algorithm:
         Discretizes the path into T+1 vertices. Minimizes the discrete action
-        L = sum(E(x_i, v_i)) + Penalty via Gauss-Seidel sweeps. Constraints 
+        L = sum(E(x_i, v_i)) + Penalty via Gauss-Seidel sweeps. Constraints
         are enforced using the Augmented Lagrangian Method (ALM).
 
     Attributes:
@@ -343,6 +374,7 @@ class AVBDSolver(eqx.Module):
             trades strict Gauss-Seidel convergence for GPU parallelism.
         implicit_diff: Enable O(1) memory analytical adjoints during backprop.
     """
+
     step_size: float = eqx.field(static=True, default=0.05)
     beta: float = eqx.field(static=True, default=1.2)
     iterations: int = eqx.field(static=True, default=50)
@@ -353,14 +385,14 @@ class AVBDSolver(eqx.Module):
     implicit_diff: bool = eqx.field(static=True, default=False)
 
     def solve(
-        self, 
-        metric: FinslerMetric, 
-        p_start: jax.Array, 
-        p_end: jax.Array, 
+        self,
+        metric: FinslerMetric,
+        p_start: jax.Array,
+        p_end: jax.Array,
         n_steps: int = 10,
-        constraints: Optional[List[Callable[[jax.Array], jax.Array]]] = None,
+        constraints: Optional[list[Callable[[jax.Array], jax.Array]]] = None,
         train_mode: bool = True,
-        key: Optional[jax.Array] = None
+        key: Optional[jax.Array] = None,
     ) -> Trajectory:
         """Finds the energy-minimizing geodesic between two points.
 
@@ -369,21 +401,23 @@ class AVBDSolver(eqx.Module):
             p_start: Start point on the manifold, shape (D,).
             p_end: End point on the manifold, shape (D,).
             n_steps: Number of discrete path segments. Default: 10.
-            constraints: Optional list of scalar functions c(x) = 0. 
+            constraints: Optional list of scalar functions c(x) = 0.
                 Each must map (D,) -> scalar.
-            train_mode: If True, uses jax.lax.scan (differentiable). 
+            train_mode: If True, uses jax.lax.scan (differentiable).
                 If False, uses jax.lax.while_loop (supports early stopping).
-            key: PRNG key for stochastic vertex permutation. If None, 
+            key: PRNG key for stochastic vertex permutation. If None,
                 a deterministic key is derived from p_start and p_end.
 
         Returns:
             A Trajectory containing the optimized path and statistics.
         """
         if self.implicit_diff:
-            return self._solve_implicit(metric, p_start, p_end, n_steps,
-                                        constraints, train_mode, key)
-        return self._solve_core(metric, p_start, p_end, n_steps,
-                                constraints, train_mode, key)
+            return self._solve_implicit(
+                metric, p_start, p_end, n_steps, constraints, train_mode, key
+            )
+        return self._solve_core(
+            metric, p_start, p_end, n_steps, constraints, train_mode, key
+        )
 
     def _solve_implicit(
         self,
@@ -399,12 +433,10 @@ class AVBDSolver(eqx.Module):
         inner, lambdas, stiffness = _implicit_forward_pass(
             (self, metric, p_start, p_end), n_steps, constraints, key
         )
-        full_xs = jnp.concatenate(
-            [p_start[None], inner, p_end[None]], axis=0
-        )
+        full_xs = jnp.concatenate([p_start[None], inner, p_end[None]], axis=0)
         full_vs = jax.vmap(metric.manifold.log_map)(full_xs[:-1], full_xs[1:])
         energy = jnp.sum(jax.vmap(metric.energy)(full_xs[:-1], full_vs))
-        
+
         # Determine violation via evaluated constraints
         violation = jnp.array(0.0)
         if constraints is not None and len(constraints) > 0:
@@ -417,18 +449,18 @@ class AVBDSolver(eqx.Module):
             energy=energy,
             constraint_violation=violation,
             lambdas=lambdas,
-            stiffness=stiffness
+            stiffness=stiffness,
         )
 
     def _solve_core(
-        self, 
-        metric: FinslerMetric, 
-        p_start: jax.Array, 
-        p_end: jax.Array, 
+        self,
+        metric: FinslerMetric,
+        p_start: jax.Array,
+        p_end: jax.Array,
         n_steps: int = 10,
-        constraints: Optional[List[Callable[[jax.Array], jax.Array]]] = None,
+        constraints: Optional[list[Callable[[jax.Array], jax.Array]]] = None,
         train_mode: bool = True,
-        key: Optional[jax.Array] = None
+        key: Optional[jax.Array] = None,
     ) -> Trajectory:
         """Core iterative AVBD solver (unrolled backprop).
 
@@ -450,17 +482,17 @@ class AVBDSolver(eqx.Module):
             # Deterministic but data-dependent fallback for vmap compatibility
             seed_val = jnp.sum(p_start + p_end).astype(jnp.int32)
             key = jax.random.fold_in(jax.random.PRNGKey(0), seed_val)
-        
+
         k_init, k_sweep = jax.random.split(key)
-        
+
         # Standardize constraints
         actual_constraints = constraints if constraints is not None else []
         num_constraints = len(actual_constraints)
-        
+
         # Linear initialization in ambient space, then projected
         t = jnp.linspace(0, 1, n_steps + 1)[:, None]
         linear_path = (1 - t) * p_start + t * p_end
-        
+
         # Perturb slightly to avoid zero-velocity singularities at initialization
         noise = jax.random.normal(k_init, shape=linear_path.shape) * 1e-4
         path_guess = jax.vmap(metric.manifold.project)(linear_path + noise)
@@ -477,8 +509,8 @@ class AVBDSolver(eqx.Module):
             stiffness=init_stiffness,
             step=0,
             max_violation=jnp.array(0.0),
-            prev_energy=jnp.inf,
-            curr_energy=jnp.array(0.0)
+            prev_energy=jnp.array(jnp.inf),
+            curr_energy=jnp.array(0.0),
         )
 
         def get_local_energy(x_prev, x, x_next):
@@ -495,7 +527,7 @@ class AVBDSolver(eqx.Module):
 
             def loss_fn(curr_x):
                 E = get_local_energy(x_prev, curr_x, x_next)
-                
+
                 # Augmented Lagrangian Penalty
                 penalty = 0.0
                 if num_constraints > 0:
@@ -503,22 +535,23 @@ class AVBDSolver(eqx.Module):
                     lam = s.lambdas[v_idx - 1]
                     mu = s.stiffness[v_idx - 1]
                     penalty = jnp.sum(lam * c_vals + 0.5 * mu * (c_vals**2))
-                
+
                 return E + penalty
 
             # Projected Riemannian Gradient Descent
             grad_euc = jax.grad(loss_fn)(x)
             grad_tan = metric.manifold.to_tangent(x, grad_euc)
-            
+
             # Clip for stability
             gnorm = safe_norm(grad_tan, eps=GRAD_EPS)
             scale = jnp.minimum(1.0, grad_clip / (gnorm + GRAD_EPS))
             step = -step_size * grad_tan * scale
-            
+
             return metric.manifold.retract(x, step)
 
         def update_vertex_triple(x_prev, x, x_next, lam, mu):
             """Optimizes a single vertex given its neighbors (for vmap)."""
+
             def loss_fn(curr_x):
                 E = get_local_energy(x_prev, curr_x, x_next)
                 penalty = 0.0
@@ -553,7 +586,9 @@ class AVBDSolver(eqx.Module):
             return full_path.at[color_indices].set(new_xs)
 
         def step_fn(s: SolverState, _):
-            full_path = jnp.concatenate([p_start[None, :], s.path, p_end[None, :]], axis=0)
+            full_path = jnp.concatenate(
+                [p_start[None, :], s.path, p_end[None, :]], axis=0
+            )
 
             if parallel:
                 # Colored Gauss-Seidel: update each color group in parallel,
@@ -579,10 +614,11 @@ class AVBDSolver(eqx.Module):
             new_stiffness = s.stiffness
 
             if num_constraints > 0:
+
                 def get_c_all(x):
                     return jnp.stack([c(x) for c in actual_constraints])
-                
-                all_c = jax.vmap(get_c_all)(new_inner) # (n_inner, num_constraints)
+
+                all_c = jax.vmap(get_c_all)(new_inner)  # (n_inner, num_constraints)
                 new_lambdas = s.lambdas + s.stiffness * all_c
                 new_stiffness = jnp.minimum(s.stiffness * beta, 1e6)
                 max_v = jnp.max(jnp.abs(all_c))
@@ -598,29 +634,33 @@ class AVBDSolver(eqx.Module):
                 step=s.step + 1,
                 max_violation=max_v,
                 prev_energy=s.curr_energy,
-                curr_energy=total_E
+                curr_energy=total_E,
             ), None
 
         # Execution
         if train_mode:
             final_state, _ = jax.lax.scan(step_fn, state, None, length=iterations)
         else:
+
             def cond(s):
                 iter_not_done = s.step < iterations
                 energy_not_conv = jnp.abs(s.curr_energy - s.prev_energy) > energy_tol
                 constraint_not_met = s.max_violation > tol
                 return iter_not_done & (energy_not_conv | constraint_not_met)
+
             final_state = jax.lax.while_loop(cond, lambda s: step_fn(s, None)[0], state)
 
         # Final Trajectory Reassembly
-        full_xs = jnp.concatenate([p_start[None, :], final_state.path, p_end[None, :]], axis=0)
+        full_xs = jnp.concatenate(
+            [p_start[None, :], final_state.path, p_end[None, :]], axis=0
+        )
         full_vs = jax.vmap(metric.manifold.log_map)(full_xs[:-1], full_xs[1:])
-        
+
         return Trajectory(
             xs=full_xs,
             vs=full_vs,
             energy=final_state.curr_energy,
             constraint_violation=final_state.max_violation,
             lambdas=final_state.lambdas,
-            stiffness=final_state.stiffness
+            stiffness=final_state.stiffness,
         )

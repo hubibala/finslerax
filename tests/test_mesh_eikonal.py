@@ -1,21 +1,21 @@
-import jax
+import equinox as eqx
 import jax.numpy as jnp
-import numpy as np
-from ham.solvers.mesh_eikonal import MeshEikonalSolver, _fast_mesh_solve
+
+from ham.geometry.manifolds import EuclideanSpace
 from ham.geometry.mesh_adjacency import MeshAdjacency
 from ham.geometry.metric import AsymmetricMetric
-from ham.geometry.manifolds import EuclideanSpace
-import equinox as eqx
+from ham.solvers.mesh_eikonal import MeshEikonalSolver, _fast_mesh_solve
+
 
 class DummyRandersMetric(AsymmetricMetric):
     wind_scale: float = eqx.field(static=True)
     def __init__(self, dim: int, wind_scale: float = 0.0):
         self.manifold = EuclideanSpace(dim)
         self.wind_scale = float(wind_scale)
-        
+
     def metric_fn(self, x, v):
         return jnp.sqrt(jnp.sum(v**2))
-        
+
     def zermelo_data(self, x):
         H = jnp.eye(2)
         W = jnp.array([self.wind_scale, self.wind_scale])
@@ -40,16 +40,16 @@ def _create_simple_mesh():
 def test_mesh_solver_forward():
     vertices, faces = _create_simple_mesh()
     mesh_adj = MeshAdjacency.build(vertices, faces, num_ref_points=1)
-    
+
     solver = MeshEikonalSolver(max_iters=50, tol=1e-5)
     metric = DummyRandersMetric(2, wind_scale=0.0)
-    
+
     source = jnp.array([[0.0, 0.0]])
     T = solver.solve(metric, mesh_adj, vertices, faces, source)
-    
+
     # Distance to source [0, 0] should be roughly Euclidean
     T_analytical = jnp.sqrt(jnp.sum(vertices**2, axis=-1))
-    
+
     # It won't be perfectly Euclidean because it's constrained to the edges of the mesh
     # and first-order Godunov has numerical diffusion (linear interpolation on the edge).
     max_error = jnp.max(jnp.abs(T - T_analytical))
@@ -57,25 +57,25 @@ def test_mesh_solver_forward():
 
 def test_mesh_sweeping_gradients():
     from jax.test_util import check_grads
-    
+
     vertices, faces = _create_simple_mesh()
     mesh_adj = MeshAdjacency.build(vertices, faces, num_ref_points=1)
-    
+
     F = len(faces)
     V = len(vertices)
-    
+
     G_faces = jnp.stack([jnp.eye(2) for _ in range(F)])
     B_faces = jnp.zeros((F, 2))
-    
+
     source_mask = jnp.zeros(V, dtype=bool).at[0].set(True)
-    
+
     def fwd(g_tensor, b_tensor):
         g_tensor = jnp.asarray(g_tensor)
         b_tensor = jnp.asarray(b_tensor)
         return _fast_mesh_solve(
-            g_tensor, b_tensor, source_mask, 
-            mesh_adj.sweep_orderings, mesh_adj.vertex_adjacency, 
+            g_tensor, b_tensor, source_mask,
+            mesh_adj.sweep_orderings, mesh_adj.vertex_adjacency,
             vertices, 50, 1e-6
         )
-        
+
     check_grads(fwd, (G_faces, B_faces), order=1, modes=['rev'], eps=1e-3)

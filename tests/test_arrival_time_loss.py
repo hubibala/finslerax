@@ -1,12 +1,9 @@
 """Tests for ArrivalTimeLoss used in metric recovery experiments."""
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
-import pytest
-from jax import config
 
 # config.update("jax_enable_x64", True)
-
 from ham.geometry.manifolds import EuclideanSpace
 from ham.geometry.zoo import Riemannian
 from ham.models.learned import NeuralRanders

@@ -1,29 +1,39 @@
-import jax.numpy as jnp
 import jax
+import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ham.geometry import Sphere, Randers, TriangularMesh, DiscreteRanders
+from ham.geometry import DiscreteRanders, Randers, Sphere, TriangularMesh
 from ham.solvers import AVBDSolver
-from ham.vis import setup_3d_plot, plot_sphere, plot_trajectory, generate_icosphere, plot_indicatrices
+from ham.vis import (
+    generate_icosphere,
+    plot_indicatrices,
+    plot_sphere,
+    plot_trajectory,
+    setup_3d_plot,
+)
 
 # --- 1. Continuous Physics ---
 radius = 1.0
 sphere_cont = Sphere(radius)
 
+
 # Wind: Rotational around Z (Equatorial Trade Winds)
-def w_net(x): 
+def w_net(x):
     base = jnp.array([-x[1], x[0], 0.0])
     return 0.8 * base
 
-def h_net(x): return jnp.eye(3)
+
+def h_net(x):
+    return jnp.eye(3)
+
 
 metric_randers = Randers(sphere_cont, h_net, w_net)
 metric_riem = Randers(sphere_cont, h_net, lambda x: jnp.zeros(3))
 
 # --- 2. Mission: South -> North ---
 start = jnp.array([0.0, 1.0, 0.0])
-end   = jnp.array([0.0,  0.0, 1.0])
+end = jnp.array([0.0, 0.0, 1.0])
 
 solver = AVBDSolver(step_size=0.05, beta=10.0, iterations=500, tol=1e-6)
 
@@ -46,7 +56,7 @@ verts, faces = generate_icosphere(radius=1.0, subdivisions=1)
 mesh_discrete = TriangularMesh(verts, faces)
 
 print("Sampling Wind field onto Mesh Faces...")
-face_centers = jnp.mean(verts[faces], axis=1) # (F, 3)
+face_centers = jnp.mean(verts[faces], axis=1)  # (F, 3)
 face_winds = jax.vmap(w_net)(face_centers)
 
 metric_discrete_randers = DiscreteRanders(mesh_discrete, face_winds)
@@ -58,26 +68,46 @@ print(f"Energy Discrete Mesh path: {e_mesh:.4f}")
 
 # --- 4. Visualization ---
 fig, ax = setup_3d_plot()
-ax.set_title(f"Zermelo S^2: Discrete Matches Continuous\\nEnergy: {e_rand:.2f} (Cont) vs {e_mesh:.2f} (Disc)")
+ax.set_title(
+    f"Zermelo S^2: Discrete Matches Continuous\\nEnergy: {e_rand:.2f} (Cont) vs {e_mesh:.2f} (Disc)"
+)
 
 plot_sphere(ax, alpha=0.05)
 
 # Wind Vectors
-theta = np.linspace(0, 2*np.pi, 20)
+theta = np.linspace(0, 2 * np.pi, 20)
 equator_pts = np.stack([np.cos(theta), np.sin(theta), np.zeros_like(theta)], axis=1)
 wind_vecs = np.array(jax.vmap(w_net)(jnp.array(equator_pts)))
-ax.quiver(equator_pts[:,0], equator_pts[:,1], equator_pts[:,2], 
-          wind_vecs[:,0], wind_vecs[:,1], wind_vecs[:,2], 
-          length=0.2, color='blue', alpha=0.6, label='Wind')
+ax.quiver(
+    equator_pts[:, 0],
+    equator_pts[:, 1],
+    equator_pts[:, 2],
+    wind_vecs[:, 0],
+    wind_vecs[:, 1],
+    wind_vecs[:, 2],
+    length=0.2,
+    color="blue",
+    alpha=0.6,
+    label="Wind",
+)
 
 # Paths
-plot_trajectory(ax, traj_riem, color='gray', linestyle='--', label='Riemannian (Great Circle)')
-plot_trajectory(ax, traj_rand, color='green', linewidth=4, label='Randers (Continuous)')
-plot_trajectory(ax, traj_mesh, color='orange', linestyle=':', linewidth=2, label='Randers (Discrete)')
+plot_trajectory(
+    ax, traj_riem, color="gray", linestyle="--", label="Riemannian (Great Circle)"
+)
+plot_trajectory(ax, traj_rand, color="green", linewidth=4, label="Randers (Continuous)")
+plot_trajectory(
+    ax,
+    traj_mesh,
+    color="orange",
+    linestyle=":",
+    linewidth=2,
+    label="Randers (Discrete)",
+)
 
 # Indicatrices
 ind_pts = traj_rand.xs[::6]
-plot_indicatrices(ax, metric_randers, ind_pts, scale=0.15, color='purple')
+plot_indicatrices(ax, metric_randers, ind_pts, scale=0.15, color="purple")
 
 ax.legend()
 plt.savefig("zermelo_demo.png")
