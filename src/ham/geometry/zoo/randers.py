@@ -27,7 +27,7 @@ class Randers(AsymmetricMetric):
                  epsilon: float = 1e-5,
                  use_wind: bool = True):
         """Initializes the Randers metric."""
-        self.manifold = manifold
+        super().__init__(manifold=manifold)
         self.h_net = h_net
         self.w_net = w_net
         self.epsilon = float(epsilon)

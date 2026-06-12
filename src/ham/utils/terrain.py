@@ -17,7 +17,7 @@ from typing import Tuple
 from ham.geometry.mesh import TriangularMesh
 from ham.geometry.metric import FinslerMetric, AsymmetricMetric
 from ham.models.wildfire import project_spd, project_b_norm
-from ham.utils.math import GRAD_EPS
+from ham.utils.math import GRAD_EPS, safe_norm
 
 __all__ = [
     "dem_to_mesh",
@@ -175,7 +175,7 @@ def compute_face_normals(mesh: TriangularMesh) -> jnp.ndarray:
     e1 = v1 - v0
     e2 = v2 - v0
     normals = jnp.cross(e1, e2)    # (F, 3)
-    norms = jnp.sqrt(jnp.sum(normals ** 2, axis=-1, keepdims=True) + 1e-12)
+    norms = safe_norm(normals, axis=-1, keepdims=True)
     return normals / norms
 
 
@@ -418,16 +418,16 @@ class CovariateMeshRanders(AsymmetricMetric):
         # Orthonormal face frame via Gram-Schmidt
         e1_raw = v1_tri - v0_tri
         e2_raw = v2_tri - v0_tri
-        norm_e1 = jnp.sqrt(jnp.sum(e1_raw ** 2) + 1e-12)
+        norm_e1 = safe_norm(e1_raw)
         u1 = e1_raw / norm_e1
 
         e2_orth = e2_raw - jnp.dot(e2_raw, u1) * u1
-        norm_e2 = jnp.sqrt(jnp.sum(e2_orth ** 2) + 1e-12)
+        norm_e2 = safe_norm(e2_orth)
         u2 = e2_orth / norm_e2
 
         # Face normal and tangent projection
         normal = jnp.cross(u1, u2)
-        normal = normal / jnp.sqrt(jnp.sum(normal ** 2) + 1e-12)
+        normal = normal / safe_norm(normal)
         v_tan = v_safe - jnp.dot(v_safe, normal) * normal
 
         # Randers parameters for this face
@@ -476,10 +476,10 @@ class CovariateMeshRanders(AsymmetricMetric):
         v0_tri, v1_tri, v2_tri = tri[0], tri[1], tri[2]
         e1_raw = v1_tri - v0_tri
         e2_raw = v2_tri - v0_tri
-        norm_e1 = jnp.sqrt(jnp.sum(e1_raw ** 2) + 1e-12)
+        norm_e1 = safe_norm(e1_raw)
         u1 = e1_raw / norm_e1
         e2_orth = e2_raw - jnp.dot(e2_raw, u1) * u1
-        norm_e2 = jnp.sqrt(jnp.sum(e2_orth ** 2) + 1e-12)
+        norm_e2 = safe_norm(e2_orth)
         u2 = e2_orth / norm_e2
 
         G_f, b_f = self._get_face_params(face_idx)

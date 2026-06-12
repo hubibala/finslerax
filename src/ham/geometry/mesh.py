@@ -342,7 +342,7 @@ class TriangularMesh(Manifold):
         
         # If the triangle is degenerate (collinear edges), the basis is ill-defined.
         # safe_norm prevents NaN, but we should guard the final projection.
-        area_sq = d3, d4, d5 = jnp.dot(u, u), jnp.dot(u, w), jnp.dot(w, w)
+        d3, d4, d5 = jnp.dot(u, u), jnp.dot(u, w), jnp.dot(w, w)
         det = d3 * d5 - d4 * d4
         is_degenerate = det < NORM_EPS**2
         

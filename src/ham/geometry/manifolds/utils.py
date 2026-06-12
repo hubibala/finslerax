@@ -63,4 +63,4 @@ def _safe_arccos_jvp(primals, tangents):
     (x_dot,) = tangents
     denom = jnp.sqrt(jnp.maximum(1.0 - x**2, GRAD_EPS))
     tangent_out = -x_dot / denom
-    return jnp.arccos(x), tangent_out
+    return _safe_arccos(x), tangent_out

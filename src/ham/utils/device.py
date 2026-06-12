@@ -21,9 +21,12 @@ importing JAX::
     JAX_PLATFORMS=gpu python examples/experiment_gahtan_phase1.py
 """
 
+import logging
 import jax
 
 __all__ = ["get_device", "configure_device"]
+
+logger = logging.getLogger(__name__)
 
 
 def get_device(device: str = "cpu") -> jax.Device:
@@ -71,5 +74,5 @@ def configure_device(device: str) -> jax.Device:
     """
     dev = get_device(device)
     jax.config.update("jax_default_device", dev)
-    print(f"[HAMTools] Default JAX device set to: {dev}")
+    logger.info(f"Default JAX device set to: {dev}")
     return dev

@@ -70,7 +70,7 @@ def safe_norm(x, axis=-1, keepdims=False, eps=GRAD_EPS):
         x: Input array of arbitrary shape.
         axis: Axis along which to compute the norm. Defaults to -1.
         keepdims: Whether to keep the reduced axis. Defaults to False.
-        eps: Guard epsilon. Defaults to :const:`GRAD_EPS` (1e-12).
+        eps: Guard epsilon. Defaults to :const:`GRAD_EPS` (1e-6).
 
     Returns:
         Array of L2 norms with the same dtype as x.

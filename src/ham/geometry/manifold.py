@@ -205,6 +205,24 @@ class Manifold(eqx.Module, ABC):
         scale = jnp.clip(_safe_norm_ratio(y - x, v), 0.0, 1e4)
         
         return v * scale
+
+    def parallel_transport(self, x: jax.Array, y: jax.Array, v: jax.Array) -> jax.Array:
+        """
+        Parallel transports vector v from T_x M to T_y M along the geodesic x -> y.
+        
+        The default implementation provides a first-order approximation via 
+        orthogonal projection onto T_y M. Exact Riemannian manifolds should 
+        override this with closed-form expressions.
+        
+        Args:
+            x: Source point on M. Shape: `(D,)` or `(N,)` in ambient coordinates.
+            y: Target point on M. Shape: same as `x`.
+            v: Tangent vector in T_x M. Shape: same as `x`.
+            
+        Returns:
+            Transported vector in T_y M. Shape: same as `x`.
+        """
+        return self.to_tangent(y, v)
     
     @abstractmethod
     def random_sample(self, key: jax.Array, shape: tuple[int, ...]) -> jax.Array:

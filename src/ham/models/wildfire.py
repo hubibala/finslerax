@@ -611,9 +611,7 @@ class CovariateConditionedRanders(AsymmetricMetric):
             b = jnp.zeros(2, dtype=G.dtype)
         return G, b
 
-    def zermelo_data(
-        self, x: jax.Array
-    ) -> tuple[jax.Array, jax.Array, jax.Array]:
+    def zermelo_data(self, x: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array]:
         """Return the Zermelo navigation triple ``(H, W, lambda)`` at position x.
 
         Implements the :class:`~ham.geometry.metric.AsymmetricMetric` interface
@@ -625,27 +623,22 @@ class CovariateConditionedRanders(AsymmetricMetric):
             x: (2,) world-coordinate position.
 
         Returns:
-            G:      (2, 2) SPD metric tensor (the Riemannian sea).
-            b:      (2,) drift vector (the wind).
-            lambda: Causality scalar ``1 - ||b||²_{G^{-1}}``.
-        """
-    def zermelo_data(self, x: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array]:
-        """Convert metric to Eikonal-compatible (H, W, lam) formulation.
-
-        Returns:
-            lambda: Contravariant Zermelo metric matrix ``H(x)``.
-            lambda: Contravariant wind vector ``W(x)``.
-            lambda: Causality scalar ``1 - ||b||^2_{G^{-1}}``.
+            H:      (2, 2) contravariant SPD metric tensor (the Riemannian sea).
+            W:      (2,) contravariant drift vector (the wind).
+            lambda: Causality scalar ``1 - ||W||^2_{H^{-1}}``.
         """
         G, b = self._get_params(x)
         det_G = jnp.maximum(G[0, 0] * G[1, 1] - G[0, 1] ** 2, 1e-8)
         
-        # Ginv is the inverse of the covariant G
+        # Ginv is the inverse of the covariant G. In Zermelo formulation, H = G^{-1}.
         Ginv11 = G[1, 1] / det_G
         Ginv22 = G[0, 0] / det_G
         Ginv12 = -G[0, 1] / det_G
         
-        # W = G^{-1} * b
+        H = jnp.stack([jnp.stack([Ginv11, Ginv12]),
+                       jnp.stack([Ginv12, Ginv22])])
+        
+        # W = G^{-1} * b = H * b
         W1 = Ginv11 * b[0] + Ginv12 * b[1]
         W2 = Ginv12 * b[0] + Ginv22 * b[1]
         W = jnp.array([W1, W2])
@@ -653,7 +646,7 @@ class CovariateConditionedRanders(AsymmetricMetric):
         b_Ginv_b = b[0]*W1 + b[1]*W2
         lam = jnp.maximum(1.0 - b_Ginv_b, 1e-6)
         
-        return G, W, lam
+        return H, W, lam
 
     def metric_fn(self, x: jax.Array, v: jax.Array) -> jax.Array:
         """Randers-Zermelo cost F(x, v).

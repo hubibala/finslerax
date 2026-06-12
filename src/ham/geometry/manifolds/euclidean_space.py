@@ -20,36 +20,38 @@ class EuclideanSpace(Manifold):
 
     @property
     def ambient_dim(self) -> int:
+        """The dimension of the embedding Euclidean space."""
         return self._dim
 
     @property
     def intrinsic_dim(self) -> int:
+        """The intrinsic dimension of the manifold."""
         return self._dim
 
     def project(self, x: jax.Array) -> jax.Array:
-        """Identity projection."""
+        """Identity projection, as points are inherently valid in Euclidean space."""
         return x
 
     def to_tangent(self, x: jax.Array, v: jax.Array) -> jax.Array:
-        """Identity tangent projection."""
+        """Identity tangent projection, as tangent spaces are identical to the space itself."""
         return v
 
     def exp_map(self, x: jax.Array, v: jax.Array) -> jax.Array:
-        """Flat exponential map: x + v."""
+        """Flat exponential map: ``x + v``."""
         return x + v
 
     def retract(self, x: jax.Array, delta: jax.Array) -> jax.Array:
-        """Flat retraction: x + delta."""
+        """Flat retraction: ``x + delta``."""
         return x + delta
 
     def log_map(self, x: jax.Array, y: jax.Array) -> jax.Array:
-        """Flat log map: y - x."""
+        """Flat log map (inverse of exp_map): ``y - x``."""
         return y - x
 
     def parallel_transport(self, x: jax.Array, y: jax.Array, v: jax.Array) -> jax.Array:
-        """Identity parallel transport."""
+        """Identity parallel transport: vectors do not rotate in flat space."""
         return v
 
     def random_sample(self, key: jax.Array, shape: tuple[int, ...] = ()) -> jax.Array:
-        """Gaussian random sampling."""
+        """Gaussian random sampling from N(0, I)."""
         return jax.random.normal(key, shape + (self._dim,))

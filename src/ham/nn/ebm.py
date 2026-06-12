@@ -38,8 +38,7 @@ class ScalarEnergyField(eqx.Module):
     this represents Waddington's altitude. The data distribution is defined as
     p(x) \propto exp(-E(x)).
     
-    Uses SiLU (Swish) activation for smooth, non-monotonic gradients, and a 
-    Quadratic Head to ensure the energy landscape is globally confining.
+    Uses SiLU (Swish) activation for smooth, non-monotonic gradients.
     """
     embedding: Optional[RandomFourierFeatures]
     mlp: eqx.nn.MLP
