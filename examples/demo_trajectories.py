@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
-from sim.fields import rossby_haurwitz
+from ham.sim.fields import rossby_haurwitz
 
 # config.update("jax_enable_x64", True)
 from ham.geometry import Randers, Sphere

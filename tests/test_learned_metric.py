@@ -130,7 +130,7 @@ class TestNeuralRiemannian(unittest.TestCase):
     def test_jit_vmap(self):
         xs = jnp.ones((3, 3)) * 0.5
         vs = jnp.eye(3)
-        energy_fn = eqx.filter_jit(jax.vmap(self.metric.energy))
+        energy_fn = eqx.filter_jit(eqx.filter_vmap(self.metric.energy))
         result = energy_fn(xs, vs)
         self.assertEqual(result.shape, (3,))
         self.assertTrue(jnp.all(jnp.isfinite(result)))
@@ -184,7 +184,7 @@ class TestPullbackRiemannian(unittest.TestCase):
     def test_jit_vmap(self):
         xs = jnp.ones((3, 3)) * 0.1
         vs = jnp.eye(3)
-        energy_fn = eqx.filter_jit(jax.vmap(self.metric.energy))
+        energy_fn = eqx.filter_jit(eqx.filter_vmap(self.metric.energy))
         result = energy_fn(xs, vs)
         self.assertEqual(result.shape, (3,))
         self.assertTrue(jnp.all(jnp.isfinite(result)))

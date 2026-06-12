@@ -46,6 +46,7 @@ import argparse
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
 import equinox as eqx
 import jax
@@ -100,26 +101,26 @@ def get_config(quick: bool = False) -> dict:
     Returns:
         dict with all hyperparameters.
     """
-    return dict(
-        quick=quick,
-        hidden_dim=128,
-        fuel_emb_dim=4,
-        cnn_channels=64,
-        n_epochs=50 if quick else 100,
-        lr=1e-3,
-        lr_schedule="adam",  # fixed lr Adam (matches Gahtan)
-        grad_clip=1.0,  # matches Gahtan grad_clip=1.0
-        early_stopping_patience=20,  # patience in epochs (applied every val_interval epochs)
-        batch_size_fires=32,  # matches Gahtan batch_size=32
-        sequential_fires=False,
-        eikonal_iters=50,
-        lambda_tv=0.005,  # single TV weight, matches Gahtan lambda_G=lambda_B=0.005
-        k_train_obs=500,  # obs pixels sampled per fire by the loader (for val_pixels field)
-        train_ratio=0.70,
-        val_ratio=0.15,
-        seed=42,
-        train_seeds=[0] if quick else [0, 1, 2],
-    )
+    return {
+        "quick": quick,
+        "hidden_dim": 128,
+        "fuel_emb_dim": 4,
+        "cnn_channels": 64,
+        "n_epochs": 50 if quick else 100,
+        "lr": 1e-3,
+        "lr_schedule": "adam",  # fixed lr Adam (matches Gahtan)
+        "grad_clip": 1.0,  # matches Gahtan grad_clip=1.0
+        "early_stopping_patience": 20,  # patience in epochs (applied every val_interval epochs)
+        "batch_size_fires": 32,  # matches Gahtan batch_size=32
+        "sequential_fires": False,
+        "eikonal_iters": 50,
+        "lambda_tv": 0.005,  # single TV weight, matches Gahtan lambda_G=lambda_B=0.005
+        "k_train_obs": 500,  # obs pixels sampled per fire by the loader (for val_pixels field)
+        "train_ratio": 0.70,
+        "val_ratio": 0.15,
+        "seed": 42,
+        "train_seeds": [0] if quick else [0, 1, 2],
+    }
 
 
 # ===========================================================================
@@ -574,13 +575,13 @@ def evaluate_fire(
 
     n_burned = int(np.sum(scenario.burned_mask))
     if len(eval_pixels) == 0:
-        return dict(
-            pearson_r=0.0,
-            spearman_r=0.0,
-            iou_50=0.0,
-            eval_coverage=0.0,
-            n_eval_pixels=0,
-        )
+        return {
+            "pearson_r": 0.0,
+            "spearman_r": 0.0,
+            "iou_50": 0.0,
+            "eval_coverage": 0.0,
+            "n_eval_pixels": 0,
+        }
 
     bound_metric = bind_scenario_to_metric(metric, scenario)
     bound_metric = bound_metric.precompute_metric_field()
@@ -644,13 +645,13 @@ def evaluate_fire(
     else:
         iou50 = 0.0
 
-    return dict(
-        pearson_r=r_pearson,
-        spearman_r=r_spearman,
-        iou_50=iou50,
-        eval_coverage=coverage,
-        n_eval_pixels=len(eval_pixels),
-    )
+    return {
+        "pearson_r": r_pearson,
+        "spearman_r": r_spearman,
+        "iou_50": iou50,
+        "eval_coverage": coverage,
+        "n_eval_pixels": len(eval_pixels),
+    }
 
 
 # ===========================================================================
@@ -691,7 +692,7 @@ def _val_metrics(
     # Valid mask: GT finite and solver converged (< 1e5)
     valid = np.isfinite(gt_full) & (pred_dense < 1e5)
     if valid.sum() < 10:
-        return dict(pearson_r=0.0, relative_rmse=float("inf"))
+        return {"pearson_r": 0.0, "relative_rmse": float("inf")}
 
     pred_v = pred_dense[valid]
     gt_v = gt_full[valid]
@@ -703,14 +704,14 @@ def _val_metrics(
     max_gt = float(gt_v.max())
     rel_rmse = rmse / max_gt if max_gt > 1e-6 else float("inf")
 
-    return dict(pearson_r=r, relative_rmse=rel_rmse)
+    return {"pearson_r": r, "relative_rmse": rel_rmse}
 
 
 def _val_pearson_r(
     metric: CovariateConditionedRanders,
     solver: EikonalSolver,
     scenario: WildfireScenario,
-    cfg: dict = None,
+    cfg: Optional[dict] = None,
 ) -> float:
     """Backwards-compat wrapper — returns Pearson r only."""
     return _val_metrics(metric, solver, scenario)["pearson_r"]
@@ -879,8 +880,6 @@ def train_scene(
     best_metric = metric
     patience_counter: int = 0
     train_loss_history: list = []
-    train_data_loss_history: list = []
-    train_reg_loss_history: list = []
     val_r_history: list = []
     val_rel_rmse_history: list = []
     epoch_runtimes: list = []
@@ -948,7 +947,7 @@ def train_scene(
     B = cfg["batch_size_fires"]  # vmap batch size
     print(
         f"  Batched training (dense MSE): B={B} fires/step, "
-        f"{n_batches_per_epoch} steps/epoch, grid={H_grid}×{W_grid}"
+        f"{n_batches_per_epoch} steps/epoch, grid={H_grid}×{W_grid}"  # noqa: RUF001
     )
 
     for epoch in range(cfg["n_epochs"]):
@@ -957,8 +956,6 @@ def train_scene(
         # Shuffle training fires
         perm = rng.permutation(len(train_scenarios))
         epoch_losses: list = []
-        epoch_data_losses: list = []
-        epoch_reg_losses: list = []
 
         for batch_start in range(0, len(perm) - B + 1, B):
             batch_idx = perm[batch_start : batch_start + B]
@@ -978,7 +975,7 @@ def train_scene(
         epoch_runtimes.append(time.time() - t_epoch)
 
         # Validation every 5 epochs (quick) or every epoch (full) — matches Gahtan cadence
-        val_interval = 5 if cfg.get("quick", False) else 5
+        val_interval = 5
         if (epoch + 1) % val_interval == 0 or epoch == 0:
             val_results = [_val_metrics(metric, solver, sc) for sc in val_scenarios]
             mean_val_r = (
@@ -1070,23 +1067,23 @@ def train_scene(
     eqx.tree_serialise_leaves(ckpt_path, best_metric)
     print(f"    Saved checkpoint: {ckpt_path}")
 
-    return dict(
-        scene_id=scene_id,
-        seed=seed,
-        use_wind=use_wind,
-        test_pearson_r_mean=test_r_mean,
-        test_pearson_r_std=test_r_std,
-        test_spearman_r_mean=test_spr_mean,
-        test_relative_rmse_mean=test_rel_rmse_mean,
-        test_relative_rmse_std=test_rel_rmse_std,
-        test_iou50=test_iou50,
-        eval_coverage=mean_coverage,
-        best_val_corr=best_val_corr,
-        train_loss_history=train_loss_history,
-        val_r_history=val_r_history,
-        val_rel_rmse_history=val_rel_rmse_history,
-        runtime_per_epoch_s=runtime_per_epoch,
-    )
+    return {
+        "scene_id": scene_id,
+        "seed": seed,
+        "use_wind": use_wind,
+        "test_pearson_r_mean": test_r_mean,
+        "test_pearson_r_std": test_r_std,
+        "test_spearman_r_mean": test_spr_mean,
+        "test_relative_rmse_mean": test_rel_rmse_mean,
+        "test_relative_rmse_std": test_rel_rmse_std,
+        "test_iou50": test_iou50,
+        "eval_coverage": mean_coverage,
+        "best_val_corr": best_val_corr,
+        "train_loss_history": train_loss_history,
+        "val_r_history": val_r_history,
+        "val_rel_rmse_history": val_rel_rmse_history,
+        "runtime_per_epoch_s": runtime_per_epoch,
+    }
 
 
 # ===========================================================================
@@ -1222,7 +1219,7 @@ def _save_figures(results: list, output_dir: str, cfg: dict) -> None:
     ax.scatter(rts, cors, s=40, alpha=0.7, color="#4477AA")
     ax.set_xlabel("Runtime (s / epoch)")
     ax.set_ylabel("Test Pearson r")
-    ax.set_title("Phase W1 — Runtime–correlation tradeoff")
+    ax.set_title("Phase W1 — Runtime–correlation tradeoff")  # noqa: RUF001
     plt.tight_layout()
     for ext in ("pdf", "png"):
         fig.savefig(os.path.join(fig_dir, f"phaseW1_runtime_tradeoff.{ext}"), dpi=150)
@@ -1461,19 +1458,19 @@ def run_synthetic(cfg: dict, output_dir: str, use_wind: bool = True) -> dict:
         eqx.tree_serialise_leaves(ckpt_path, metric)
         print(f"  Checkpoint saved to {ckpt_path}")
 
-    return dict(
-        scene_id="synthetic",
-        seed=cfg["seed"],
-        use_wind=use_wind,
-        test_pearson_r_mean=result["pearson_r"],
-        test_pearson_r_std=0.0,
-        test_spearman_r_mean=result["spearman_r"],
-        test_iou50=result["iou_50"],
-        eval_coverage=result["eval_coverage"],
-        train_loss_history=train_loss_history,
-        val_r_history=[],
-        runtime_per_epoch_s=train_time / max(n_epochs, 1),
-    )
+    return {
+        "scene_id": "synthetic",
+        "seed": cfg["seed"],
+        "use_wind": use_wind,
+        "test_pearson_r_mean": result["pearson_r"],
+        "test_pearson_r_std": 0.0,
+        "test_spearman_r_mean": result["spearman_r"],
+        "test_iou50": result["iou_50"],
+        "eval_coverage": result["eval_coverage"],
+        "train_loss_history": train_loss_history,
+        "val_r_history": [],
+        "runtime_per_epoch_s": train_time / max(n_epochs, 1),
+    }
 
 
 # ===========================================================================
@@ -1536,7 +1533,7 @@ def main() -> None:
         action="store_true",
         help=(
             "Use jax.lax.map instead of jax.vmap for the per-fire training loop. "
-            "Reduces peak memory from O(B×grid) to O(grid) — required on "
+            "Reduces peak memory from O(B×grid) to O(grid) — required on "  # noqa: RUF001
             "memory-constrained TPUs (e.g. Colab v2-8 with 32 GB HBM). "
             "Slower than vmap but otherwise numerically identical."
         ),
@@ -1553,7 +1550,7 @@ def main() -> None:
         "--synthetic",
         action="store_true",
         help=(
-            "Run the synthetic smoke test on a generated 20×20 grid — "
+            "Run the synthetic smoke test on a generated 20×20 grid — "  # noqa: RUF001
             "no real dataset required.  Combine with --quick for fast CI."
         ),
     )
