@@ -1,3 +1,8 @@
+> ⚠️ **SUPERSEDED (2026-06-12).** This report describes the *pre-reorganization* layout
+> (`src/ham/bio/`, `src/ham/sim/`, `experiments/`) and most of its P0/P1 findings are now fixed.
+> See **[REPORT_2026-06-12.md](REPORT_2026-06-12.md)** for the current state of the codebase.
+> Retained below for historical reference.
+
 # HAMTools Full Codebase Review — Master Report
 
 **Date:** 2026-05-15 (updated 2026-05-18 — wildfire training regression investigation)**  

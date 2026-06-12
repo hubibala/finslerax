@@ -20,29 +20,76 @@ class WrappedNormal(eqx.Module):
         self.scale = scale
         self.manifold = manifold
 
+    def _prior_origin(self) -> jnp.ndarray:
+        """Canonical origin of the prior (the base point of the standard wrapped normal).
+
+        Mirrors the per-manifold convention used by :meth:`sample`:
+        the zero vector for flat Euclidean space, the time-axis pole
+        ``e_0`` for the hyperboloid, and ``radius * e_{-1}`` for the sphere.
+        """
+        origin = jnp.zeros_like(self.mean)
+        if self.manifold.ambient_dim == self.manifold.intrinsic_dim:
+            return origin
+        elif isinstance(self.manifold, Hyperboloid):
+            return origin.at[..., 0].set(1.0)
+        else:
+            radius = getattr(self.manifold, "radius", 1.0)
+            return origin.at[..., -1].set(radius)
+
     def sample(self, key: jax.random.PRNGKey, shape: Tuple[int] = ()) -> jnp.ndarray:
         d = self.manifold.intrinsic_dim
         v_flat = jax.random.normal(key, shape + (d,)) * self.scale
-        
-        origin = jnp.zeros_like(self.mean)
-        if hasattr(self.manifold, "ambient_dim") and self.manifold.ambient_dim == self.manifold.intrinsic_dim:
+
+        origin = self._prior_origin()
+        if self.manifold.ambient_dim == self.manifold.intrinsic_dim:
             v_origin = v_flat
         elif isinstance(self.manifold, Hyperboloid):
-            origin = origin.at[..., 0].set(1.0)
             v_origin = jnp.concatenate([jnp.zeros(shape + (1,)), v_flat], axis=-1)
         else:
             # Sphere or other fallback
-            radius = getattr(self.manifold, "radius", 1.0)
-            origin = origin.at[..., -1].set(radius)
             v_origin = jnp.concatenate([v_flat, jnp.zeros(shape + (1,))], axis=-1)
-            
+
         v_at_mean = self.manifold.parallel_transport(origin, self.mean, v_origin)
         z = self.manifold.exp_map(self.mean, v_at_mean)
         return z
 
     def kl_divergence_std_normal(self) -> jnp.ndarray:
-        kl = -jnp.log(self.scale + 1e-6) + (self.scale**2) / 2.0 - 0.5
-        return jnp.sum(kl, axis=-1)
+        r"""KL divergence to the standard wrapped normal prior at the origin.
+
+        For a wrapped normal :math:`q = \mathrm{exp}_\mu(\mathrm{PT}_{o\to\mu}(u))`
+        with :math:`u \sim \mathcal N(0, \sigma^2)` in the tangent space at the
+        origin, the divergence to the prior :math:`p` (origin mean, unit scale)
+        decomposes into a *scale* term and a *location* term:
+
+        .. math::
+            \mathrm{KL}(q\,\|\,p)
+            = \underbrace{\sum_i \big(\tfrac{1}{2}\sigma_i^2 - \log\sigma_i - \tfrac12\big)}_{\text{scale}}
+            + \underbrace{\tfrac12\, d_M(o, \mu)^2}_{\text{location}} .
+
+        The location term :math:`\tfrac12 d_M(o,\mu)^2` is the manifold
+        generalisation of the Euclidean :math:`\tfrac12\|\mu\|^2`; it is
+        computed as :math:`\tfrac12\|\log_o \mu\|^2` in the tangent metric at
+        the origin (Minkowski norm on the hyperboloid).  Omitting it leaves the
+        posterior *mean* entirely unregularised, which collapses the KL's role
+        as a prior on latent location.
+
+        Reference: Nagano et al., *A Wrapped Normal Distribution on Hyperbolic
+        Space for Gradient-Based Learning*, ICML 2019.
+        """
+        scale_kl = jnp.sum(
+            -jnp.log(self.scale + 1e-6) + (self.scale**2) / 2.0 - 0.5, axis=-1
+        )
+
+        origin = self._prior_origin()
+        v0 = self.manifold.log_map(origin, self.mean)
+        if hasattr(self.manifold, "_minkowski_dot"):
+            # Geodesic distance² in the Minkowski tangent metric (hyperboloid).
+            d_sq = self.manifold._minkowski_dot(v0, v0)
+        else:
+            d_sq = jnp.sum(v0**2, axis=-1)
+        location_kl = 0.5 * jnp.maximum(d_sq, 0.0)
+
+        return scale_kl + location_kl
 
 class GeometricVAE(eqx.Module):
     """

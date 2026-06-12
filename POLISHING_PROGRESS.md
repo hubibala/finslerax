@@ -31,10 +31,11 @@ With the geometry and solvers fixed, we polish the neural components, losses, an
 
 ## Phase 4: Biology & Models
 These files apply the framework to biological data (RNA velocity) and model architectures (VAE).
+Paths below are now under `research/weinreb/bio/`. See `reviews/REPORT_2026-06-12.md` §4.
 
-- [ ] `src/ham/bio/data.py`
-- [ ] `src/ham/bio/check_data.py`
-- [ ] `src/ham/bio/vae.py`
+- [~] `research/weinreb/bio/data.py` — CRITICAL velocity→PCA projection fixed (wind was silently 0); full doc pass pending
+- [ ] `research/weinreb/bio/check_data.py`
+- [~] `research/weinreb/bio/vae.py` — CRITICAL KL location term added + regression tests; `_minkowski_*` coupling (W-MK) pending
 - [ ] `src/ham/bio/train_geodesic.py`
 - [ ] `src/ham/bio/train_joint.py`
 - [ ] `src/ham/bio/train_modular.py`

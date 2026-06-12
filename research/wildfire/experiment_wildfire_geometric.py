@@ -47,7 +47,7 @@ from jax import config
 from ham.geometry.manifolds import EuclideanSpace
 from ham.models.wildfire import CovariateConditionedRanders
 from ham.solvers.avbd import AVBDSolver
-from ham.geometry.curvature import flag_curvature_sample, scalar_curvature
+from ham.geometry.curvature import flag_curvature_sample
 from ham.data.wildfire import WildfireScenario
 
 FIG_DIR = "results/phaseW3/figs"
