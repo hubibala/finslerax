@@ -33,12 +33,14 @@ Dataset folder structure expected at ``data_root``::
 
 import glob
 import os
+from typing import Optional
 
 import numpy as np
 from PIL import Image
 
 try:
     import rasterio
+
     HAS_RASTERIO = True
 except ImportError:
     HAS_RASTERIO = False
@@ -82,9 +84,7 @@ class Sim2RealFireLoader:
                 for event_folder in os.listdir(mask_dir):
                     event_path = os.path.join(mask_dir, event_folder)
                     if os.path.isdir(event_path):
-                        weather_file = os.path.join(
-                            weather_dir, f"{event_folder}.txt"
-                        )
+                        weather_file = os.path.join(weather_dir, f"{event_folder}.txt")
                         if os.path.exists(weather_file):
                             events.append(event_folder)
                 if events:
@@ -94,7 +94,7 @@ class Sim2RealFireLoader:
                     }
         return scenes
 
-    def list_scenarios(self, scene_filter: list = None) -> list:
+    def list_scenarios(self, scene_filter: Optional[list] = None) -> list:
         """Return list of ``(scene_id, event_id)`` tuples.
 
         Args:
@@ -133,12 +133,8 @@ class Sim2RealFireLoader:
         veg = self._load_tif_folder(
             os.path.join(scene_path, "Vegetation_Map"), self.VEG_FILES
         )
-        mask_dir = os.path.join(
-            scene_path, "Satellite_Images_Mask", event_id
-        )
-        weather_file = os.path.join(
-            scene_path, "Weather_Data", f"{event_id}.txt"
-        )
+        mask_dir = os.path.join(scene_path, "Satellite_Images_Mask", event_id)
+        weather_file = os.path.join(scene_path, "Weather_Data", f"{event_id}.txt")
         masks, timestamps = self._load_mask_sequence(mask_dir)
         weather = self._load_weather(weather_file)
         return {
@@ -178,19 +174,26 @@ class Sim2RealFireLoader:
         """
         mask_files = glob.glob(os.path.join(mask_dir, "out*.jpg"))
 
-        def _get_index(f):
-            basename = os.path.basename(f)
-            return int(basename.replace("out", "").replace(".jpg", ""))
+        if mask_files:
 
-        mask_files = sorted(mask_files, key=_get_index)
+            def _get_index(f):
+                basename = os.path.basename(f)
+                return int(basename.replace("out", "").replace(".jpg", ""))
+
+            mask_files = sorted(mask_files, key=_get_index)
+        else:
+            # Fallback for real fire data
+            mask_files = glob.glob(os.path.join(mask_dir, "*.png"))
+            mask_files = sorted(mask_files)
+
         masks = []
         for f in mask_files:
             img = Image.open(f).convert("L")
             arr = np.array(img)
             masks.append(arr > 127)
-        masks = np.stack(masks, axis=0)
+        masks_arr = np.stack(masks, axis=0)
         timestamps = list(range(len(masks)))
-        return masks, timestamps
+        return masks_arr, timestamps
 
     def _load_weather(self, filepath: str) -> np.ndarray:
         """Load weather data file.
@@ -202,7 +205,7 @@ class Sim2RealFireLoader:
             ``(temp, humidity, wind_speed, wind_dir_sin, wind_dir_cos)``.
         """
         data = []
-        with open(filepath, "r") as f:
+        with open(filepath) as f:
             for line in f:
                 parts = line.strip().split()
                 if len(parts) >= 9:
@@ -210,13 +213,15 @@ class Sim2RealFireLoader:
                     humidity = float(parts[5])
                     wind_speed = float(parts[7])
                     wind_dir_rad = np.deg2rad(float(parts[8]))
-                    data.append([
-                        temp,
-                        humidity,
-                        wind_speed,
-                        np.sin(wind_dir_rad),
-                        np.cos(wind_dir_rad),
-                    ])
+                    data.append(
+                        [
+                            temp,
+                            humidity,
+                            wind_speed,
+                            np.sin(wind_dir_rad),
+                            np.cos(wind_dir_rad),
+                        ]
+                    )
         return np.array(data, dtype=np.float32)
 
 
@@ -231,7 +236,7 @@ def extract_arrival_times(masks: np.ndarray, timestamps: list) -> np.ndarray:
         arrival_times: ``[H, W]`` float32 array — time when each pixel first
         burned; ``inf`` for pixels that never burned.
     """
-    T, H, W = masks.shape
+    _T, H, W = masks.shape
     arrival = np.full((H, W), np.inf, dtype=np.float32)
     for t_idx, t in enumerate(timestamps):
         newly_assigned = masks[t_idx] & np.isinf(arrival)

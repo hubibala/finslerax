@@ -4,14 +4,16 @@ Verifies shapes, mathematical properties (symmetry, positive-definiteness),
 and compatibility with JAX transformations (jit, vmap, grad).
 """
 
+import unittest
+
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import unittest
-import equinox as eqx
 import numpy as np
 
-from ham.nn.networks import VectorField, PSDMatrixField, RandomFourierFeatures
+from ham.nn.networks import PSDMatrixField, RandomFourierFeatures, VectorField
 from ham.utils.math import PSD_EPS
+
 
 class TestRandomFourierFeatures(unittest.TestCase):
     """Standalone tests for the RFF embedding."""
@@ -40,7 +42,7 @@ class TestRandomFourierFeatures(unittest.TestCase):
 
 
 class TestNetworks(unittest.TestCase):
-    
+
     def setUp(self):
         self.key = jax.random.PRNGKey(42)
         self.dim = 3
@@ -49,27 +51,27 @@ class TestNetworks(unittest.TestCase):
         """Verify VectorField works with JIT, vmap, and grad."""
         vf = VectorField(dim=self.dim, hidden_dim=16, depth=2, key=self.key)
         x = jnp.array([0.1, 0.2, 0.3])
-        
+
         # 1. JIT
         @eqx.filter_jit
         def jit_vf(model, val):
             return model(val)
-            
+
         np.testing.assert_allclose(jit_vf(vf, x), vf(x), atol=1e-5)
-        
+
         # 2. Vmap (Map over data, not model)
         xs = jnp.ones((5, self.dim))
         vmap_vf = eqx.filter_vmap(lambda m, val: m(val), in_axes=(None, 0))
         out_batched = vmap_vf(vf, xs)
         self.assertEqual(out_batched.shape, (5, self.dim))
-        
+
         # 3. Grad (Differentiate w.r.t model parameters)
         def loss(model, val):
             return jnp.sum(model(val)**2)
-            
+
         grad_fn = eqx.filter_grad(loss)
         g_model = grad_fn(vf, x)
-        
+
         # Verify gradients flow to MLP weights
         leaves = jax.tree_util.tree_leaves(g_model.mlp)
         self.assertTrue(len(leaves) > 0)
@@ -86,7 +88,7 @@ class TestNetworks(unittest.TestCase):
     def test_psd_matrix_properties(self):
         """The output G must be Symmetric and Positive Definite."""
         psd_net = PSDMatrixField(dim=self.dim, hidden_dim=16, depth=2, key=self.key)
-        
+
         # Test at multiple inputs
         test_inputs = [
             jnp.array([0.5, -0.5, 0.0]),
@@ -96,11 +98,11 @@ class TestNetworks(unittest.TestCase):
         for x in test_inputs:
             G = psd_net(x)
             self.assertEqual(G.shape, (self.dim, self.dim))
-            
+
             # Symmetry: G == G.T
             diff_sym = jnp.max(jnp.abs(G - G.T))
             self.assertLess(float(diff_sym), 1e-12, "Matrix is not exactly symmetric")
-            
+
             # Positive Definite: minimum eigenvalue >= PSD_EPS floor
             eigs = jnp.linalg.eigvalsh(G)
             min_eig = float(jnp.min(eigs))
@@ -131,7 +133,7 @@ class TestNetworks(unittest.TestCase):
 
     def test_psd_with_fourier(self):
         """PSDMatrixField with use_fourier=True should still be SPD."""
-        psd_net = PSDMatrixField(dim=self.dim, hidden_dim=16, depth=2, 
+        psd_net = PSDMatrixField(dim=self.dim, hidden_dim=16, depth=2,
                                  key=self.key, use_fourier=True)
         x = jnp.array([0.1, 0.2, 0.3])
         G = psd_net(x)
@@ -143,11 +145,11 @@ class TestNetworks(unittest.TestCase):
         """Ensure RFF embedding actually changes the output behavior."""
         vf_base = VectorField(3, 32, 2, self.key, use_fourier=False)
         vf_four = VectorField(3, 32, 2, self.key, use_fourier=True)
-        
+
         x = jnp.array([0.1, 0.2, 0.3])
         out_base = vf_base(x)
         out_four = vf_four(x)
-        
+
         # They should differ significantly due to frequency mapping
         self.assertFalse(jnp.allclose(out_base, out_four),
                          "Fourier and non-Fourier outputs should differ")

@@ -1,0 +1,13 @@
+{
+  "name": "A6_piecewise_metric",
+  "category": "A_forward_solver",
+  "success": true,
+  "metrics": {
+    "speed_in_slow": 2.0
+  },
+  "metadata": {
+    "N": 200
+  },
+  "runtime_seconds": 0.060923099517822266,
+  "timestamp": "2026-05-25T12:50:13.471757"
+}

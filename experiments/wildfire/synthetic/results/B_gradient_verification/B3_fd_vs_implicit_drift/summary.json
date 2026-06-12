@@ -1,0 +1,17 @@
+{
+  "name": "B3_fd_vs_implicit_drift",
+  "category": "B_gradient_verification",
+  "success": true,
+  "metrics": {
+    "pct_good_b1": 100.0,
+    "pct_good_b2": 100.0,
+    "mean_err_b1": 0.0,
+    "mean_err_b2": 0.0
+  },
+  "metadata": {
+    "N": 50,
+    "n_test_points": 15
+  },
+  "runtime_seconds": 1.0182716846466064,
+  "timestamp": "2026-05-25T12:50:25.068418"
+}

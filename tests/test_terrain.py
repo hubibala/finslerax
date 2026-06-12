@@ -2,17 +2,15 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-import pytest
 
 from ham.utils.terrain import (
+    CovariateMeshRanders,
+    compute_face_normals,
+    compute_face_slopes_aspects,
     dem_to_mesh,
     interpolate_covariates_to_vertices,
     pixel_to_world_3d,
-    compute_face_normals,
-    compute_face_slopes_aspects,
-    CovariateMeshRanders,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

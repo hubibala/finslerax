@@ -15,22 +15,19 @@ Test structure:
     6. flag_curvature_sample (metric Gram-Schmidt, PRNG key API)
 """
 
+import unittest
+
 import jax
 import jax.numpy as jnp
-import unittest
 import numpy as np
-from jax import config
 
 # config.update("jax_enable_x64", True)
-
-from ham.geometry import EuclideanSpace, Sphere
-from ham.geometry import Euclidean, Riemannian, Randers
+from ham.geometry import Euclidean, EuclideanSpace, Randers, Riemannian, Sphere
 from ham.geometry.curvature import (
+    flag_curvature_sample,
     riemann_curvature_tensor,
     sectional_curvature,
-    flag_curvature_sample,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared metric-based Gram-Schmidt helper for test setup

@@ -19,27 +19,29 @@ See Also:
     ham.models.learned       : NeuralRanders (position-conditioned variant).
 """
 
-from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
-import jax
-import jax.numpy as jnp
-import equinox as eqx
 from typing import Optional
 
-from ham.geometry.metric import FinslerMetric, AsymmetricMetric
+import equinox as eqx
+import jax
+import jax.numpy as jnp
+
 from ham.geometry.manifold import Manifold
-from ham.utils.math import GRAD_EPS, NORM_EPS, PSD_EPS
+from ham.geometry.metric import AsymmetricMetric
+from ham.utils.config import DEFAULT_JNP_DTYPE
+from ham.utils.math import GRAD_EPS, NORM_EPS
 
 __all__ = [
-    "project_spd",
-    "project_b_norm",
-    "LocalTerrainCNN",
     "CovariateConditionedRanders",
+    "LocalTerrainCNN",
+    "project_b_norm",
+    "project_spd",
 ]
 
 
 # ---------------------------------------------------------------------------
 # Differentiable projection helpers
 # ---------------------------------------------------------------------------
+
 
 def project_spd(mat: jax.Array, eps_min: float, eps_max: float) -> jax.Array:
     """Project a 2×2 symmetric matrix to SPD via eigenvalue clamping.
@@ -64,7 +66,9 @@ def project_spd(mat: jax.Array, eps_min: float, eps_max: float) -> jax.Array:
     g22 = mat[1, 1]
 
     trace = g11 + g22
-    disc = jnp.sqrt((g11 - g22) ** 2 + 4.0 * g12 ** 2 + 1e-8)  # 1e-8 prevents O(1e4) grad near isotropic point
+    disc = jnp.sqrt(
+        (g11 - g22) ** 2 + 4.0 * g12**2 + 1e-8
+    )  # 1e-8 prevents O(1e4) grad near isotropic point
     lam_max = (trace + disc) * 0.5
     lam_min = (trace - disc) * 0.5
 
@@ -75,12 +79,11 @@ def project_spd(mat: jax.Array, eps_min: float, eps_max: float) -> jax.Array:
     c = jnp.cos(theta)
     s = jnp.sin(theta)
 
-    g11_new = lam_max_c * c ** 2 + lam_min_c * s ** 2
+    g11_new = lam_max_c * c**2 + lam_min_c * s**2
     g12_new = (lam_max_c - lam_min_c) * c * s
-    g22_new = lam_max_c * s ** 2 + lam_min_c * c ** 2
+    g22_new = lam_max_c * s**2 + lam_min_c * c**2
 
-    return jnp.stack([jnp.stack([g11_new, g12_new]),
-                      jnp.stack([g12_new, g22_new])])
+    return jnp.stack([jnp.stack([g11_new, g12_new]), jnp.stack([g12_new, g22_new])])
 
 
 def project_b_norm(b: jax.Array, G_mat: jax.Array, max_norm: float = 0.9) -> jax.Array:
@@ -103,14 +106,12 @@ def project_b_norm(b: jax.Array, G_mat: jax.Array, max_norm: float = 0.9) -> jax
     g11 = G_mat[0, 0]
     g12 = G_mat[0, 1]
     g22 = G_mat[1, 1]
-    det_G = g11 * g22 - g12 ** 2
+    det_G = g11 * g22 - g12**2
     det_G = jnp.maximum(det_G, 1e-8)
 
     # ||b||_{G^{-1}}^2 = b^T G^{-1} b
     #   = (b1^2 * g22 - 2*b1*b2*g12 + b2^2 * g11) / det(G)
-    norm_sq = (b[0] ** 2 * g22
-               - 2.0 * b[0] * b[1] * g12
-               + b[1] ** 2 * g11) / det_G
+    norm_sq = (b[0] ** 2 * g22 - 2.0 * b[0] * b[1] * g12 + b[1] ** 2 * g11) / det_G
     norm = jnp.sqrt(jnp.maximum(norm_sq, GRAD_EPS))
 
     scale = jnp.minimum(1.0, max_norm / (norm + NORM_EPS))
@@ -120,6 +121,7 @@ def project_b_norm(b: jax.Array, G_mat: jax.Array, max_norm: float = 0.9) -> jax
 # ---------------------------------------------------------------------------
 # LocalTerrainCNN
 # ---------------------------------------------------------------------------
+
 
 class LocalTerrainCNN(eqx.Module):
     """Fully-convolutional terrain encoder mapping raster stacks to local metric params.
@@ -138,23 +140,37 @@ class LocalTerrainCNN(eqx.Module):
         Gahtan, Shpund & Bronstein (2026). arXiv:2603.00035, Section 6.
     """
 
-    conv1: eqx.nn.Conv2d   # 5 → n_channels, kernel 3
-    conv2: eqx.nn.Conv2d   # n_channels → n_channels, kernel 3
-    conv3: eqx.nn.Conv2d   # n_channels → n_channels, kernel 3
-    head:  eqx.nn.Conv2d   # (n_channels + fuel_emb_dim + weather_dim) → 5, kernel 1
+    conv1: eqx.nn.Conv2d  # 5 → n_channels, kernel 3
+    conv2: eqx.nn.Conv2d  # n_channels → n_channels, kernel 3
+    conv3: eqx.nn.Conv2d  # n_channels → n_channels, kernel 3
+    head: eqx.nn.Conv2d  # (n_channels + fuel_emb_dim + weather_dim) → 5, kernel 1
     n_channels: int = eqx.field(static=True)
     fuel_emb_dim: int = eqx.field(static=True)
     weather_dim: int = eqx.field(static=True)
 
-    def __init__(self, fuel_emb_dim: int, n_channels: int, key: jax.Array, weather_dim: int = 4):
+    def __init__(
+        self, fuel_emb_dim: int, n_channels: int, key: jax.Array, weather_dim: int = 4
+    ):
         k1, k2, k3, k4 = jax.random.split(key, 4)
         self.n_channels = int(n_channels)
         self.fuel_emb_dim = int(fuel_emb_dim)
         self.weather_dim = int(weather_dim)
-        self.conv1 = eqx.nn.Conv2d(5, n_channels, 3, padding=1, dtype=DEFAULT_JNP_DTYPE, key=k1)
-        self.conv2 = eqx.nn.Conv2d(n_channels, n_channels, 3, padding=1, dtype=DEFAULT_JNP_DTYPE, key=k2)
-        self.conv3 = eqx.nn.Conv2d(n_channels, n_channels, 3, padding=1, dtype=DEFAULT_JNP_DTYPE, key=k3)
-        self.head  = eqx.nn.Conv2d(n_channels + fuel_emb_dim + weather_dim, 5, 1, dtype=DEFAULT_JNP_DTYPE, key=k4)
+        self.conv1 = eqx.nn.Conv2d(
+            5, n_channels, 3, padding=1, dtype=DEFAULT_JNP_DTYPE, key=k1
+        )
+        self.conv2 = eqx.nn.Conv2d(
+            n_channels, n_channels, 3, padding=1, dtype=DEFAULT_JNP_DTYPE, key=k2
+        )
+        self.conv3 = eqx.nn.Conv2d(
+            n_channels, n_channels, 3, padding=1, dtype=DEFAULT_JNP_DTYPE, key=k3
+        )
+        self.head = eqx.nn.Conv2d(
+            n_channels + fuel_emb_dim + weather_dim,
+            5,
+            1,
+            dtype=DEFAULT_JNP_DTYPE,
+            key=k4,
+        )
 
     def __call__(
         self,
@@ -176,23 +192,24 @@ class LocalTerrainCNN(eqx.Module):
         Returns:
             ``(H, W, 5)`` float64 raw local metric parameters ``[g11, g12, g22, b1, b2]``.
         """
-        x = jax.nn.relu(self.conv1(raster_stack))          # (n_channels, H, W)
-        x = jax.nn.relu(self.conv2(x))                     # (n_channels, H, W)
-        x = jax.nn.relu(self.conv3(x))                     # (n_channels, H, W)
+        x = jax.nn.relu(self.conv1(raster_stack))  # (n_channels, H, W)
+        x = jax.nn.relu(self.conv2(x))  # (n_channels, H, W)
+        x = jax.nn.relu(self.conv3(x))  # (n_channels, H, W)
         H, W = raster_stack.shape[1], raster_stack.shape[2]
         weather_spatial = jnp.broadcast_to(
             weather_vec[:, None, None], (self.weather_dim, H, W)
-        )                                                    # (weather_dim, H, W)
+        )  # (weather_dim, H, W)
         combined = jnp.concatenate(
             [x, fuel_field, weather_spatial], axis=0
-        )                                                    # (n_channels + fuel_emb_dim + weather_dim, H, W)
-        raw_local = self.head(combined)                    # (5, H, W)
-        return raw_local.transpose(1, 2, 0)                # (H, W, 5)
+        )  # (n_channels + fuel_emb_dim + weather_dim, H, W)
+        raw_local = self.head(combined)  # (5, H, W)
+        return raw_local.transpose(1, 2, 0)  # (H, W, 5)
 
 
 # ---------------------------------------------------------------------------
 # CovariateConditionedRanders
 # ---------------------------------------------------------------------------
+
 
 class CovariateConditionedRanders(AsymmetricMetric):
     """Randers-type Finsler metric conditioned on terrain and weather covariates.
@@ -243,26 +260,26 @@ class CovariateConditionedRanders(AsymmetricMetric):
             :meth:`precompute_metric_field`.
     """
 
-    global_mlp: eqx.nn.MLP       # weather covariates (4,) → raw 5 params
-    local_cnn: LocalTerrainCNN   # fully-conv terrain encoder: (5,H,W) → (H,W,5)
-    fuel_embedding: jax.Array    # (13, fuel_emb_dim) — FBFM13 type embeddings
+    global_mlp: eqx.nn.MLP  # weather covariates (4,) → raw 5 params
+    local_cnn: LocalTerrainCNN  # fully-conv terrain encoder: (5,H,W) → (H,W,5)
+    fuel_embedding: jax.Array  # (13, fuel_emb_dim) — FBFM13 type embeddings
 
     # Per-step precomputed local metric parameter field; set by precompute_metric_field().
     # None in the unbound model; (H, W, 5) float64 after precomputation.
-    metric_field: Optional[jax.Array]      # (H, W, 5) float64 local raw params
+    metric_field: Optional[jax.Array]  # (H, W, 5) float64 local raw params
 
     # Baked-in scene covariates (None until bind_scene is called)
-    elev_raster: Optional[jax.Array]       # (H, W) float64
-    slope_raster: Optional[jax.Array]      # (H, W) float64
-    aspect_raster: Optional[jax.Array]     # (H, W) float64
-    canopy_raster: Optional[jax.Array]     # (H, W) float64
+    elev_raster: Optional[jax.Array]  # (H, W) float64
+    slope_raster: Optional[jax.Array]  # (H, W) float64
+    aspect_raster: Optional[jax.Array]  # (H, W) float64
+    canopy_raster: Optional[jax.Array]  # (H, W) float64
     fuel_code_raster: Optional[jax.Array]  # (H, W) int32
-    weather_vec: Optional[jax.Array]       # (4,) [T_air, humidity, sin_wind, cos_wind]
+    weather_vec: Optional[jax.Array]  # (4,) [T_air, humidity, sin_wind, cos_wind]
     # Stored as a regular JAX leaf (not static) so eqx.tree_at can update it in
     # bind_scene. Inside metric computations it is wrapped in stop_gradient to
     # prevent unintended gradient flow through the grid resolution.
-    pixel_spacing_m: jax.Array             # scalar float64, metres per pixel
-    scene_origin_xy: Optional[jax.Array]   # (2,) world coords of pixel (0,0) in metres
+    pixel_spacing_m: jax.Array  # scalar float64, metres per pixel
+    scene_origin_xy: Optional[jax.Array]  # (2,) world coords of pixel (0,0) in metres
 
     # Configuration constants (static — known at JIT compile time)
     eps_G: float = eqx.field(static=True)
@@ -486,19 +503,26 @@ class CovariateConditionedRanders(AsymmetricMetric):
             CNN weights during training.
         """
         # stop_gradient on all rasters: they are frozen scene data, not trainable
-        # parameters.  Without this guard, backpropagation through the CNN would
-        # accumulate non-zero gradients w.r.t. the raster leaves, and any call to
-        # eqx.apply_updates on a terrain-bound model would corrupt the raster values.
-        raster_stack = jnp.stack([
-            jax.lax.stop_gradient(self.elev_raster),
-            jax.lax.stop_gradient(self.slope_raster),
-            jnp.sin(jax.lax.stop_gradient(self.aspect_raster)),
-            jnp.cos(jax.lax.stop_gradient(self.aspect_raster)),
-            jax.lax.stop_gradient(self.canopy_raster),
-        ], axis=0).astype(DEFAULT_JNP_DTYPE)  # (5, H, W)
+        # parameters.
+        assert self.elev_raster is not None
+        assert self.slope_raster is not None
+        assert self.aspect_raster is not None
+        assert self.canopy_raster is not None
+        raster_stack = jnp.stack(
+            [
+                jax.lax.stop_gradient(self.elev_raster),
+                jax.lax.stop_gradient(self.slope_raster),
+                jnp.sin(jax.lax.stop_gradient(self.aspect_raster)),
+                jnp.cos(jax.lax.stop_gradient(self.aspect_raster)),
+                jax.lax.stop_gradient(self.canopy_raster),
+            ],
+            axis=0,
+        ).astype(DEFAULT_JNP_DTYPE)  # (5, H, W)
 
         # Per-pixel fuel embeddings: (H, W, fuel_emb_dim) → (fuel_emb_dim, H, W)
-        fuel_codes_clipped = jnp.clip(jax.lax.stop_gradient(self.fuel_code_raster), 0, 12)
+        fuel_codes_clipped = jnp.clip(
+            jax.lax.stop_gradient(self.fuel_code_raster), 0, 12
+        )
         fuel_field = self.fuel_embedding[fuel_codes_clipped]  # (H, W, fuel_emb_dim)
         fuel_field = fuel_field.transpose(2, 0, 1).astype(DEFAULT_JNP_DTYPE)
 
@@ -528,7 +552,8 @@ class CovariateConditionedRanders(AsymmetricMetric):
             Scalar interpolated value.
         """
         spacing = jax.lax.stop_gradient(self.pixel_spacing_m)
-        origin  = jax.lax.stop_gradient(self.scene_origin_xy)
+        origin = jax.lax.stop_gradient(self.scene_origin_xy)
+        assert origin is not None
         px = (x_world[0] - origin[0]) / spacing
         py = (x_world[1] - origin[1]) / spacing
         H, W = raster.shape
@@ -544,14 +569,14 @@ class CovariateConditionedRanders(AsymmetricMetric):
         v01 = raster[y0, x1]
         v10 = raster[y1, x0]
         v11 = raster[y1, x1]
-        return (v00 * (1.0 - fx) * (1.0 - fy)
-                + v01 * fx * (1.0 - fy)
-                + v10 * (1.0 - fx) * fy
-                + v11 * fx * fy)
+        return (
+            v00 * (1.0 - fx) * (1.0 - fy)
+            + v01 * fx * (1.0 - fy)
+            + v10 * (1.0 - fx) * fy
+            + v11 * fx * fy
+        )
 
-    def _bilinear_interp_field(
-        self, field: jax.Array, x_world: jax.Array
-    ) -> jax.Array:
+    def _bilinear_interp_field(self, field: jax.Array, x_world: jax.Array) -> jax.Array:
         """Bilinear interpolation of a ``(H, W, C)`` field at a world-coordinate point.
 
         This is the differentiable lookup used in :meth:`_get_params`.  Gradients
@@ -566,7 +591,8 @@ class CovariateConditionedRanders(AsymmetricMetric):
             ``(C,)`` interpolated feature vector.
         """
         spacing = jax.lax.stop_gradient(self.pixel_spacing_m)
-        origin  = jax.lax.stop_gradient(self.scene_origin_xy)
+        origin = jax.lax.stop_gradient(self.scene_origin_xy)
+        assert origin is not None
         px = (x_world[0] - origin[0]) / spacing
         py = (x_world[1] - origin[1]) / spacing
         H, W, _ = field.shape
@@ -578,10 +604,12 @@ class CovariateConditionedRanders(AsymmetricMetric):
         y1 = jnp.minimum(y0 + 1, H - 1)
         fx = px - x0
         fy = py - y0
-        return (field[y0, x0] * (1.0 - fx) * (1.0 - fy)
-                + field[y0, x1] * fx * (1.0 - fy)
-                + field[y1, x0] * (1.0 - fx) * fy
-                + field[y1, x1] * fx * fy)
+        return (
+            field[y0, x0] * (1.0 - fx) * (1.0 - fy)
+            + field[y0, x1] * fx * (1.0 - fy)
+            + field[y1, x0] * (1.0 - fx) * fy
+            + field[y1, x1] * fx * fy
+        )
 
     def _get_params(self, x_world: jax.Array) -> tuple:
         """Compute projected SPD metric G and drift b at a world-coordinate point.
@@ -596,12 +624,13 @@ class CovariateConditionedRanders(AsymmetricMetric):
         Returns:
             Tuple ``(G, b)`` where G is (2, 2) SPD and b is (2,).
         """
+        assert self.metric_field is not None
+        assert self.weather_vec is not None
         raw_local = self._bilinear_interp_field(self.metric_field, x_world)  # (5,)
-        raw_global = self.global_mlp(self.weather_vec)                        # (5,)
-        raw = raw_global + raw_local                                          # (5,)
+        raw_global = self.global_mlp(self.weather_vec)  # (5,)
+        raw = raw_global + raw_local  # (5,)
 
-        G_raw = jnp.stack([jnp.stack([raw[0], raw[1]]),
-                           jnp.stack([raw[1], raw[2]])])
+        G_raw = jnp.stack([jnp.stack([raw[0], raw[1]]), jnp.stack([raw[1], raw[2]])])
         G = project_spd(G_raw, self.eps_G, self.max_G)
 
         # use_wind is static — Python if is safe inside JIT
@@ -611,9 +640,7 @@ class CovariateConditionedRanders(AsymmetricMetric):
             b = jnp.zeros(2, dtype=G.dtype)
         return G, b
 
-    def zermelo_data(
-        self, x: jax.Array
-    ) -> tuple[jax.Array, jax.Array, jax.Array]:
+    def zermelo_data(self, x: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array]:
         """Return the Zermelo navigation triple ``(H, W, lambda)`` at position x.
 
         Implements the :class:`~ham.geometry.metric.AsymmetricMetric` interface
@@ -625,18 +652,29 @@ class CovariateConditionedRanders(AsymmetricMetric):
             x: (2,) world-coordinate position.
 
         Returns:
-            G:      (2, 2) SPD metric tensor (the Riemannian sea).
-            b:      (2,) drift vector (the wind).
-            lambda: Causality scalar ``1 - ||b||²_{G^{-1}}``.
+            H:      (2, 2) contravariant SPD metric tensor (the Riemannian sea).
+            W:      (2,) contravariant drift vector (the wind).
+            lambda: Causality scalar ``1 - ||W||^2_{H^{-1}}``.
         """
         G, b = self._get_params(x)
-        det_G = G[0, 0] * G[1, 1] - G[0, 1] ** 2
-        det_G = jnp.maximum(det_G, 1e-8)
-        b_Ginv_b = (b[0] ** 2 * G[1, 1]
-                    - 2.0 * b[0] * b[1] * G[0, 1]
-                    + b[1] ** 2 * G[0, 0]) / det_G
+        det_G = jnp.maximum(G[0, 0] * G[1, 1] - G[0, 1] ** 2, 1e-8)
+
+        # Ginv is the inverse of the covariant G. In Zermelo formulation, H = G^{-1}.
+        Ginv11 = G[1, 1] / det_G
+        Ginv22 = G[0, 0] / det_G
+        Ginv12 = -G[0, 1] / det_G
+
+        H = jnp.stack([jnp.stack([Ginv11, Ginv12]), jnp.stack([Ginv12, Ginv22])])
+
+        # W = G^{-1} * b = H * b
+        W1 = Ginv11 * b[0] + Ginv12 * b[1]
+        W2 = Ginv12 * b[0] + Ginv22 * b[1]
+        W = jnp.array([W1, W2])
+
+        b_Ginv_b = b[0] * W1 + b[1] * W2
         lam = jnp.maximum(1.0 - b_Ginv_b, 1e-6)
-        return G, b, lam
+
+        return H, W, lam
 
     def metric_fn(self, x: jax.Array, v: jax.Array) -> jax.Array:
         """Randers-Zermelo cost F(x, v).
@@ -664,7 +702,7 @@ class CovariateConditionedRanders(AsymmetricMetric):
         Reference:
             spec/MATH_SPEC.md § 5 (Zermelo navigation formula).
         """
-        v_sq_raw = jnp.sum(v ** 2)
+        v_sq_raw = jnp.sum(v**2)
         is_zero = v_sq_raw < GRAD_EPS
         # Use a neutral unit-norm direction (1/√2, 1/√2) scaled to √(GRAD_EPS/2) to
         # avoid the diagonal bias that adding √GRAD_EPS to both components introduces.
@@ -677,15 +715,15 @@ class CovariateConditionedRanders(AsymmetricMetric):
         det_G = jnp.maximum(det_G, 1e-8)
 
         # λ = 1 - b^T G^{-1} b
-        b_Ginv_b = (b[0] ** 2 * G[1, 1]
-                    - 2.0 * b[0] * b[1] * G[0, 1]
-                    + b[1] ** 2 * G[0, 0]) / det_G
+        b_Ginv_b = (
+            b[0] ** 2 * G[1, 1] - 2.0 * b[0] * b[1] * G[0, 1] + b[1] ** 2 * G[0, 0]
+        ) / det_G
         lam = jnp.maximum(1.0 - b_Ginv_b, 1e-6)
 
         Gv = jnp.dot(G, v_safe)
         v_sq_h = jnp.dot(v_safe, Gv)
         bdotv = jnp.dot(b, v_safe)
 
-        disc = lam * v_sq_h + bdotv ** 2
+        disc = lam * v_sq_h + bdotv**2
         cost = (jnp.sqrt(jnp.maximum(disc, GRAD_EPS)) - bdotv) / lam
         return jnp.where(is_zero, 0.0, cost)

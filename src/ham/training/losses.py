@@ -1,12 +1,19 @@
+from typing import Any, Generic, TypeVar
+
+from ..typing import GenerativeModel
+
+ModelType = TypeVar("ModelType")
+
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
-from typing import Tuple, Any
-from ham.utils.math import safe_norm, NORM_EPS
-from ham.solvers.geodesic import ExponentialMap
-from ham.geometry.metric import AsymmetricMetric
 
-class LossComponent(eqx.Module):
+from ham.geometry.metric import AsymmetricMetric
+from ham.solvers.geodesic import ExponentialMap
+from ham.utils.math import NORM_EPS, safe_norm
+
+
+class LossComponent(eqx.Module, Generic[ModelType]):
     """Base class for modular loss components.
 
     All concrete losses must implement ``__call__`` returning a scalar JAX
@@ -16,6 +23,7 @@ class LossComponent(eqx.Module):
         ham.training.pipeline.TrainingPhase -- how losses are composed.
         examples/weinreb_smoke_test.py -- working usage example.
     """
+
     weight: float = eqx.field(static=True)
     name: str = eqx.field(static=True)
 
@@ -23,7 +31,9 @@ class LossComponent(eqx.Module):
         self.weight = weight
         self.name = name
 
-    def __call__(self, model: eqx.Module, batch: Tuple[Any, ...], key: jax.random.PRNGKey) -> jnp.ndarray:
+    def __call__(
+        self, model: ModelType, batch: tuple[Any, ...], key: jax.Array
+    ) -> jnp.ndarray:
         """Compute the (scalar) loss value.
 
         Args:
@@ -37,8 +47,10 @@ class LossComponent(eqx.Module):
         """
         raise NotImplementedError("Loss component must implement __call__")
 
-class ReconstructionLoss(LossComponent):
+
+class ReconstructionLoss(LossComponent[GenerativeModel]):
     """MSE reconstruction loss for the VAE."""
+
     def __init__(self, weight: float = 1.0):
         super().__init__(weight, "Recon")
 
@@ -47,10 +59,12 @@ class ReconstructionLoss(LossComponent):
         dist = model._get_dist(x)
         z_sample = dist.sample(key)
         x_rec = model.decode(z_sample)
-        return jnp.mean((x - x_rec)**2) * self.weight
+        return jnp.mean((x - x_rec) ** 2) * self.weight
 
-class KLDivergenceLoss(LossComponent):
+
+class KLDivergenceLoss(LossComponent[GenerativeModel]):
     """KL Divergence loss for the wrapped normal distribution."""
+
     def __init__(self, weight: float = 1.0):
         super().__init__(weight, "KL")
 
@@ -59,15 +73,17 @@ class KLDivergenceLoss(LossComponent):
         dist = model._get_dist(x)
         return jnp.mean(dist.kl_divergence_std_normal()) * self.weight
 
-class ZermeloAlignmentLoss(LossComponent):
+
+class ZermeloAlignmentLoss(LossComponent[GenerativeModel]):
     """Aligns the latent velocity with the learned Wind field W."""
+
     def __init__(self, weight: float = 1.0):
         super().__init__(weight, "Z_Align")
 
     def __call__(self, model, batch, key):
         x, v_rna = batch[0], batch[1]
         z_mean, u_lat = model.project_control(x, v_rna)
-        
+
         if isinstance(model.metric, AsymmetricMetric):
             _, W, _ = model.metric.zermelo_data(z_mean)
         else:
@@ -75,21 +91,23 @@ class ZermeloAlignmentLoss(LossComponent):
 
         norm_w = model.manifold._minkowski_norm(W)
         norm_v = model.manifold._minkowski_norm(u_lat)
-        
+
         w_dir = W / jnp.maximum(norm_w, NORM_EPS)[..., None]
         v_dir = u_lat / jnp.maximum(norm_v, NORM_EPS)[..., None]
-        
+
         return -model.manifold._minkowski_dot(w_dir, v_dir) * self.weight
 
-class GeodesicSprayLoss(LossComponent):
+
+class GeodesicSprayLoss(LossComponent[GenerativeModel]):
     """Penalizes acceleration (spray vector norm) to encourage geodesic trajectories."""
+
     def __init__(self, weight: float = 1.0):
         super().__init__(weight, "Spray")
 
     def __call__(self, model, batch, key):
         x, v_rna = batch[0], batch[1]
         z_mean, u_lat = model.project_control(x, v_rna)
-        
+
         if isinstance(model.metric, AsymmetricMetric):
             _, W, _ = model.metric.zermelo_data(z_mean)
         else:
@@ -98,74 +116,80 @@ class GeodesicSprayLoss(LossComponent):
         dot_z = u_lat + W
         spray_vec = model.metric.spray(z_mean, dot_z)
         spray_norm = model.metric.inner_product(z_mean, dot_z, spray_vec, spray_vec)
-        
+
         return spray_norm * self.weight
 
-class VelocityDirectionAlignmentLoss(LossComponent):
+
+class VelocityDirectionAlignmentLoss(LossComponent[GenerativeModel]):
     """
     Computes negative cosine similarity between the true data velocity
     projected into latent space and the metric's learned drift direction (Wind vector W).
     """
+
     def __init__(self, weight: float = 1.0):
         super().__init__(weight, "VelDirAlign")
 
     def __call__(self, model, batch, key):
         x_start, x_end = batch[0], batch[1]
         v_true = x_end - x_start
-        
+
         # Project data velocity to latent space
         z_start, v_lat = model.project_control(x_start, v_true)
-        
+
         # Get metric drift (Wind vector W)
         if isinstance(model.metric, AsymmetricMetric):
             _, W, _ = model.metric.zermelo_data(z_start)
         else:
             W = jnp.zeros_like(v_lat)
-            
+
         # Cosine similarity in latent space
         norm_w = safe_norm(W, axis=-1)
         norm_v = safe_norm(v_lat, axis=-1)
-        
+
         w_dir = W / jnp.maximum(norm_w, NORM_EPS)[..., None]
         v_dir = v_lat / jnp.maximum(norm_v, NORM_EPS)[..., None]
-        
+
         cos_sim = jnp.sum(w_dir * v_dir, axis=-1)
-        
+
         return (1.0 - cos_sim) * self.weight
 
-class ContrastiveAlignmentLoss(LossComponent):
+
+class ContrastiveAlignmentLoss(LossComponent[GenerativeModel]):
     """Aligns the Wind field with the log map between parent and child points in latent space."""
+
     def __init__(self, weight: float = 1.0):
         super().__init__(weight, "Cont_Align")
 
     def __call__(self, model, batch, key):
         parent_x, child_x = batch[0], batch[1]
-        
+
         k1, k2 = jax.random.split(key)
         parent_z = model.encode(parent_x, k1)
         child_z = model.encode(child_x, k2)
-        
+
         if isinstance(model.metric, AsymmetricMetric):
             _, W_out, _ = model.metric.zermelo_data(parent_z)
         else:
             W_out = jnp.zeros_like(parent_z)
         v_tan = model.manifold.log_map(parent_z, child_z)
-        
+
         align_score = -model.manifold._minkowski_dot(W_out, v_tan)
         return align_score * self.weight
 
-class MetricAnchorLoss(LossComponent):
+
+class MetricAnchorLoss(LossComponent[GenerativeModel]):
     """Anchors the metric tensor H(x) to Identity to prevent degenerate solutions."""
+
     def __init__(self, weight: float = 1.0):
         super().__init__(weight, "H_Reg")
 
     def __call__(self, model, batch, key):
         parent_x = batch[0]
         parent_z = model.encode(parent_x, key)
-        
+
         if isinstance(model.metric, AsymmetricMetric):
             H_out, _, _ = model.metric.zermelo_data(parent_z)
-        elif hasattr(model.metric, 'g_net'):
+        elif hasattr(model.metric, "g_net"):
             H_out = model.metric.g_net(parent_z)
             H_out = 0.5 * (H_out + H_out.T)
         else:
@@ -173,11 +197,13 @@ class MetricAnchorLoss(LossComponent):
 
         dim = H_out.shape[-1]
         I = jnp.eye(dim)
-        
-        return jnp.mean((H_out - I)**2) * self.weight
 
-class MetricSmoothnessLoss(LossComponent):
+        return jnp.mean((H_out - I) ** 2) * self.weight
+
+
+class MetricSmoothnessLoss(LossComponent[GenerativeModel]):
     """Jacobian penalty on W to encourage smooth vector fields."""
+
     def __init__(self, weight: float = 0.1):
         super().__init__(weight, "Smoothness")
 
@@ -191,24 +217,27 @@ class MetricSmoothnessLoss(LossComponent):
         def get_w_single(pt):
             _, W_out, _ = model.metric.zermelo_data(pt)
             return W_out
-        
+
         jac = jax.jacfwd(get_w_single)(parent_z)
-        
+
         return jnp.mean(jac**2) * self.weight
+
 
 def _solve_and_integrate_impl(model, z_start, z_end):
     traj_result = model.solver.solve(model.metric, z_start, z_end)
-    trajectory = traj_result.xs  
-    
+    trajectory = traj_result.xs
+
     N = trajectory.shape[0]
     dt = 1.0 / (N - 1)
     velocities = jnp.diff(trajectory, axis=0) / dt
     positions = trajectory[:-1]
-    
+
     step_energies = jax.vmap(model.metric.energy)(positions, velocities)
     return jnp.sum(step_energies) * dt
 
+
 _solve_and_integrate = eqx.filter_checkpoint(_solve_and_integrate_impl)
+
 
 def _solve_avbd_trajectory_impl(model, z_start, z_end, n_steps):
     """
@@ -217,47 +246,52 @@ def _solve_avbd_trajectory_impl(model, z_start, z_end, n_steps):
     traj = model.solver.solve(model.metric, z_start, z_end, n_steps=n_steps)
     return traj.xs
 
+
 _solve_avbd_trajectory = eqx.filter_checkpoint(_solve_avbd_trajectory_impl)
 
-class LongTrajectoryAlignmentLoss(LossComponent):
+
+class LongTrajectoryAlignmentLoss(LossComponent[GenerativeModel]):
     """
     Stable alignment loss that compares the full observed path
     against the geodesic (BVP solution) predicted by the metric.
     """
+
     def __init__(self, weight: float = 1.0):
         super().__init__(weight, "LongTrajAlign")
 
     def __call__(self, model, batch, key):
         # batch[2] is expected to be Traj_long (T, 3) for a single trajectory in the vmap
-        traj_obs_data = batch[2] 
+        traj_obs_data = batch[2]
         n_points = traj_obs_data.shape[0]
-        
-        # 1. Encode to latent space (using a fixed key for Deterministic context if possible, 
+
+        # 1. Encode to latent space (using a fixed key for Deterministic context if possible,
         # or just vmap encode)
         # We use a static key to avoid stochastic 'jitter' in the regression target.
         keys = jax.random.split(key, n_points)
         z_obs = jax.vmap(model.encode)(traj_obs_data, keys)
-        
+
         # 2. Solve the BVP between observed start and end
         z_start = z_obs[0]
         z_end = z_obs[-1]
         n_segments = n_points - 1
-        
+
         z_geo = _solve_avbd_trajectory(model, z_start, z_end, n_segments)
-        
+
         # 3. Penalize the difference
         # This forces the learned geometry's 'straight lines' to be the data's paths.
-        return jnp.mean((z_geo - z_obs)**2) * self.weight
+        return jnp.mean((z_geo - z_obs) ** 2) * self.weight
 
-class EulerLagrangeResidualLoss(LossComponent):
+
+class EulerLagrangeResidualLoss(LossComponent[GenerativeModel]):
     """
     Physically-informed loss that penalizes violations of the Euler-Lagrange equations.
-    This provides a simulation-free, mathematically rigorous method to align empirical 
+    This provides a simulation-free, mathematically rigorous method to align empirical
     trajectories with the geodesics of the learned Randers metric.
-    
-    The residual R measures the degree to which an observed path deviates from the 
+
+    The residual R measures the degree to which an observed path deviates from the
     extremum of the energy functional. R = d/dt (dL/dv) - dL/dz.
     """
+
     epsilon: float = eqx.field(static=True)
 
     def __init__(self, weight: float = 1.0, epsilon: float = 1e-4):
@@ -265,19 +299,21 @@ class EulerLagrangeResidualLoss(LossComponent):
         # smoothing for Finsler non-smoothness at v=0
         self.epsilon = epsilon
 
-    def __call__(self, model: eqx.Module, batch: Tuple[Any, ...], key: jax.random.PRNGKey) -> jnp.ndarray:
+    def __call__(
+        self, model: GenerativeModel, batch: tuple[Any, ...], key: jax.Array
+    ) -> jnp.ndarray:
         # batch[2] is expected to be the empirical trajectory Traj_long: (T, D_data)
         if len(batch) < 3 or batch[2] is None:
-            return 0.0
-            
+            return jnp.array(0.0)
+
         traj_obs = batch[2]
         T = traj_obs.shape[0]
-        
+
         # 1. Map empirical trajectory to latent space
         # Use a fixed key per point to ensure the 'path' is spatially consistent for differentiation
         keys = jax.random.split(key, T)
         z_traj = jax.vmap(model.encode)(traj_obs, keys)
-        
+
         # 2. Extract continuous state, velocity, and acceleration approximations
         # Using centered finite differences as the discrete approximation of spline derivatives
         dt = 1.0 / (T - 1)
@@ -286,7 +322,7 @@ class EulerLagrangeResidualLoss(LossComponent):
 
         def compute_el_residual_sq(z, v, a):
             """Point-wise evaluation of the Euler-Lagrange residual norm squared."""
-            
+
             # Define smoothed Lagrangian L(z, v) = 1/2 * F_eps(z, v)^2
             def L_smooth(z_pt, v_pt):
                 # Retrieve Riemannian metric H and Wind W from the Randers metric
@@ -296,32 +332,32 @@ class EulerLagrangeResidualLoss(LossComponent):
                     # Identity fallback for non-Randers/Base metrics
                     H_pt = jnp.eye(z_pt.shape[0])
                     W_pt = jnp.zeros_like(z_pt)
-                
+
                 # F_eps = sqrt(v^T H v + eps^2) - <W, v>_H
                 # This formulation ensures smoothness at v=0 while capturing Randers asymmetry
                 v_norm_sq = jnp.dot(v_pt, jnp.dot(H_pt, v_pt))
                 v_norm_eps = jnp.sqrt(jnp.maximum(v_norm_sq, 0.0) + self.epsilon**2)
-                
+
                 # Wind interaction using the local metric tensor
                 W_dot_v = jnp.dot(W_pt, jnp.dot(H_pt, v_pt))
-                
+
                 F = v_norm_eps - W_dot_v
                 return 0.5 * (F**2)
 
             # dL/dv gradient function
             grad_v_fn = jax.grad(L_smooth, argnums=1)
-            
+
             # Total time derivative components: d/dt(dL/dv) = (d2L/dv2)*a + (d2L/dzdv)*v
             # We utilize jax.jvp for efficient forward-mode Hessian-vector products
             _, hess_v_a = jax.jvp(lambda v_arg: grad_v_fn(z, v_arg), (v,), (a,))
             _, mixed_term = jax.jvp(lambda z_arg: grad_v_fn(z_arg, v), (z,), (v,))
-            
+
             # Spatial gradient dL/dz
             grad_z = jax.grad(L_smooth, argnums=0)(z, v)
-            
+
             # Euler-Lagrange Residual vector: R = d/dt(dL/dv) - dL/dz
             residual = hess_v_a + mixed_term - grad_z
-            
+
             # Evaluate norm using the 'frozen' Riemannian metric tensor H
             # Evaluation magnitude is geometrically consistent with the manifold's curvature
             if isinstance(model.metric, AsymmetricMetric):
@@ -329,17 +365,18 @@ class EulerLagrangeResidualLoss(LossComponent):
             else:
                 H_frozen = jnp.eye(z.shape[0])
             H_frozen = jax.lax.stop_gradient(H_frozen)
-            
+
             # Squared norm under Riemannian metric H
             return jnp.dot(residual, jnp.dot(H_frozen, residual))
 
         # Vectorized evaluation over the entire trajectory time horizon
         # Completely avoids ODE solvers by operating point-wise
         el_violations = jax.vmap(compute_el_residual_sq)(z_traj, v_traj, a_traj)
-        
+
         return jnp.mean(el_violations) * self.weight
 
-class AVBDPathEnergyLoss(LossComponent):
+
+class AVBDPathEnergyLoss(LossComponent[GenerativeModel]):
     """Total path energy of the AVBD geodesic between encoded endpoints.
 
     Expects batch = (x_start, x_end). Encodes both endpoints, solves the
@@ -349,6 +386,7 @@ class AVBDPathEnergyLoss(LossComponent):
     Attributes:
         solver_steps: Number of discrete path segments for the BVP solver.
     """
+
     solver_steps: int = eqx.field(static=True)
 
     def __init__(self, weight: float = 1.0, solver_steps: int = 15):
@@ -360,17 +398,19 @@ class AVBDPathEnergyLoss(LossComponent):
         k1, k2 = jax.random.split(key)
         z_start = model.encode(x_start, k1)
         z_end = model.encode(x_end, k2)
-        
+
         energy = _solve_and_integrate(model, z_start, z_end)
         return energy * self.weight
 
-class WindThermodynamicLoss(LossComponent):
+
+class WindThermodynamicLoss(LossComponent[GenerativeModel]):
     """Penalizes the Riemannian norm of the Wind vector.
 
     Computes ||W(z)||_h^2 = W^T H(z) W to encourage the Zermelo convexity
     constraint ||W||_h < 1 (spec/MATH_SPEC.md § 5). Expects batch = (x, ...).
     Falls back to 0.0 for non-Randers metrics.
     """
+
     def __init__(self, weight: float = 1.0):
         super().__init__(weight, "WindCost")
 
@@ -384,7 +424,8 @@ class WindThermodynamicLoss(LossComponent):
             wind_cost = jnp.float32(0.0)
         return wind_cost * self.weight
 
-class KinematicPriorLoss(LossComponent):
+
+class KinematicPriorLoss(LossComponent[GenerativeModel]):
     """Hinge penalty on geodesic distance between paired points.
 
     Expects batch = (x_start, x_end). Encodes both, computes the log-map
@@ -395,6 +436,7 @@ class KinematicPriorLoss(LossComponent):
         margin: Maximum acceptable latent distance. Pairs closer than this
             value incur zero loss.
     """
+
     margin: float
 
     def __init__(self, weight: float = 1.0, margin: float = 0.5):
@@ -406,17 +448,19 @@ class KinematicPriorLoss(LossComponent):
         k1, k2 = jax.random.split(key)
         z_start = model.encode(x_start, k1)
         z_end = model.encode(x_end, k2)
-        
+
         v_diff = model.manifold.log_map(z_start, z_end)
         dist = safe_norm(v_diff, axis=-1)
-        loss = jax.nn.relu(dist - self.margin)**2
+        loss = jax.nn.relu(dist - self.margin) ** 2
         return jnp.mean(loss) * self.weight
+
 
 # =====================================================================
 # THE NEW FINSLER ACTION MATCHING LOSS
 # =====================================================================
 
-class FinslerActionMatchingLoss(LossComponent):
+
+class FinslerActionMatchingLoss(LossComponent[GenerativeModel]):
     """Minimizes the Finsler energy of observed biological transitions.
 
     Requires joint training so the VAE reconstruction prevents scale collapse.
@@ -426,31 +470,34 @@ class FinslerActionMatchingLoss(LossComponent):
     Expects batch = (x_start, x_end). Approximates the tangent vector as
     v = z_end - z_start (Euclidean in latent space).
     """
+
     def __init__(self, weight: float = 1.0):
         super().__init__(weight, "ActionMatching")
 
     def __call__(self, model, batch, key):
         x_start, x_end = batch[0], batch[1]
-        
+
         # 1. Stochastic encoding to latent space
         k1, k2 = jax.random.split(key)
         z_start = model.encode(x_start, k1)
         z_end = model.encode(x_end, k2)
-        
+
         # 2. Approximate the tangent vector (observed biological flow)
         v = z_end - z_start
-        
+
         # 3. Calculate Finsler energy using the model's underlying Randers metric
         # This implicitly utilizes Pullback H(z) and evaluates the Learned W(z)
-        energy = model.metric.energy(z_start, v) 
-        
+        energy = model.metric.energy(z_start, v)
+
         return jnp.mean(energy) * self.weight
 
-class WindAssistedTrajectoryAlignmentLoss(LossComponent):
+
+class WindAssistedTrajectoryAlignmentLoss(LossComponent[GenerativeModel]):
     """
     Aligns short rolled-out trajectories (using geodesic shooter) with observed displacements.
     Encourages the learned Wind/Metric to produce geodesics that match the observed flows.
     """
+
     rollout_steps: int = eqx.field(static=True)
     dt: float = eqx.field(static=True)
     ivp_shooter: ExponentialMap
@@ -463,86 +510,98 @@ class WindAssistedTrajectoryAlignmentLoss(LossComponent):
 
     def __call__(self, model, batch, key):
         x_start, x_end = batch[0], batch[1]
-        
+
         k1, k2 = jax.random.split(key)
         z_start = model.encode(x_start, k1)
         z_end = model.encode(x_end, k2)
-        
+
         # v_init represents the total latent displacement to reach the end in t=1
-        v_init = z_end - z_start 
-        
+        v_init = z_end - z_start
+
         # Shoot using the geodesic ODE (Particle Shooter)
-        # Using 1 step to avoid gradient chaos through RK4 loops, 
+        # Using 1 step to avoid gradient chaos through RK4 loops,
         # while explicitly utilizing geod_acceleration(z)
         z_pred = self.ivp_shooter.shoot(model.metric, z_start, v_init)
-        
+
         # Decode rolled z and align with observed future endpoint
         x_pred = model.decode(z_pred)
-        
-        mse_loss = jnp.mean((x_pred - x_end)**2)
+
+        mse_loss = jnp.mean((x_pred - x_end) ** 2)
         return mse_loss * self.weight
+
 
 # =====================================================================
 # SOTA LOSS FUNCTIONS: FINSLERIAN FLOW MATCHING & EIKONAL ALIGNMENT
 # =====================================================================
 
-class FinslerianFlowMatchingLoss(LossComponent):
+
+class FinslerianFlowMatchingLoss(LossComponent[GenerativeModel]):
     """
     Learns the Randers wind field W_theta(z) by matching it to the empirical drift.
     Mathematically aligns the vector field with observed trajectory derivatives.
-    
-    Reframes the trajectory alignment as finding the optimal W that minimizes 
+
+    Reframes the trajectory alignment as finding the optimal W that minimizes
     the deviation of the empirical path from a wind-assisted geodesic.
     """
+
     def __init__(self, weight: float = 1.0):
         super().__init__(weight, "FinslerFlowMatching")
 
-    def __call__(self, model: eqx.Module, batch: Tuple[Any, ...], key: jax.random.PRNGKey) -> jnp.ndarray:
+    def __call__(
+        self, model: GenerativeModel, batch: tuple[Any, ...], key: jax.Array
+    ) -> jnp.ndarray:
         # batch[2] is Traj_long: (T, D_data)
         if len(batch) < 3 or batch[2] is None:
             return jnp.float32(0.0)
-            
+
         traj_obs = batch[2]
         T = traj_obs.shape[0]
         dt = 1.0 / (T - 1)
-        
+
         # 1. Map empirical trajectory to latent space
         keys = jax.random.split(key, T)
         z_traj = jax.vmap(model.encode)(traj_obs, keys)
-        
+
         # 2. Empirical velocity (tangent vector)
         v_traj = jnp.gradient(z_traj, axis=0) / dt
-        
+
         # 3. Retrieve Randers data (Riemannian H and Wind W)
         def get_randers_data(z):
             if isinstance(model.metric, AsymmetricMetric):
                 H, W, _ = model.metric.zermelo_data(z)
                 return H, W
             return jnp.eye(z.shape[0]), jnp.zeros_like(z)
-            
+
         H_traj, W_traj = jax.vmap(get_randers_data)(z_traj)
-        
+
         # 4. Velocity-Drift Alignment
-        # In Zermelo navigation, if the wind W blows in the direction of v, 
-        # the cost F(z, v) is minimized. 
+        # In Zermelo navigation, if the wind W blows in the direction of v,
+        # the cost F(z, v) is minimized.
         # This loss encourages W to align with the normalized tangent vector.
-        
-        v_norm_h = jax.vmap(lambda v, H: jnp.sqrt(jnp.maximum(jnp.dot(v, jnp.dot(H, v)), 0.0) + NORM_EPS))(v_traj, H_traj)
+
+        v_norm_h = jax.vmap(
+            lambda v, H: jnp.sqrt(
+                jnp.maximum(jnp.dot(v, jnp.dot(H, v)), 0.0) + NORM_EPS
+            )
+        )(v_traj, H_traj)
         v_unit = v_traj / jnp.maximum(v_norm_h, NORM_EPS)[..., None]
-        
+
         # We align W with v_unit
         # Higher alignment (dot product) reduces the loss
-        alignment = jax.vmap(lambda w, v, H: jnp.dot(w, jnp.dot(H, v)))(W_traj, v_unit, H_traj)
-        
+        alignment = jax.vmap(lambda w, v, H: jnp.dot(w, jnp.dot(H, v)))(
+            W_traj, v_unit, H_traj
+        )
+
         # Regress towards perfect alignment (normalized W magnitude can be learned or regularized)
         loss = 1.0 - alignment
-        
+
         return jnp.mean(loss) * self.weight
 
 
 # =====================================================================
 # ARRIVAL TIME LOSS FOR METRIC RECOVERY (Gahtan Experiment)
 # =====================================================================
+
 
 class ArrivalTimeLoss(eqx.Module):
     """Scale-invariant arrival-time loss for metric recovery (Pearson-r).
@@ -573,6 +632,7 @@ class ArrivalTimeLoss(eqx.Module):
         spec/MATH_SPEC.md § 1.2 (Energy Functional).
         Gahtan et al. (2026), Section 5 (Metric Recovery).
     """
+
     solver: eqx.Module
     solver_steps: int = eqx.field(static=True)
     weight: float = eqx.field(static=True)
@@ -608,9 +668,11 @@ class ArrivalTimeLoss(eqx.Module):
         Returns:
             Scalar loss value, already multiplied by self.weight.
         """
+
         def single_arrival_time(x_target):
-            traj = self.solver.solve(metric, source, x_target,
-                                     n_steps=self.solver_steps)
+            traj = self.solver.solve(
+                metric, source, x_target, n_steps=self.solver_steps
+            )
             path = traj.xs  # (T+1, D)
             # Discrete arc length using midpoint quadrature:
             # F evaluated at segment midpoints for O(h^2) accuracy
@@ -629,23 +691,74 @@ class ArrivalTimeLoss(eqx.Module):
             dp = t_pred - mu_p
             do = t_obs - mu_o
             num = jnp.sum(dp * do)
-            denom = jnp.sqrt(jnp.sum(dp ** 2) * jnp.sum(do ** 2) + 1e-8)
+            denom = jnp.sqrt(jnp.sum(dp**2) * jnp.sum(do**2) + 1e-8)
             l_pearson = 1.0 - num / denom
 
-            # --- Relative MSE component (scale-aware, IoU-aligned) ---
-            # Normalise t_pred to [0,1] by its own max.  stop_gradient on
-            # the normalizer prevents all-to-all gradient coupling: gradients
-            # flow only through the relative shape of the predictions, not
-            # through the scale-correction term itself.
-            t_max = jax.lax.stop_gradient(jnp.maximum(jnp.max(t_pred), 1e-6))
-            t_pred_norm = t_pred / t_max
-            l_relmse = jnp.mean((t_pred_norm - t_obs) ** 2)
+            # --- Normalised MSE component (scale-aware) ---
+            # We divide the error by max(t_obs) so the MSE loss magnitude is
+            # roughly in [0, 1], balancing numerically with the Pearson loss.
+            # However, because we do NOT normalise t_pred, the loss still
+            # correctly forces t_pred to align with the absolute scale of t_obs.
+            t_obs_max = jnp.maximum(jnp.max(t_obs), 1e-6)
+            l_relmse = jnp.mean(((t_pred - t_obs) / t_obs_max) ** 2)
 
             loss = (1.0 - alpha) * l_pearson + alpha * l_relmse
         else:
             # Single observation: use relative MSE regardless of alpha.
             t_obs_ref = jnp.maximum(jnp.abs(t_obs[0]), 1e-6)
             loss = jnp.mean((t_pred / t_obs_ref - 1.0) ** 2)
+
+        return loss * self.weight
+
+
+class DenseArrivalTimeLoss(eqx.Module):
+    """Dense scale-invariant arrival-time loss for eikonal solver full-field metric recovery.
+
+    Computes loss between predicted full-field arrival times and target satellite data
+    using relative MSE or Pearson-r.
+
+    Args:
+        weight: Loss weight multiplier.
+    """
+
+    weight: float = eqx.field(static=True)
+    name: str = eqx.field(static=True)
+
+    def __init__(self, weight: float = 1.0):
+        self.weight = weight
+        self.name = "DenseArrivalTime"
+
+    def __call__(self, t_pred, t_obs, alpha: float = 0.0):
+        """
+        Args:
+            t_pred: Full field predicted arrival times, shape (nx, ny).
+            t_obs: Full field observed arrival times, shape (nx, ny).
+                   Points where t_obs is invalid can be masked by setting t_obs to nan,
+                   or by using a valid_mask. Here we assume all points are valid or masked.
+        """
+        mask = jnp.isfinite(t_obs) & jnp.isfinite(t_pred)
+
+        t_pred_valid = jnp.where(mask, t_pred, 0.0)
+        t_obs_valid = jnp.where(mask, t_obs, 0.0)
+        num_valid = jnp.sum(mask) + 1e-8
+
+        # Pearson-r component
+        mu_p = jnp.sum(t_pred_valid) / num_valid
+        mu_o = jnp.sum(t_obs_valid) / num_valid
+
+        dp = jnp.where(mask, t_pred_valid - mu_p, 0.0)
+        do = jnp.where(mask, t_obs_valid - mu_o, 0.0)
+
+        num = jnp.sum(dp * do)
+        denom = jnp.sqrt(jnp.sum(dp**2) * jnp.sum(do**2) + 1e-8)
+        l_pearson = 1.0 - num / denom
+
+        # Normalised MSE component
+        t_obs_max = jnp.maximum(jnp.max(jnp.where(mask, t_obs, -jnp.inf)), 1e-6)
+        sq_err = jnp.where(mask, ((t_pred - t_obs) / t_obs_max) ** 2, 0.0)
+        l_relmse = jnp.sum(sq_err) / num_valid
+
+        loss = (1.0 - alpha) * l_pearson + alpha * l_relmse
 
         return loss * self.weight
 

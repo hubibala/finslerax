@@ -1,8 +1,10 @@
 """Euclidean metric implementation."""
+
 import jax
 import jax.numpy as jnp
+
 from ham.geometry.metric import FinslerMetric
-from ham.utils.math import safe_norm, GRAD_EPS
+from ham.utils.math import GRAD_EPS, safe_norm
 
 
 class Euclidean(FinslerMetric):
@@ -17,7 +19,7 @@ class Euclidean(FinslerMetric):
     Example:
         See `examples/demo_vortex.py`, `examples/demo_zermelo.py`.
     """
-    
+
     def __repr__(self) -> str:
         return f"Euclidean(manifold={self.manifold})"
 

@@ -1,0 +1,13 @@
+{
+  "name": "C8_observation_density",
+  "category": "C_inverse_problem",
+  "success": true,
+  "metrics": {
+    "min_error": 0.12115878611803055
+  },
+  "metadata": {
+    "N": 40
+  },
+  "runtime_seconds": 21.876296758651733,
+  "timestamp": "2026-05-25T14:53:01.371114"
+}

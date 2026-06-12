@@ -1,13 +1,15 @@
 """Paraboloid manifold implementation."""
+
 import jax
 import jax.numpy as jnp
 
 from ham.geometry.manifold import Manifold
 from ham.utils import safe_norm
 
+
 class Paraboloid(Manifold):
     """The paraboloid of revolution z = x^2 + y^2, embedded in R^3.
-    
+
     Note: `exp_map` is an approximate projected retraction.
     """
 
@@ -29,7 +31,9 @@ class Paraboloid(Manifold):
 
     def to_tangent(self, x: jax.Array, v: jax.Array) -> jax.Array:
         """Projects ambient vector v onto Tx M."""
-        n = jnp.concatenate([-2 * x[..., 0:1], -2 * x[..., 1:2], jnp.ones_like(x[..., 0:1])], axis=-1)
+        n = jnp.concatenate(
+            [-2 * x[..., 0:1], -2 * x[..., 1:2], jnp.ones_like(x[..., 0:1])], axis=-1
+        )
         n = n / safe_norm(n, axis=-1, keepdims=True)
         inner = jnp.sum(n * v, axis=-1, keepdims=True)
         return v - inner * n
@@ -49,11 +53,11 @@ class Paraboloid(Manifold):
     def retract(self, x: jax.Array, delta: jax.Array) -> jax.Array:
         """Retraction via projected move."""
         xy_new = x[..., :2] + delta[..., :2]
-        z_new = jnp.sum(xy_new ** 2, axis=-1, keepdims=True)
+        z_new = jnp.sum(xy_new**2, axis=-1, keepdims=True)
         return jnp.concatenate([xy_new, z_new], axis=-1)
 
     def random_sample(self, key: jax.Array, shape: tuple[int, ...] = ()) -> jax.Array:
         """Samples on the paraboloid from a Gaussian base."""
-        xy = jax.random.normal(key, shape + (2,)) * 2.0
-        z = jnp.sum(xy ** 2, axis=-1)
+        xy = jax.random.normal(key, (*shape, 2)) * 2.0
+        z = jnp.sum(xy**2, axis=-1)
         return jnp.concatenate([xy, z[..., None]], axis=-1)

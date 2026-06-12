@@ -1,14 +1,16 @@
 """Hyperboloid manifold implementation."""
+
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
 
 from ham.geometry.manifold import Manifold
-from ham.utils import GRAD_EPS, TAYLOR_EPS
 from ham.geometry.manifolds.utils import _safe_minkowski_self_norm
+from ham.utils import GRAD_EPS, TAYLOR_EPS
 
 # Constants for numerical stability
 RETRACT_MAX_NORM = 10.0
+
 
 class Hyperboloid(Manifold):
     """The upper sheet of the hyperboloid in Minkowski space.
@@ -21,9 +23,10 @@ class Hyperboloid(Manifold):
         intrinsic_dim: Dimension n. Default: 2.
 
     Warning:
-        Joint training on complex curved manifolds like Hyperboloid with the 
+        Joint training on complex curved manifolds like Hyperboloid with the
         full VAE pipeline remains numerically sensitive.
     """
+
     _intrinsic_dim: int = eqx.field(static=True)
 
     def __init__(self, intrinsic_dim: int = 2):
@@ -56,7 +59,7 @@ class Hyperboloid(Manifold):
         denom = jnp.sqrt(-safe_sq_norm)
         x_scaled = x / denom[..., None]
         x_spatial = x[..., 1:]
-        x_spatial_sq = jnp.sum(x_spatial ** 2, axis=-1)
+        x_spatial_sq = jnp.sum(x_spatial**2, axis=-1)
         x0_new = jnp.sqrt(1.0 + x_spatial_sq)
         x_lifted = jnp.concatenate([x0_new[..., None], x_spatial], axis=-1)
         mask = is_valid_candidate[..., None]
@@ -73,7 +76,7 @@ class Hyperboloid(Manifold):
         safe_norm_v = jnp.where(norm_v < TAYLOR_EPS, 1.0, norm_v)
         sinh_over_norm = jnp.where(
             norm_v < TAYLOR_EPS,
-            1.0 + (norm_v ** 2) / 6.0,
+            1.0 + (norm_v**2) / 6.0,
             jnp.sinh(safe_norm_v) / safe_norm_v,
         )
         return jnp.cosh(norm_v)[..., None] * x + sinh_over_norm[..., None] * v
@@ -87,7 +90,7 @@ class Hyperboloid(Manifold):
         safe_norm_u = jnp.maximum(norm_u, TAYLOR_EPS)
         scale = jnp.where(
             norm_u < TAYLOR_EPS,
-            1.0 - (norm_u ** 2) / 6.0,
+            1.0 - (norm_u**2) / 6.0,
             dist / safe_norm_u,
         )
         return scale[..., None] * u
@@ -110,20 +113,22 @@ class Hyperboloid(Manifold):
         """
         norm_delta = self._minkowski_norm(delta)
         safe_nd = jnp.maximum(norm_delta, GRAD_EPS)
-        scale = jnp.where(norm_delta > RETRACT_MAX_NORM, RETRACT_MAX_NORM / safe_nd, 1.0)
+        scale = jnp.where(
+            norm_delta > RETRACT_MAX_NORM, RETRACT_MAX_NORM / safe_nd, 1.0
+        )
         safe_delta = delta * scale[..., None]
         return self.exp_map(x, safe_delta)
 
     def random_sample(self, key: jax.Array, shape: tuple[int, ...] = ()) -> jax.Array:
         """Samples uniformly on the hyperboloid upper sheet."""
         spat_dim = self.intrinsic_dim
-        v_spatial = jax.random.normal(key, shape + (spat_dim,))
+        v_spatial = jax.random.normal(key, (*shape, spat_dim))
         norm_v = jnp.linalg.norm(v_spatial, axis=-1, keepdims=True)
         safe_nv = jnp.maximum(norm_v, TAYLOR_EPS)
         x0 = jnp.cosh(norm_v)
         sinh_over_norm = jnp.where(
             norm_v < TAYLOR_EPS,
-            1.0 + (norm_v ** 2) / 6.0,
+            1.0 + (norm_v**2) / 6.0,
             jnp.sinh(safe_nv) / safe_nv,
         )
         x_rest = sinh_over_norm * v_spatial
