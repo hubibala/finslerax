@@ -20,6 +20,11 @@ from ham.training.losses import (
     WindAssistedTrajectoryAlignmentLoss,
     FinslerianFlowMatchingLoss,
 )
+from ham.training.losses_ebm import (
+    ContrastiveDivergenceLoss,
+    DenoisingScoreMatchingLoss,
+    MSELoss,
+)
 
 __all__ = [
     "HAMPipeline", "TrainingPhase",
@@ -32,4 +37,5 @@ __all__ = [
     "AVBDPathEnergyLoss", "WindThermodynamicLoss",
     "KinematicPriorLoss", "FinslerActionMatchingLoss",
     "WindAssistedTrajectoryAlignmentLoss", "FinslerianFlowMatchingLoss",
+    "ContrastiveDivergenceLoss", "DenoisingScoreMatchingLoss", "MSELoss",
 ]

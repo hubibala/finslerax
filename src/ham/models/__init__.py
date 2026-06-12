@@ -8,6 +8,8 @@ from ham.models.learned import (
     DataDrivenPullbackRanders,
     KernelWindField,
     PullbackGNet,
+    EnergyBasedRanders,
+    PseudotimeRanders,
 )
 
 __all__ = [
@@ -15,4 +17,5 @@ __all__ = [
     "PullbackRanders", "PullbackRiemannian",
     "DataDrivenPullbackRanders",
     "KernelWindField", "PullbackGNet",
+    "EnergyBasedRanders", "PseudotimeRanders"
 ]

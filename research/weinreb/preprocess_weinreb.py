@@ -30,7 +30,7 @@ from sklearn.neighbors import NearestNeighbors
 
 RAW_PATH = "data/weinreb_raw.h5ad"
 OUT_PATH = "data/weinreb_preprocessed.h5ad"
-PCA_COMPONENTS = 50
+PCA_COMPONENTS = 2
 N_TOP_GENES = 2000
 
 
@@ -109,8 +109,11 @@ print(f"  After HVG selection: {adata.shape}")
 
 sc.pp.scale(adata, max_value=10)
 sc.tl.pca(adata, n_comps=PCA_COMPONENTS)
+
+# Extract and save PCA projection and scaling information for invertibility
+pca_std = np.std(adata.obsm['X_pca'], axis=0) + 1e-8
 # Weight PCA coordinates so all components contribute equally (unit variance)
-adata.obsm['X_pca'] = adata.obsm['X_pca'] / (np.std(adata.obsm['X_pca'], axis=0) + 1e-8)
+adata.obsm['X_pca'] = adata.obsm['X_pca'] / pca_std
 print(f"  ✓ X_pca shape: {adata.obsm['X_pca'].shape} (unit variance applied)")
 
 import joblib
@@ -119,6 +122,18 @@ scaler = StandardScaler()
 scaler.fit(adata.obsm['X_pca'])
 joblib.dump(scaler, "data/weinreb_pca_scaler.joblib")
 print("  ✓ StandardScaler fitted and saved to data/weinreb_pca_scaler.joblib")
+
+# Save exact matrices needed to reverse the PCA -> Scale pipeline
+# Reverse mapping: X_scaled = (X_pca * pca_std) @ U.T
+# X_log1p = X_scaled * gene_std + gene_mean
+inversion_data = {
+    'PCs': adata.varm['PCs'],  # (n_genes, n_comps)
+    'pca_std': pca_std,        # (n_comps,)
+    'gene_mean': adata.var['mean'].values, # (n_genes,)
+    'gene_std': adata.var['std'].values    # (n_genes,)
+}
+np.save("data/weinreb_pca_inversion.npy", inversion_data)
+print("  ✓ PCA inversion matrices saved to data/weinreb_pca_inversion.npy")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -259,12 +274,37 @@ print(f"  ✓ Expected ~{n_cloned/adata.n_obs:.3f} (cloned fraction)")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 6. Save
+# 6. Diffusion Maps, DPT, and UMAP (Phase 1)
+# ══════════════════════════════════════════════════════════════════════════════
+
+print("\nComputing Diffusion Maps, DPT, and UMAP ...")
+sc.pp.neighbors(adata, n_neighbors=30)
+sc.tl.diffmap(adata, n_comps=10)
+
+# Choose a root cell from Day 2 for Diffusion Pseudotime (DPT)
+day2_indices = np.where(adata.obs['time_point'] == 2)[0]
+# We'll just pick the first day 2 cell as the root for consistency
+adata.uns['iroot'] = day2_indices[0]
+sc.tl.dpt(adata)
+
+sc.tl.umap(adata)
+
+print("  ✓ Diffusion map shape:", adata.obsm['X_diffmap'].shape)
+print("  ✓ DPT computed.")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 7. Save
 # ══════════════════════════════════════════════════════════════════════════════
 
 os.makedirs("data", exist_ok=True)
 print(f"\nSaving to {OUT_PATH} ...")
 adata.write_h5ad(OUT_PATH)
+
+DIFFUSION_OUT = "data/weinreb_diffusion.h5ad"
+print(f"Saving diffusion specific data to {DIFFUSION_OUT} ...")
+# To save space, we can just save the whole adata, but it might be large.
+# We'll save the whole adata.
+adata.write_h5ad(DIFFUSION_OUT)
 inspect(adata, "Saved object")
 
 print("\n" + "="*60)

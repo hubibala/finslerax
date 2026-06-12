@@ -28,6 +28,7 @@ from ..geometry.metric import FinslerMetric
 from ..geometry.manifold import Manifold
 from ..geometry.zoo import Randers, Riemannian
 from ..nn.networks import VectorField, PSDMatrixField
+from ..nn.ebm import ScalarEnergyField
 from ..utils.math import PSD_EPS
 
 class NeuralRiemannian(Riemannian):
@@ -278,3 +279,96 @@ class PullbackRiemannian(Riemannian):
         self.decoder = decoder
         g_net = PullbackGNet(decoder=decoder, dim=self.dim)
         super().__init__(manifold, g_net)
+
+class ConformalEnergyBase(eqx.Module):
+    """A conformal base metric H(x) = c(x) I.
+    
+    The scaling factor c(x) increases with the scalar energy field E(x),
+    ensuring that high-energy regions (mountains) cost more Riemannian 
+    distance to traverse. This forces geodesics to curve around voids.
+    """
+    ebm: eqx.Module
+    dim: int = eqx.field(static=True)
+    beta: float = eqx.field(static=True)
+
+    def __call__(self, x: jax.Array) -> jax.Array:
+        # Use softplus for stability.
+        energy = self.ebm(x)
+        c = 1.0 + jax.nn.softplus(self.beta * energy)
+        return c * jnp.eye(self.dim, dtype=x.dtype)
+
+class EBMWindField(eqx.Module):
+    """Wind field computed from the gradient of an Energy-Based Model."""
+    ebm: eqx.Module
+    scale: float = eqx.field(static=True)
+
+    def __call__(self, x: jax.Array) -> jax.Array:
+        # W(x) = -scale * \nabla E(x)
+        grad_fn = jax.grad(self.ebm)
+        return -self.scale * grad_fn(x)
+
+class EnergyBasedRanders(Randers):
+    """Energy-Based Randers Metric for Waddington's Landscape.
+
+    H(x) = c(x) I (Conformal base, scaled by energy to bend geodesics)
+    W(x) = -scale * \nabla E(x) (Negative gradient of biological potential)
+
+    This metric formulates trajectory inference as a route down the biological
+    energy landscape.
+    """
+    ebm: eqx.Module
+    dim: int = eqx.field(static=True)
+    wind_scale: float = eqx.field(static=True)
+
+    def __init__(self, manifold: Manifold, ebm: eqx.Module, wind_scale: float = 1.0, beta: float = 1.0):
+        """Initializes the Energy-Based Randers metric.
+
+        Args:
+            manifold: The topological domain M (usually flat Euclidean in PCA space).
+            ebm: A trained ScalarEnergyField model.
+            wind_scale: Scalar factor to multiply the energy gradient (lambda). Default: 1.0.
+            beta: Conformal scaling factor for the base metric. Default: 1.0.
+        """
+        self.dim = manifold.ambient_dim
+        self.ebm = ebm
+        self.wind_scale = float(wind_scale)
+        
+        h_net = ConformalEnergyBase(ebm, self.dim, beta=float(beta))
+        w_net = EBMWindField(ebm, self.wind_scale)
+        
+        super().__init__(manifold, h_net=h_net, w_net=w_net, epsilon=1e-5, use_wind=True)
+
+class PseudotimeRanders(Randers):
+    """Diffusion-Pseudotime (DPT) Randers Metric.
+    
+    H(x) = I (10D Euclidean Base metric)
+    W(x) = \nabla DPT(x) (Gradient of the 1D pseudotime potential)
+    """
+    pseudotime_net: eqx.Module
+    dim: int = eqx.field(static=True)
+    wind_scale: float = eqx.field(static=True)
+    
+    def __init__(self, manifold: Manifold, pseudotime_net: eqx.Module, wind_scale: float = 1.0):
+        self.dim = manifold.ambient_dim
+        self.pseudotime_net = pseudotime_net
+        self.wind_scale = float(wind_scale)
+        
+        # Base Metric H(x) = I
+        class FlatHNet(eqx.Module):
+            dim: int = eqx.field(static=True)
+            def __call__(self, x: jax.Array) -> jax.Array:
+                return jnp.eye(self.dim, dtype=x.dtype)
+                
+        h_net = FlatHNet(self.dim)
+        
+        # Wind W(x) = wind_scale * \nabla DPT(x)
+        class DPTWindField(eqx.Module):
+            net: eqx.Module
+            scale: float = eqx.field(static=True)
+            def __call__(self, x: jax.Array) -> jax.Array:
+                grad_fn = jax.grad(self.net)
+                return self.scale * grad_fn(x)
+                
+        w_net = DPTWindField(self.pseudotime_net, self.wind_scale)
+        
+        super().__init__(manifold, h_net=h_net, w_net=w_net, epsilon=1e-5, use_wind=True)
