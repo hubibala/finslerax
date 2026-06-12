@@ -1,9 +1,48 @@
+"""Grid-based fully anisotropic Godunov Eikonal solver (Fast Sweeping Method).
+
+Solves the dual Randers (Zermelo) arrival-time PDE on dense 2D Cartesian grids:
+
+    (grad T - B)^T G^{-1} (grad T - B) = 1,   T(source) = 0,
+
+where ``G = (H + (HW)(HW)^T / lam) / lam`` and ``B = -HW / lam`` are derived
+from the Zermelo navigation data ``(H, W, lam)`` of an
+:class:`~ham.geometry.metric.AsymmetricMetric`. Equivalently, ``T(x)`` is the
+Finsler distance from the source set to ``x`` under the primal Randers cost
+``F(v) = sqrt(v^T G v) + B . v``.
+
+The solver alternates four directional Gauss-Seidel sweeps until steady state
+and provides O(1)-memory implicit gradients with respect to ``(G, B)`` via
+``jax.custom_vjp`` (adjoint fixed-point iteration at the converged solution).
+"""
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 
 from ham.geometry.metric import AsymmetricMetric, FinslerMetric
+
+# =============================================================================
+# CONSTANTS
+# =============================================================================
+
+T_INF = 1e5
+"""Sentinel arrival time for unreached/invalid nodes (acts as +infinity)."""
+
+T_VALID_MAX = 1e4
+"""Upper bound for a 2-point update to be considered valid.
+
+Arrival times are assumed to stay below this value; domains with true arrival
+times above it must be rescaled before solving.
+"""
+
+STEADY_STATE_GRAD_TOL = 1e-4
+"""Tie tolerance for gradient routing in :func:`steady_state_min`.
+
+At the fixed point the stored value equals the freshly computed stencil
+candidate up to solver tolerance. Routing the gradient to the *new* branch
+whenever ``new <= old + tol`` ensures gradients flow into the metric tensors
+(through the stencil) instead of dead-ending in the carried state.
+"""
 
 # =============================================================================
 # STENCIL UPDATES
@@ -21,7 +60,7 @@ def _steady_state_min_fwd(old_val, new_val):
 
 def _steady_state_min_bwd(res, g):
     old_val, new_val = res
-    route_to_new = new_val <= old_val + 1e-4
+    route_to_new = new_val <= old_val + STEADY_STATE_GRAD_TOL
     g_new = jnp.where(route_to_new, g, 0.0)
     g_old = jnp.where(route_to_new, 0.0, g)
     return g_old, g_new
@@ -69,6 +108,11 @@ def compute_two_point_update(
     """
     Computes the 2-point (triangular) upwind update for the anisotropic Eikonal PDE:
         (grad T - B)^T G^-1 (grad T - B) = 1
+
+    The donor offsets ``m_k`` point from the update target to the donor
+    vertices. Since the characteristic travels donor -> target (displacement
+    ``-m_k``), the drift enters each donor value as ``S_k = T_k - m_k . B``,
+    matching the primal Randers segment cost ``F(-m) = sqrt(m^T G m) - m . B``.
     """
     e11 = g11 * m1x**2 + 2 * g12 * (m1x * m1y) + g22 * m1y**2
     e22 = g11 * m2x**2 + 2 * g12 * (m2x * m2y) + g22 * m2y**2
@@ -80,8 +124,8 @@ def compute_two_point_update(
     q12 = -e12 / det_safe
     q22 = e11 / det_safe
 
-    S1 = T1 + m1x * b1 + m1y * b2
-    S2 = T2 + m2x * b1 + m2y * b2
+    S1 = T1 - (m1x * b1 + m1y * b2)
+    S2 = T2 - (m2x * b1 + m2y * b2)
 
     alpha = q11 + 2 * q12 + q22
     beta = (q11 + q12) * S1 + (q12 + q22) * S2
@@ -97,9 +141,9 @@ def compute_two_point_update(
     lam2 = q12 * (t0_2pt - S1) + q22 * (t0_2pt - S2)
 
     inside_triangle = (lam1 >= 0) & (lam2 >= 0)
-    valid = (detE > eps) & (alpha > eps) & (t0_2pt < 1e4) & inside_triangle
+    valid = (detE > eps) & (alpha > eps) & (t0_2pt < T_VALID_MAX) & inside_triangle
 
-    return jnp.where(valid, t0_2pt, 1e5)
+    return jnp.where(valid, t0_2pt, T_INF)
 
 
 def compute_one_point_update(
@@ -112,11 +156,16 @@ def compute_one_point_update(
     mx: float,
     my: float,
 ) -> jax.Array:
-    """Computes the 1-point (edge) update."""
+    """Computes the 1-point (edge) update.
+
+    ``m`` points from the update target to the donor, so the segment cost is
+    the primal Randers cost of the reverse displacement:
+    ``F(-m) = sqrt(m^T G m) - m . B``.
+    """
     m_G_m = g11 * mx**2 + 2 * g12 * mx * my + g22 * my**2
     distance = safe_sqrt(m_G_m)
     m_dot_b = mx * b1 + my * b2
-    return T_nbr + distance + m_dot_b
+    return T_nbr + distance - m_dot_b
 
 
 def stencil_update(
@@ -149,52 +198,53 @@ def stencil_update(
 # =============================================================================
 
 
-def sweep_y(
+def sweep_axis0(
     T: jax.Array,
     G: jax.Array,
     B: jax.Array,
     source_mask: jax.Array,
-    hx: float,
-    hy: float,
+    h0: float,
+    h1: float,
     direction: int,
 ) -> jax.Array:
     """
-    Sweeps along axis 0 (Y-axis).
-    direction=1: top to bottom (row i depends on row i-1).
-    direction=-1: bottom to top (row i depends on row i+1).
+    Sweeps along axis 0 of ``T``.
+
+    All metric/drift components are given in *array-axis* order:
+    ``G = (g00, g01, g11)`` and ``B = (b0, b1)``, where index 0 refers to
+    axis 0 (the scanned axis, spacing ``h0``) and index 1 to axis 1
+    (the in-row axis, spacing ``h1``).
+
+    direction=1: row i depends on row i-1.
+    direction=-1: row i depends on row i+1.
     """
 
     def scan_fn(T_prev, xs):
-        T_curr, g11, g12, g22, b1, b2, s_mask = xs
+        T_curr, g00, g01, g11, b0, b1, s_mask = xs
 
-        padded_T_prev = jnp.pad(T_prev, (1, 1), constant_values=1e5)
+        padded_T_prev = jnp.pad(T_prev, (1, 1), constant_values=T_INF)
 
         T2 = T_prev
-        T1_left = padded_T_prev[0:-2]
         T0 = T_curr
 
-        # Vector points from current (i,j) to neighbor (i_nbr, j_nbr)
-        # For Y sweep, neighbor is in Y direction.
-        p = -direction * hy
+        # Donor offsets point from the current point (i, j) to the donor.
+        # The donor row lies -direction steps along axis 0.
+        p = -direction * h0
 
-        m2x = 0.0
-        m2y = p
+        # Axis-aligned donor: (i - direction, j)
+        m2a = p
+        m2b = 0.0
 
-        # Left neighbor: (i_nbr, j-1)
-        m1x_left = -1.0 * hx
-        m1y_left = p
-
+        # Diagonal donor: (i - direction, j - 1)
+        T1_left = padded_T_prev[0:-2]
         T0_new1 = stencil_update(
-            T1_left, T2, T0, g11, g12, g22, b1, b2, m1x_left, m1y_left, m2x, m2y
+            T1_left, T2, T0, g00, g01, g11, b0, b1, p, -h1, m2a, m2b
         )
 
-        # Right neighbor: (i_nbr, j+1)
+        # Diagonal donor: (i - direction, j + 1)
         T1_right = padded_T_prev[2:]
-        m1x_right = 1.0 * hx
-        m1y_right = p
-
         T0_new2 = stencil_update(
-            T1_right, T2, T0_new1, g11, g12, g22, b1, b2, m1x_right, m1y_right, m2x, m2y
+            T1_right, T2, T0_new1, g00, g01, g11, b0, b1, p, h1, m2a, m2b
         )
 
         T_curr_out = jnp.where(s_mask, 0.0, T0_new2)
@@ -230,21 +280,27 @@ def sweep_all(
     hx: float,
     hy: float,
 ) -> jax.Array:
-    """Executes 4 directional sweeps (Y+, X+, Y-, X-)."""
-    # 1. Sweep Y +1 (top to bottom)
-    T = sweep_y(T, G, B, source_mask, hx, hy, 1)
+    """Executes 4 directional sweeps (X+, Y+, X-, Y-).
 
-    # 2. Sweep X +1 (left to right)
-    # Transpose the domain to run a Y sweep along the X axis
+    ``T`` has layout ``(nx, ny)`` with axis 0 = x (``indexing="ij"``);
+    ``G = (g11, g12, g22)`` and ``B = (b1, b2)`` are the metric/drift fields
+    in (x, y) component order.
+    """
+    # Components reordered to (y, x) for the transposed (Y-axis) sweeps.
     G_T = jnp.stack([G[2].T, G[1].T, G[0].T], axis=0)
     B_T = jnp.stack([B[1].T, B[0].T], axis=0)
-    T = sweep_y(T.T, G_T, B_T, source_mask.T, hx=hy, hy=hx, direction=1).T
 
-    # 3. Sweep Y -1 (bottom to top)
-    T = sweep_y(T, G, B, source_mask, hx, hy, -1)
+    # 1. Sweep X +1 (axis 0, increasing)
+    T = sweep_axis0(T, G, B, source_mask, hx, hy, 1)
 
-    # 4. Sweep X -1 (right to left)
-    T = sweep_y(T.T, G_T, B_T, source_mask.T, hx=hy, hy=hx, direction=-1).T
+    # 2. Sweep Y +1 (transpose so axis 0 is y)
+    T = sweep_axis0(T.T, G_T, B_T, source_mask.T, h0=hy, h1=hx, direction=1).T
+
+    # 3. Sweep X -1
+    T = sweep_axis0(T, G, B, source_mask, hx, hy, -1)
+
+    # 4. Sweep Y -1
+    T = sweep_axis0(T.T, G_T, B_T, source_mask.T, h0=hy, h1=hx, direction=-1).T
 
     return T
 
@@ -267,8 +323,8 @@ def _fast_sweeping_solve(G, B, source_mask, hx, hy, max_iters, tol):
         max_diff = jnp.max(jnp.where(jnp.isnan(diff), 0.0, diff))
         return T_new, max_diff, iters + 1
 
-    T_init = jnp.where(source_mask, 0.0, 1e5)
-    final_val = jax.lax.while_loop(cond_fun, body_fun, (T_init, jnp.array(1e5), 0))
+    T_init = jnp.where(source_mask, 0.0, T_INF)
+    final_val = jax.lax.while_loop(cond_fun, body_fun, (T_init, jnp.array(T_INF), 0))
     return final_val[0]
 
 

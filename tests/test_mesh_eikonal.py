@@ -79,3 +79,79 @@ def test_mesh_sweeping_gradients():
         )
 
     check_grads(fwd, (G_faces, B_faces), order=1, modes=['rev'], eps=1e-3)
+
+
+# ---------------------------------------------------------------------------
+# Directional regression test (would have caught the wind-sign-flip bug fixed
+# in 2026-06; see reviews/REPORT_SOLVERS_2026-06-12.md)
+# ---------------------------------------------------------------------------
+
+
+def _structured_grid_mesh(nm: int):
+    """Regular triangulated grid over [-1, 1]^2 with nm x nm vertices."""
+    import numpy as np
+
+    xs = np.linspace(-1.0, 1.0, nm)
+    XX, YY = np.meshgrid(xs, xs, indexing="ij")
+    verts = np.stack([XX.ravel(), YY.ravel()], axis=-1)
+
+    def vid(i, j):
+        return i * nm + j
+
+    faces = []
+    for i in range(nm - 1):
+        for j in range(nm - 1):
+            faces.append([vid(i, j), vid(i + 1, j), vid(i, j + 1)])
+            faces.append([vid(i + 1, j), vid(i + 1, j + 1), vid(i, j + 1)])
+    return (
+        jnp.array(verts, dtype=jnp.float32),
+        jnp.array(np.array(faces, dtype=np.int32)),
+    )
+
+
+class ConstWindMetric(AsymmetricMetric):
+    wx: float = eqx.field(static=True)
+
+    def __init__(self, wx: float):
+        self.manifold = EuclideanSpace(2)
+        self.wx = float(wx)
+
+    def metric_fn(self, x, v):
+        H, W, lam = self.zermelo_data(x)
+        Hv = H @ v
+        Wv = W @ Hv
+        return (jnp.sqrt(lam * (v @ Hv) + Wv**2) - Wv) / lam
+
+    def zermelo_data(self, x):
+        H = jnp.eye(2)
+        W = jnp.array([self.wx, 0.0])
+        return H, W, 1.0 - W @ H @ W
+
+
+def test_mesh_constant_wind_directional():
+    """Downwind arrival must be earlier than upwind on a planar mesh."""
+    import numpy as np
+
+    nm = 21
+    w, d = 0.5, 0.5
+    verts, faces = _structured_grid_mesh(nm)
+    mesh_adj = MeshAdjacency.build(verts, faces, num_ref_points=2)
+
+    solver = MeshEikonalSolver(max_iters=100, tol=1e-6)
+    T = solver.solve(ConstWindMetric(w), mesh_adj, verts, faces,
+                     jnp.array([[0.0, 0.0]]))
+    Tg = np.array(T).reshape(nm, nm)
+
+    ic = nm // 2
+    off = int(round(d / (2.0 / (nm - 1))))
+
+    assert abs(Tg[ic + off, ic] - d / (1 + w)) < 0.03, (
+        f"downwind T={Tg[ic + off, ic]:.4f}, expected {d / (1 + w):.4f}"
+    )
+    assert abs(Tg[ic - off, ic] - d / (1 - w)) < 0.06, (
+        f"upwind T={Tg[ic - off, ic]:.4f}, expected {d / (1 - w):.4f}"
+    )
+    # Crosswind: d / sqrt(1 - w^2), looser tol (mesh diffusion off-axis)
+    cross = d / np.sqrt(1 - w * w)
+    assert abs(Tg[ic, ic + off] - cross) < 0.1
+    assert abs(Tg[ic, ic - off] - cross) < 0.1

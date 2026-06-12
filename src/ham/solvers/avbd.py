@@ -35,7 +35,7 @@ import jax.numpy as jnp
 
 from ham.geometry.metric import FinslerMetric
 from ham.solvers.coloring import chain_coloring
-from ham.utils.math import GRAD_EPS, safe_norm
+from ham.utils.math import GRAD_EPS, PSD_EPS, safe_norm
 
 __all__ = ["AVBDSolver", "Trajectory"]
 
@@ -67,6 +67,8 @@ class SolverState(NamedTuple):
         path: Inner path vertices (excluding boundaries), shape (T-1, D).
         lambdas: Lagrange multipliers for constraints, shape (T-1, C).
         stiffness: Penalty parameters for constraints, shape (T-1, C).
+        prev_c: Constraint values from the previous iteration, shape (T-1, C).
+            Used by the ALM schedule to grow stiffness only on stagnation.
         step: Current iteration counter.
         max_violation: Maximum constraint violation in the current iteration.
         prev_energy: Total path energy from the previous iteration.
@@ -76,19 +78,40 @@ class SolverState(NamedTuple):
     path: jax.Array
     lambdas: jax.Array
     stiffness: jax.Array
+    prev_c: jax.Array
     step: int
     max_violation: jax.Array
     prev_energy: jax.Array
     curr_energy: jax.Array
 
 
+# Fallback name-substring heuristic for modules that do not declare
+# ``nondiff_fields`` explicitly. Prefer the explicit declaration: this list is
+# fragile (matches substrings anywhere in the field path) and exists only for
+# backward compatibility with metrics written before the protocol existed.
+_DEFAULT_NONDIFF_KEYS = (
+    "raster",
+    "pixel_spacing",
+    "origin",
+    "manifold",
+    "covariates",
+    "weather",
+)
+
+
 def get_differentiable_mask(obj):
     """Generate a PyTree of booleans matching the structure of obj.
 
     Returns True for trainable/differentiable inexact arrays, and False for
-    non-differentiable arrays (e.g. terrain rasters, manifold, pixel spacing, scene origin)
-    and static fields.
+    non-differentiable arrays (e.g. terrain rasters, manifold, pixel spacing,
+    scene origin) and static fields.
+
+    Modules can opt out of the name heuristic by declaring an explicit
+    ``nondiff_fields`` attribute (an iterable of field-name substrings, e.g.
+    ``nondiff_fields: ClassVar[tuple[str, ...]] = ("elevation_map",)``); when
+    present it replaces :data:`_DEFAULT_NONDIFF_KEYS` entirely.
     """
+    nondiff_keys = tuple(getattr(obj, "nondiff_fields", _DEFAULT_NONDIFF_KEYS))
     flat, treedef = jax.tree_util.tree_flatten_with_path(obj)
     mask_flat = []
     for path, leaf in flat:
@@ -100,17 +123,7 @@ def get_differentiable_mask(obj):
         is_static_field = False
         for entry in path:
             name = getattr(entry, "name", None) or str(entry)
-            if any(
-                k in name
-                for k in [
-                    "raster",
-                    "pixel_spacing",
-                    "origin",
-                    "manifold",
-                    "covariates",
-                    "weather",
-                ]
-            ):
+            if any(k in name for k in nondiff_keys):
                 is_static_field = True
                 break
 
@@ -204,14 +217,15 @@ def _implicit_forward_pass_bwd(
     # -----------------------------------------------------------------------
     # Block-Tridiagonal Thomas Algorithm for the IFT adjoint system
     # -----------------------------------------------------------------------
-    # The path Hessian dG/dx* is block-tridiagonal with D×D blocks.
+    # The path Jacobian J = dG/dx* is block-tridiagonal with D×D blocks.
     # For N interior vertices and ambient dimension D, the dense solve is
     # O(N²D²) memory and O(N³D³) flops.  The Thomas algorithm reduces this
     # to O(N·D²) memory and O(N·D³) flops — a factor of N improvement.
     #
-    # Block structure:
-    #   Row k: A[k]·λ[k-1] + B[k]·λ[k] + C[k]·λ[k+1] = g[k]
+    # Block structure of J:
+    #   Row k: A[k]·x[k-1] + B[k]·x[k] + C[k]·x[k+1]
     # where A[k] = dG_k/dx_{k-1}, B[k] = dG_k/dx_k, C[k] = dG_k/dx_{k+1}.
+    # The adjoint (cotangent) system solved below is J^T·λ = g.
     #
     # Full path (N+2 points, first=p_start, last=p_end):
     #   full_ext[0]   = p_start  (boundary, fixed)
@@ -225,51 +239,60 @@ def _implicit_forward_pass_bwd(
     D = inner.shape[1]
     full_ext = jnp.concatenate([p_start[None], inner, p_end[None]], axis=0)
 
-    def local_residual_k(k):
-        """dE/dx_k for inner vertex k (0-indexed), shape (D,)."""
-        xp = full_ext[k]
-        xc = full_ext[k + 1]
-        xn = full_ext[k + 2]
-
-        def E_loc(xc_):
-            v_in = metric.manifold.log_map(xp, xc_)
-            v_out = metric.manifold.log_map(xc_, xn)
-            return metric.energy(xp, v_in) + metric.energy(xc_, v_out)
-
-        return jax.grad(E_loc)(xc)
-
     # Compute all three D×D block Jacobians for every inner vertex via vmap.
     # vmap over k = 0 .. n_inner-1; dynamic indexing into full_ext is safe.
     ks = jnp.arange(n_inner)
 
-    def get_ABC(k):
+    def get_ABC(k, lam_k, mu_k):
         xp = full_ext[k]
         xc = full_ext[k + 1]
         xn = full_ext[k + 2]
 
         def G_k(xp_, xc_, xn_):
-            def E_loc(xc__):
+            def L_loc(xc__):
                 v_in = metric.manifold.log_map(xp_, xc__)
                 v_out = metric.manifold.log_map(xc__, xn_)
-                return metric.energy(xp_, v_in) + metric.energy(xc__, v_out)
+                E = metric.energy(xp_, v_in) + metric.energy(xc__, v_out)
+                # The converged residual is of the full Lagrangian, so the
+                # IFT Jacobian must include the ALM penalty curvature.
+                if constraints is not None and len(constraints) > 0:
+                    c_vals = jnp.stack([c(xc__) for c in constraints])
+                    E = E + jnp.sum(lam_k * c_vals + 0.5 * mu_k * c_vals**2)
+                return E
 
-            return jax.grad(E_loc)(xc_)
+            grad_euc = jax.grad(L_loc)(xc_)
+            # Project to the tangent space so we differentiate the same map
+            # whose root the solver found (see `_el_residual`).
+            return metric.manifold.to_tangent(xc_, grad_euc)
 
         A_k = jax.jacobian(lambda xp_: G_k(xp_, xc, xn))(xp)  # dG_k/dx_{k-1}
         B_k = jax.jacobian(lambda xc_: G_k(xp, xc_, xn))(xc)  # dG_k/dx_k
         C_k = jax.jacobian(lambda xn_: G_k(xp, xc, xn_))(xn)  # dG_k/dx_{k+1}
         return A_k, B_k, C_k
 
-    A_blocks, B_blocks, C_blocks = jax.vmap(get_ABC)(ks)  # each (N, D, D)
+    A_blocks, B_blocks, C_blocks = jax.vmap(get_ABC)(
+        ks, lambdas, stiffness
+    )  # each (N, D, D)
 
-    # Tikhonov regularisation on each diagonal block — same rcond as old lstsq.
-    # Adds eps * I to each B[k] before all solves, bounding condition number.
-    _btd_reg = 1e-4
+    # The cotangent solve needs J^T lam = g (not J lam = g). J^T is block-
+    # tridiagonal with row-k blocks (C[k-1]^T, B[k]^T, A[k+1]^T). For the
+    # symmetric case (Euclidean manifold, energy Hessian) this coincides with
+    # (A, B, C), but with tangent projection or penalty terms J is generally
+    # non-symmetric.
+    AT = jnp.swapaxes(A_blocks, -1, -2)
+    BT = jnp.swapaxes(B_blocks, -1, -2)
+    CT = jnp.swapaxes(C_blocks, -1, -2)
+
+    # Tikhonov regularisation on each diagonal block — canonical PSD floor.
+    # Adds eps * I to each diagonal block before all solves, bounding the
+    # condition number.
+    _btd_reg = PSD_EPS
     g_rhs = g_inner_tan  # shape (N, D) — right-hand side of adjoint system
 
     # Forward sweep (Thomas forward elimination): left to right, k = 1 .. N-1.
-    # Carry = (B'[k-1], g'[k-1]).  Scan input at step k = (A[k], B[k], C[k-1], g[k]).
-    B0_reg = B_blocks[0] + _btd_reg * jnp.eye(D, dtype=B_blocks.dtype)
+    # Carry = (B'[k-1], g'[k-1]).  Scan input at step k = (sub[k], diag[k],
+    # super[k-1], g[k]) of the transposed system.
+    B0_reg = BT[0] + _btd_reg * jnp.eye(D, dtype=BT.dtype)
 
     def fwd_step(carry, inputs):
         B_prev, g_prev = carry
@@ -282,9 +305,9 @@ def _implicit_forward_pass_bwd(
 
     if n_inner > 1:
         fwd_inputs = (
-            A_blocks[1:],  # A[1..N-1],  (N-1, D, D)
-            B_blocks[1:],  # B[1..N-1]
-            C_blocks[:-1],  # C[0..N-2]
+            CT[:-1],  # sub'[1..N-1]   = C[0..N-2]^T,  (N-1, D, D)
+            BT[1:],  # diag'[1..N-1]  = B[1..N-1]^T
+            AT[1:],  # super'[0..N-2] = A[1..N-1]^T
             g_rhs[1:],  # g[1..N-1],  (N-1, D)
         )
         (_, _), (B_prime_rest, g_prime_rest) = jax.lax.scan(
@@ -310,7 +333,7 @@ def _implicit_forward_pass_bwd(
         bwd_inputs = (
             B_prime[:-1][::-1],  # B'[N-2..0]  reversed (N-1, D, D)
             g_prime[:-1][::-1],  # g'[N-2..0]  reversed (N-1, D)
-            C_blocks[:-1][::-1],  # C[N-2..0]   reversed (N-1, D, D)
+            AT[1:][::-1],  # super'[N-2..0] = A[N-1..1]^T reversed (N-1, D, D)
         )
         _, lam_rest_rev = jax.lax.scan(bwd_step, lam_last, bwd_inputs)
         # lam_rest_rev is (N-1, D) in reversed order [lam_{N-2}, ..., lam_0]
@@ -360,6 +383,18 @@ class AVBDSolver(eqx.Module):
         Discretizes the path into T+1 vertices. Minimizes the discrete action
         L = sum(E(x_i, v_i)) + Penalty via Gauss-Seidel sweeps. Constraints
         are enforced using the Augmented Lagrangian Method (ALM).
+
+    Note:
+        The dual variables are updated after *every* primal sweep (a
+        primal-dual variant rather than textbook ALM, which converges the
+        primal subproblem between dual updates). Dual updates are gated on
+        ``|c| > tol`` — once a constraint is satisfied to tolerance its
+        multiplier and stiffness freeze — and the stiffness grows by ``beta``
+        (capped at 1e6) only where the violation also failed to shrink by at
+        least 4x since the previous sweep (the standard ALM stagnation
+        schedule). Setting ``tol`` below the primal accuracy floor (single
+        clipped GD sweeps, float32) together with a large ``beta`` can still
+        destabilize the duals.
 
     Attributes:
         step_size: Learning rate for vertex gradient descent.
@@ -502,11 +537,14 @@ class AVBDSolver(eqx.Module):
         n_inner = n_steps - 1
         init_lambdas = jnp.zeros((n_inner, num_constraints))
         init_stiffness = jnp.ones((n_inner, num_constraints))
+        # inf sentinel: the first iteration never counts as stagnation.
+        init_prev_c = jnp.full((n_inner, num_constraints), jnp.inf)
 
         state = SolverState(
             path=init_inner,
             lambdas=init_lambdas,
             stiffness=init_stiffness,
+            prev_c=init_prev_c,
             step=0,
             max_violation=jnp.array(0.0),
             prev_energy=jnp.array(jnp.inf),
@@ -612,6 +650,7 @@ class AVBDSolver(eqx.Module):
             max_v = jnp.array(0.0)
             new_lambdas = s.lambdas
             new_stiffness = s.stiffness
+            new_prev_c = s.prev_c
 
             if num_constraints > 0:
 
@@ -619,9 +658,25 @@ class AVBDSolver(eqx.Module):
                     return jnp.stack([c(x) for c in actual_constraints])
 
                 all_c = jax.vmap(get_c_all)(new_inner)  # (n_inner, num_constraints)
-                new_lambdas = s.lambdas + s.stiffness * all_c
-                new_stiffness = jnp.minimum(s.stiffness * beta, 1e6)
+                # Freeze duals where the constraint is already satisfied to
+                # tolerance: once |c| sits at the primal accuracy floor,
+                # further lambda accumulation and stiffness growth destabilize
+                # the bounded-step sweeps (the solve diverges *after* having
+                # converged).
+                needs_work = jnp.abs(all_c) > tol
+                new_lambdas = s.lambdas + jnp.where(
+                    needs_work, s.stiffness * all_c, 0.0
+                )
+                # Standard ALM schedule: grow the penalty only where the
+                # violation also failed to shrink sufficiently since the last
+                # sweep. Unconditional geometric growth races the stiffness to
+                # the cap, which the clipped primal steps cannot track.
+                stalled = needs_work & (jnp.abs(all_c) > 0.25 * jnp.abs(s.prev_c))
+                new_stiffness = jnp.where(
+                    stalled, jnp.minimum(s.stiffness * beta, 1e6), s.stiffness
+                )
                 max_v = jnp.max(jnp.abs(all_c))
+                new_prev_c = all_c
 
             # C. Energy Monitoring
             vels = jax.vmap(metric.manifold.log_map)(new_full[:-1], new_full[1:])
@@ -631,6 +686,7 @@ class AVBDSolver(eqx.Module):
                 path=new_inner,
                 lambdas=new_lambdas,
                 stiffness=new_stiffness,
+                prev_c=new_prev_c,
                 step=s.step + 1,
                 max_violation=max_v,
                 prev_energy=s.curr_energy,

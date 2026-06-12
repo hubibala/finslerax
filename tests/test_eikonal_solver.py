@@ -68,3 +68,96 @@ def test_fast_sweeping_gradients_anisotropic():
         return _fast_sweeping_solve(g_tensor, b_tensor, source_mask, hx, hy, 100, 1e-6)
 
     check_grads(fwd, (G, B), order=1, modes=['rev'], eps=1e-3)
+
+
+# ---------------------------------------------------------------------------
+# Directional regression tests (would have caught the axis-swap and the
+# wind-sign-flip bugs fixed in 2026-06; see reviews/REPORT_SOLVERS_2026-06-12.md)
+# ---------------------------------------------------------------------------
+
+
+class ConstWindMetric(AsymmetricMetric):
+    """Identity sea metric with a constant wind vector."""
+
+    wx: float = eqx.field(static=True)
+    wy: float = eqx.field(static=True)
+
+    def __init__(self, wx: float = 0.0, wy: float = 0.0):
+        self.manifold = EuclideanSpace(2)
+        self.wx = float(wx)
+        self.wy = float(wy)
+
+    def metric_fn(self, x, v):
+        H, W, lam = self.zermelo_data(x)
+        Hv = H @ v
+        Wv = W @ Hv
+        return (jnp.sqrt(lam * (v @ Hv) + Wv**2) - Wv) / lam
+
+    def zermelo_data(self, x):
+        H = jnp.eye(2)
+        W = jnp.array([self.wx, self.wy])
+        return H, W, 1.0 - W @ H @ W
+
+
+class AnisoSeaMetric(AsymmetricMetric):
+    """Diagonal sea metric diag(4, 1): motion along x is twice as slow."""
+
+    def __init__(self):
+        self.manifold = EuclideanSpace(2)
+
+    def metric_fn(self, x, v):
+        H, _, _ = self.zermelo_data(x)
+        return jnp.sqrt(v @ H @ v)
+
+    def zermelo_data(self, x):
+        return jnp.diag(jnp.array([4.0, 1.0])), jnp.zeros(2), jnp.array(1.0)
+
+
+def _solve_probe(metric, n=61, d=0.5):
+    solver = EikonalSolver(max_iters=200, tol=1e-6)
+    T, _, _ = solver.solve(
+        metric, jnp.array([0.0, 0.0]), (-1.0, 1.0, -1.0, 1.0), (n, n)
+    )
+    ic = n // 2
+    off = int(round(d / (2.0 / (n - 1))))
+    return T, ic, off
+
+
+def test_eikonal_constant_wind_directional():
+    """Downwind must be fast, upwind slow: T(+x)=d/(1+w), T(-x)=d/(1-w)."""
+    w, d = 0.5, 0.5
+    T, ic, off = _solve_probe(ConstWindMetric(wx=w), d=d)
+
+    assert abs(T[ic + off, ic] - d / (1 + w)) < 0.03, (
+        f"downwind T={T[ic + off, ic]:.4f}, expected {d / (1 + w):.4f}"
+    )
+    assert abs(T[ic - off, ic] - d / (1 - w)) < 0.05, (
+        f"upwind T={T[ic - off, ic]:.4f}, expected {d / (1 - w):.4f}"
+    )
+    # Crosswind (Zermelo tacking): d / sqrt(1 - w^2)
+    cross = d / jnp.sqrt(1 - w * w)
+    assert abs(T[ic, ic + off] - cross) < 0.05
+    assert abs(T[ic, ic - off] - cross) < 0.05
+
+
+def test_eikonal_constant_wind_y_axis():
+    """Same as above with the wind along y - guards the axis pairing."""
+    w, d = 0.5, 0.5
+    T, ic, off = _solve_probe(ConstWindMetric(wy=w), d=d)
+
+    assert abs(T[ic, ic + off] - d / (1 + w)) < 0.03
+    assert abs(T[ic, ic - off] - d / (1 - w)) < 0.05
+    cross = d / jnp.sqrt(1 - w * w)
+    assert abs(T[ic + off, ic] - cross) < 0.05
+    assert abs(T[ic - off, ic] - cross) < 0.05
+
+
+def test_eikonal_diagonal_anisotropy():
+    """H = diag(4, 1) makes x-travel twice as slow: T(+-x)=2d, T(+-y)=d."""
+    d = 0.5
+    T, ic, off = _solve_probe(AnisoSeaMetric(), d=d)
+
+    assert abs(T[ic + off, ic] - 2 * d) < 0.05
+    assert abs(T[ic - off, ic] - 2 * d) < 0.05
+    assert abs(T[ic, ic + off] - d) < 0.03
+    assert abs(T[ic, ic - off] - d) < 0.03
