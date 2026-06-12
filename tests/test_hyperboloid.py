@@ -1,16 +1,16 @@
 import unittest
+
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import config
 
 # Use 64-bit precision for geometric checks
 # config.update("jax_enable_x64", True)
-
 from ham.geometry.manifolds import Hyperboloid
 
+
 class TestHyperboloid(unittest.TestCase):
-    
+
     def setUp(self):
         self.dim = 2
         self.manifold = Hyperboloid(intrinsic_dim=self.dim)
@@ -34,16 +34,16 @@ class TestHyperboloid(unittest.TestCase):
         # Generate random ambient points (some valid, some invalid)
         key, subkey = jax.random.split(self.key)
         random_ambient = jax.random.normal(subkey, (10, 3)) * 5.0
-        
+
         projected = self.manifold.project(random_ambient)
-        
+
         for i in range(10):
             p = projected[i]
             norm_sq = self.minkowski_dot(p, p)
-            
+
             # 1. Check Hyperboloid equation <p,p>_L = -1
             self.assertAlmostEqual(norm_sq, -1.0, places=4)
-            
+
             # 2. Check Upper Sheet x0 > 0
             self.assertGreater(p[0], 0.0)
 
@@ -52,7 +52,7 @@ class TestHyperboloid(unittest.TestCase):
         x = jnp.array([1.0, 0.0, 0.0]) # The origin is definitely on the manifold
         p = self.manifold.project(x)
         np.testing.assert_allclose(p, x, atol=1e-5)
-        
+
         # Double projection
         p2 = self.manifold.project(p)
         np.testing.assert_allclose(p2, p, atol=1e-5)
@@ -63,14 +63,14 @@ class TestHyperboloid(unittest.TestCase):
         <x, v>_L = 0
         """
         # 1. Get a valid point on manifold
-        x = jnp.array([np.cosh(1.0), np.sinh(1.0), 0.0]) 
-        
+        x = jnp.array([np.cosh(1.0), np.sinh(1.0), 0.0])
+
         # 2. Generate random ambient vector
         v_amb = jnp.array([1.0, 2.0, 3.0])
-        
+
         # 3. Project to tangent space
         v_tan = self.manifold.to_tangent(x, v_amb)
-        
+
         # 4. Check orthogonality
         inner = self.minkowski_dot(x, v_tan)
         self.assertAlmostEqual(inner, 0.0, places=6)
@@ -80,7 +80,7 @@ class TestHyperboloid(unittest.TestCase):
         Random samples must satisfy manifold constraints.
         """
         samples = self.manifold.random_sample(self.key, (100,))
-        
+
         for i in range(100):
             p = samples[i]
             norm_sq = self.minkowski_dot(p, p)
@@ -93,12 +93,12 @@ class TestHyperboloid(unittest.TestCase):
         """
         x = jnp.array([1.0, 0.0, 0.0])
         v = jnp.array([0.0, 0.5, 0.5])
-        
+
         y = self.manifold.exp_map(x, v)
         # y should be on the manifold
         norm_sq = self.minkowski_dot(y, y)
         self.assertAlmostEqual(norm_sq, -1.0, places=6)
-        
+
         v_recovered = self.manifold.log_map(x, y)
         np.testing.assert_allclose(v_recovered, v, atol=1e-5)
 
@@ -115,12 +115,12 @@ class TestHyperboloid(unittest.TestCase):
         x = jnp.array([1.0, 0.0, 0.0])
         v = jnp.array([0.0, 0.5, 0.5])
         y = self.manifold.random_sample(self.key, ())
-        
+
         v_trans = self.manifold.parallel_transport(x, y, v)
-        
+
         # Norm preserved
         self.assertAlmostEqual(self.minkowski_dot(v_trans, v_trans), self.minkowski_dot(v, v), places=6)
-        
+
         # Orthogonal to y
         self.assertAlmostEqual(self.minkowski_dot(y, v_trans), 0.0, places=6)
 
@@ -130,9 +130,9 @@ class TestHyperboloid(unittest.TestCase):
         """
         x = jnp.array([1.0, 0.0, 0.0]) # Origin
         v = jnp.array([0.0, 0.5, 0.5]) # Valid tangent vector at origin (<x, v>_L = 0)
-        
+
         new_x = self.manifold.retract(x, v)
-        
+
         norm_sq = self.minkowski_dot(new_x, new_x)
         self.assertAlmostEqual(norm_sq, -1.0, places=6)
 

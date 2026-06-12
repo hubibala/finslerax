@@ -1,12 +1,13 @@
 """Concrete Finsler metric implementations."""
-from .euclidean import Euclidean
-from .riemannian import Riemannian
-from .randers import Randers
+
 from .discrete import DiscreteRanders
+from .euclidean import Euclidean
+from .randers import Randers
+from .riemannian import Riemannian
 
 __all__ = [
-    "Euclidean",
-    "Riemannian",
-    "Randers",
     "DiscreteRanders",
+    "Euclidean",
+    "Randers",
+    "Riemannian",
 ]

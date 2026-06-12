@@ -1,7 +1,9 @@
 import jax
 import jax.numpy as jnp
 import pytest
-from ham.utils.math import safe_norm, safe_norm_additive, GRAD_EPS
+
+from ham.utils.math import GRAD_EPS, safe_norm, safe_norm_additive
+
 
 def test_safe_norm_forward_zero():
     """Verify safe_norm(0) returns sqrt(eps)."""
@@ -14,7 +16,7 @@ def test_safe_norm_grad_at_zero():
     """Verify gradient at zero is finite (zero)."""
     def f(x):
         return safe_norm(x)
-    
+
     g = jax.grad(f)
     grad_val = g(jnp.zeros((3,)))
     assert jnp.all(jnp.isfinite(grad_val))
@@ -44,11 +46,11 @@ def test_safe_norm_additive_smoothness():
     """Verify additive norm is smooth at zero (non-zero 2nd derivative)."""
     def f(x):
         return safe_norm_additive(x, eps=1e-3)
-    
+
     # 1st derivative should be 0 at origin
     g = jax.grad(f)
     assert jnp.allclose(g(jnp.zeros((3,))), 0.0)
-    
+
     # 2nd derivative (Hessian) should be 1/eps * Identity at origin
     # d^2/dv^2 sqrt(v^2 + eps^2) = 1/eps at v=0
     h = jax.hessian(f)

@@ -6,8 +6,11 @@ Provides dataset loaders, normalizers, and spatial/temporal preprocessing method
 the Sim2Real-Fire dataset (Gahtan et al., 2026).
 """
 
-from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
+from typing import Optional
+
 import numpy as np
+
+from ham.utils.config import DEFAULT_NP_DTYPE
 
 
 class WildfireScenario:
@@ -52,8 +55,14 @@ class WildfireScenario:
         self.pixel_spacing_m = pixel_spacing_m
         self.origin_xy = origin_xy
         self.burned_mask = burned_mask
-        self.val_pixels = val_pixels if val_pixels is not None else np.zeros((0, 2), dtype=np.int64)
-        self.val_arrival_times = val_arrival_times if val_arrival_times is not None else np.zeros((0,), dtype=DEFAULT_NP_DTYPE)
+        self.val_pixels = (
+            val_pixels if val_pixels is not None else np.zeros((0, 2), dtype=np.int64)
+        )
+        self.val_arrival_times = (
+            val_arrival_times
+            if val_arrival_times is not None
+            else np.zeros((0,), dtype=DEFAULT_NP_DTYPE)
+        )
 
 
 def extract_arrival_times(masks: np.ndarray) -> np.ndarray:
@@ -106,7 +115,9 @@ def find_ignition_point(masks: np.ndarray) -> np.ndarray:
     return np.array([H / 2.0, W / 2.0], dtype=DEFAULT_NP_DTYPE)
 
 
-def stratified_sample_observations(arrival: np.ndarray, n_samples: int, seed=None) -> np.ndarray:
+def stratified_sample_observations(
+    arrival: np.ndarray, n_samples: int, seed=None
+) -> np.ndarray:
     """Sample exactly n_samples pixel coordinates stratified across 10 equal-width time bins.
 
     Args:
@@ -138,7 +149,9 @@ def stratified_sample_observations(arrival: np.ndarray, n_samples: int, seed=Non
         return coords[indices]
 
     # Partition arrival times into 10 equal-width bins
-    bin_idx = np.minimum(9, np.floor((times - t_min) / (t_max - t_min) * 10).astype(int))
+    bin_idx = np.minimum(
+        9, np.floor((times - t_min) / (t_max - t_min) * 10).astype(int)
+    )
     bin_coords = [coords[bin_idx == b] for b in range(10)]
     capacities = np.array([len(b) for b in bin_coords])
 
@@ -235,8 +248,8 @@ class SceneNormalizer:
         slope_std: float = 1.0,
         canopy_mean: float = 0.0,
         canopy_std: float = 1.0,
-        weather_mean: np.ndarray = None,
-        weather_std: np.ndarray = None,
+        weather_mean: Optional[np.ndarray] = None,
+        weather_std: Optional[np.ndarray] = None,
     ):
         self.elev_mean = float(elev_mean)
         self.elev_std = float(elev_std)
@@ -244,8 +257,16 @@ class SceneNormalizer:
         self.slope_std = float(slope_std)
         self.canopy_mean = float(canopy_mean)
         self.canopy_std = float(canopy_std)
-        self.weather_mean = np.zeros(4) if weather_mean is None else np.asarray(weather_mean, dtype=DEFAULT_NP_DTYPE)
-        self.weather_std = np.ones(4) if weather_std is None else np.asarray(weather_std, dtype=DEFAULT_NP_DTYPE)
+        self.weather_mean = (
+            np.zeros(4)
+            if weather_mean is None
+            else np.asarray(weather_mean, dtype=DEFAULT_NP_DTYPE)
+        )
+        self.weather_std = (
+            np.ones(4)
+            if weather_std is None
+            else np.asarray(weather_std, dtype=DEFAULT_NP_DTYPE)
+        )
 
     @classmethod
     def fit(cls, scenarios: list):
@@ -336,9 +357,20 @@ class SceneNormalizer:
         else:
             weather_mean, weather_std = np.zeros(4), np.ones(4)
 
-        return cls(elev_mean, elev_std, slope_mean, slope_std, canopy_mean, canopy_std, weather_mean, weather_std)
+        return cls(
+            elev_mean,
+            elev_std,
+            slope_mean,
+            slope_std,
+            canopy_mean,
+            canopy_std,
+            weather_mean,
+            weather_std,
+        )
 
-    def normalize_spatial(self, elev: np.ndarray, slope: np.ndarray, canopy: np.ndarray):
+    def normalize_spatial(
+        self, elev: np.ndarray, slope: np.ndarray, canopy: np.ndarray
+    ):
         """Apply fitted standardization to spatial covariates."""
         elev_n = (np.asarray(elev) - self.elev_mean) / self.elev_std
         slope_n = (np.asarray(slope) - self.slope_mean) / self.slope_std
@@ -356,7 +388,7 @@ def load_wildfire_scenario(
     event_id: str,
     normalizer: SceneNormalizer,
     k_train_obs: int,
-    seed: int = None,
+    seed: Optional[int] = None,
 ) -> WildfireScenario:
     """Load and preprocess a single fire scenario from a dataset loader.
 
@@ -391,12 +423,17 @@ def load_wildfire_scenario(
     ignition_pixel = find_ignition_point(masks)
     pixel_spacing_m = 30.0  # Sim2Real-Fire dataset default resolution is 30m
     ignition_world = np.array(
-        [float(ignition_pixel[1]) * pixel_spacing_m, float(ignition_pixel[0]) * pixel_spacing_m],
+        [
+            float(ignition_pixel[1]) * pixel_spacing_m,
+            float(ignition_pixel[0]) * pixel_spacing_m,
+        ],
         dtype=DEFAULT_NP_DTYPE,
     )
 
     # Stratified observation sampling (training targets)
-    obs_pixels = stratified_sample_observations(arrival_times_hours, n_samples=k_train_obs, seed=seed)
+    obs_pixels = stratified_sample_observations(
+        arrival_times_hours, n_samples=k_train_obs, seed=seed
+    )
     if len(obs_pixels) > 0:
         obs_arrival_times = arrival_times[obs_pixels[:, 0], obs_pixels[:, 1]]
     else:
@@ -471,8 +508,8 @@ def train_val_test_split(
     keys = list(scenarios_keys)
     shuffled_idx = rng.permutation(len(keys))
 
-    n_train = int(round(len(keys) * train_ratio))
-    n_val = int(round(len(keys) * val_ratio))
+    n_train = round(len(keys) * train_ratio)
+    n_val = round(len(keys) * val_ratio)
 
     train_idx = shuffled_idx[:n_train]
     val_idx = shuffled_idx[n_train : n_train + n_val]

@@ -20,16 +20,19 @@ Note:
     - PSD_EPS = 1e-4: metric tensor regularization in PullbackGNet.
     See also: spec/ARCH_SPEC.md § 3, § 5; spec/MATH_SPEC.md § 5.
 """
+
+from typing import Any
+
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
-from typing import Any
-from ..geometry.metric import FinslerMetric
+
 from ..geometry.manifold import Manifold
 from ..geometry.zoo import Randers, Riemannian
-from ..nn.networks import VectorField, PSDMatrixField
-from ..nn.ebm import ScalarEnergyField
+from ..nn.networks import PSDMatrixField, VectorField
+from ..typing import EnergyModel
 from ..utils.math import PSD_EPS
+
 
 class NeuralRiemannian(Riemannian):
     """A learnable Riemannian metric F(x,v) = sqrt(v^T G(x) v).
@@ -37,10 +40,12 @@ class NeuralRiemannian(Riemannian):
     G(x) is parameterized by a PSDMatrixField neural network, guaranteeing
     positive-definiteness. See also: spec/ARCH_SPEC.md § 3, spec/MATH_SPEC.md § 5.
     """
+
     dim: int = eqx.field(static=True)
 
-    def __init__(self, manifold: Manifold, key: jax.Array,
-                 hidden_dim: int = 32, depth: int = 2):
+    def __init__(
+        self, manifold: Manifold, key: jax.Array, hidden_dim: int = 32, depth: int = 2
+    ):
         """Initializes the neural Riemannian metric.
 
         Args:
@@ -53,6 +58,7 @@ class NeuralRiemannian(Riemannian):
         g_net = PSDMatrixField(self.dim, hidden_dim, depth, key)
         super().__init__(manifold, g_net)
 
+
 class NeuralRanders(Randers):
     """A learnable Randers metric defined via Zermelo navigation.
 
@@ -64,11 +70,18 @@ class NeuralRanders(Randers):
         ham.geometry.zoo.Randers, ham.nn.networks.VectorField,
         ham.nn.networks.PSDMatrixField, examples/demo_learned_wind.py.
     """
+
     dim: int = eqx.field(static=True)
 
-    def __init__(self, manifold: Manifold, key: jax.Array,
-                 hidden_dim: int = 32, depth: int = 2,
-                 use_fourier: bool = True, use_wind: bool = True):
+    def __init__(
+        self,
+        manifold: Manifold,
+        key: jax.Array,
+        hidden_dim: int = 32,
+        depth: int = 2,
+        use_fourier: bool = True,
+        use_wind: bool = True,
+    ):
         """Initializes the neural Randers metric.
 
         Args:
@@ -82,11 +95,12 @@ class NeuralRanders(Randers):
         """
         k1, k2 = jax.random.split(key)
         self.dim = manifold.ambient_dim
-        
+
         h_net = PSDMatrixField(self.dim, hidden_dim, depth, k1)
-        w_net = VectorField(self.dim, hidden_dim, depth, k2, 
-                            use_fourier=use_fourier, fourier_scale=3.0)
-                            
+        w_net = VectorField(
+            self.dim, hidden_dim, depth, k2, use_fourier=use_fourier, fourier_scale=3.0
+        )
+
         super().__init__(manifold, h_net, w_net, epsilon=1e-5, use_wind=use_wind)
 
 
@@ -104,12 +118,22 @@ class PullbackRanders(Randers):
     See also:
         PullbackGNet, PullbackRiemannian, examples/weinreb_smoke_test.py.
     """
+
     decoder: eqx.Module
     dim: int = eqx.field(static=True)
     use_wind: bool = eqx.field(static=True, default=True)
 
-    def __init__(self, manifold, decoder, key, hidden_dim=64, depth=3,
-                 use_fourier=False, fourier_scale=1.0, use_wind=True):
+    def __init__(
+        self,
+        manifold,
+        decoder,
+        key,
+        hidden_dim=64,
+        depth=3,
+        use_fourier=False,
+        fourier_scale=1.0,
+        use_wind=True,
+    ):
         """Initializes the pullback Randers metric.
 
         Args:
@@ -128,15 +152,23 @@ class PullbackRanders(Randers):
         self.dim = int(manifold.ambient_dim)
         self.decoder = decoder
         self.use_wind = bool(use_wind)
-        
+
         # We only need the VectorField for the Wind.
-        w_net = VectorField(self.dim, hidden_dim, depth, key, 
-                            use_fourier=use_fourier, fourier_scale=fourier_scale)
-        
+        w_net = VectorField(
+            self.dim,
+            hidden_dim,
+            depth,
+            key,
+            use_fourier=use_fourier,
+            fourier_scale=fourier_scale,
+        )
+
         # Proper eqx.Module for H(z)
         h_net = PullbackGNet(decoder=decoder, dim=self.dim)
-        
-        super().__init__(manifold, h_net=h_net, w_net=w_net, epsilon=1e-5, use_wind=self.use_wind)
+
+        super().__init__(
+            manifold, h_net=h_net, w_net=w_net, epsilon=1e-5, use_wind=self.use_wind
+        )
 
 
 class KernelWindField(eqx.Module):
@@ -148,6 +180,7 @@ class KernelWindField(eqx.Module):
     This provides a data-driven, non-parametric wind field from observed
     pseudo-velocities projected into the latent space.
     """
+
     anchors_z: Any
     anchors_v: Any
     sigma: float = eqx.field(static=True)
@@ -179,13 +212,14 @@ class KernelWindField(eqx.Module):
         z_sq = jnp.sum(z**2, axis=-1, keepdims=True)
         anchors_sq = jnp.sum(self.anchors_z**2, axis=-1)
         dots = jnp.dot(self.anchors_z, z)
-        
+
         dists_sq = z_sq + anchors_sq - 2 * dots
         # Clamp to avoid small negative values from floating-point cancellation
         dists_sq = jnp.maximum(dists_sq, 0.0)
 
         weights = jax.nn.softmax(-dists_sq / (2 * self.sigma**2))
         return jnp.dot(weights, self.anchors_v)
+
 
 class DataDrivenPullbackRanders(Randers):
     """Pullback Randers metric with data-driven kernel-smoothed wind.
@@ -198,11 +232,14 @@ class DataDrivenPullbackRanders(Randers):
     See also:
         KernelWindField, PullbackGNet, examples/experiment_h2_directional.py.
     """
+
     decoder: Any
     dim: int = eqx.field(static=True)
     use_wind: bool = eqx.field(static=True, default=True)
 
-    def __init__(self, manifold, decoder, anchors_z, anchors_v, sigma=0.5, use_wind=True):
+    def __init__(
+        self, manifold, decoder, anchors_z, anchors_v, sigma=0.5, use_wind=True
+    ):
         """Initializes the data-driven pullback Randers metric.
 
         Args:
@@ -219,7 +256,9 @@ class DataDrivenPullbackRanders(Randers):
         self.use_wind = bool(use_wind)
         h_net = PullbackGNet(decoder=decoder, dim=self.dim)
         w_net = KernelWindField(anchors_z, anchors_v, sigma)
-        super().__init__(manifold, h_net=h_net, w_net=w_net, epsilon=1e-5, use_wind=self.use_wind)
+        super().__init__(
+            manifold, h_net=h_net, w_net=w_net, epsilon=1e-5, use_wind=self.use_wind
+        )
 
 
 class PullbackGNet(eqx.Module):
@@ -238,6 +277,7 @@ class PullbackGNet(eqx.Module):
         decoder: The decoder network f: R^d -> R^D.
         dim: Latent dimension d (used for the identity regularization).
     """
+
     decoder: Any
     dim: int = eqx.field(static=True)
 
@@ -254,6 +294,7 @@ class PullbackGNet(eqx.Module):
         H = jnp.dot(J.T, J)
         return H + PSD_EPS * jnp.eye(self.dim)
 
+
 class PullbackRiemannian(Riemannian):
     """A Riemannian metric defined by the decoder's pullback G(z) = J^T J + eps I.
 
@@ -264,6 +305,7 @@ class PullbackRiemannian(Riemannian):
         PullbackRanders(use_wind=False) is functionally equivalent to this
         class. Use this when wind is never needed (simpler API).
     """
+
     decoder: eqx.Module
     dim: int = eqx.field(static=True)
 
@@ -280,14 +322,16 @@ class PullbackRiemannian(Riemannian):
         g_net = PullbackGNet(decoder=decoder, dim=self.dim)
         super().__init__(manifold, g_net)
 
+
 class ConformalEnergyBase(eqx.Module):
     """A conformal base metric H(x) = c(x) I.
-    
+
     The scaling factor c(x) increases with the scalar energy field E(x),
-    ensuring that high-energy regions (mountains) cost more Riemannian 
+    ensuring that high-energy regions (mountains) cost more Riemannian
     distance to traverse. This forces geodesics to curve around voids.
     """
-    ebm: eqx.Module
+
+    ebm: EnergyModel
     dim: int = eqx.field(static=True)
     beta: float = eqx.field(static=True)
 
@@ -297,15 +341,18 @@ class ConformalEnergyBase(eqx.Module):
         c = 1.0 + jax.nn.softplus(self.beta * energy)
         return c * jnp.eye(self.dim, dtype=x.dtype)
 
+
 class EBMWindField(eqx.Module):
     """Wind field computed from the gradient of an Energy-Based Model."""
-    ebm: eqx.Module
+
+    ebm: EnergyModel
     scale: float = eqx.field(static=True)
 
     def __call__(self, x: jax.Array) -> jax.Array:
         # W(x) = -scale * \nabla E(x)
         grad_fn = jax.grad(self.ebm)
         return -self.scale * grad_fn(x)
+
 
 class EnergyBasedRanders(Randers):
     """Energy-Based Randers Metric for Waddington's Landscape.
@@ -316,11 +363,18 @@ class EnergyBasedRanders(Randers):
     This metric formulates trajectory inference as a route down the biological
     energy landscape.
     """
-    ebm: eqx.Module
+
+    ebm: EnergyModel
     dim: int = eqx.field(static=True)
     wind_scale: float = eqx.field(static=True)
 
-    def __init__(self, manifold: Manifold, ebm: eqx.Module, wind_scale: float = 1.0, beta: float = 1.0):
+    def __init__(
+        self,
+        manifold: Manifold,
+        ebm: EnergyModel,
+        wind_scale: float = 1.0,
+        beta: float = 1.0,
+    ):
         """Initializes the Energy-Based Randers metric.
 
         Args:
@@ -332,43 +386,53 @@ class EnergyBasedRanders(Randers):
         self.dim = manifold.ambient_dim
         self.ebm = ebm
         self.wind_scale = float(wind_scale)
-        
+
         h_net = ConformalEnergyBase(ebm, self.dim, beta=float(beta))
         w_net = EBMWindField(ebm, self.wind_scale)
-        
-        super().__init__(manifold, h_net=h_net, w_net=w_net, epsilon=1e-5, use_wind=True)
+
+        super().__init__(
+            manifold, h_net=h_net, w_net=w_net, epsilon=1e-5, use_wind=True
+        )
+
 
 class PseudotimeRanders(Randers):
     """Diffusion-Pseudotime (DPT) Randers Metric.
-    
+
     H(x) = I (10D Euclidean Base metric)
     W(x) = \nabla DPT(x) (Gradient of the 1D pseudotime potential)
     """
-    pseudotime_net: eqx.Module
+
+    pseudotime_net: EnergyModel
     dim: int = eqx.field(static=True)
     wind_scale: float = eqx.field(static=True)
-    
-    def __init__(self, manifold: Manifold, pseudotime_net: eqx.Module, wind_scale: float = 1.0):
+
+    def __init__(
+        self, manifold: Manifold, pseudotime_net: EnergyModel, wind_scale: float = 1.0
+    ):
         self.dim = manifold.ambient_dim
         self.pseudotime_net = pseudotime_net
         self.wind_scale = float(wind_scale)
-        
+
         # Base Metric H(x) = I
         class FlatHNet(eqx.Module):
             dim: int = eqx.field(static=True)
+
             def __call__(self, x: jax.Array) -> jax.Array:
                 return jnp.eye(self.dim, dtype=x.dtype)
-                
+
         h_net = FlatHNet(self.dim)
-        
+
         # Wind W(x) = wind_scale * \nabla DPT(x)
         class DPTWindField(eqx.Module):
-            net: eqx.Module
+            net: EnergyModel
             scale: float = eqx.field(static=True)
+
             def __call__(self, x: jax.Array) -> jax.Array:
                 grad_fn = jax.grad(self.net)
                 return self.scale * grad_fn(x)
-                
+
         w_net = DPTWindField(self.pseudotime_net, self.wind_scale)
-        
-        super().__init__(manifold, h_net=h_net, w_net=w_net, epsilon=1e-5, use_wind=True)
+
+        super().__init__(
+            manifold, h_net=h_net, w_net=w_net, epsilon=1e-5, use_wind=True
+        )

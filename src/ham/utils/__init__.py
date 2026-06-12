@@ -3,15 +3,20 @@
 Provides numerical math primitives, data downloaders, and device configuration.
 """
 
-from .math import safe_norm, GRAD_EPS, NORM_EPS, PSD_EPS, TAYLOR_EPS
+from .device import configure_device, get_device
 from .download_data import download_benchmark_data
 from .download_weinreb import download_weinreb, process_weinreb
-from .device import get_device, configure_device
+from .math import GRAD_EPS, NORM_EPS, PSD_EPS, TAYLOR_EPS, safe_norm
 
 __all__ = [
-    "safe_norm",
-    "GRAD_EPS", "NORM_EPS", "PSD_EPS", "TAYLOR_EPS",
+    "GRAD_EPS",
+    "NORM_EPS",
+    "PSD_EPS",
+    "TAYLOR_EPS",
+    "configure_device",
     "download_benchmark_data",
-    "download_weinreb", "process_weinreb",
-    "get_device", "configure_device",
+    "download_weinreb",
+    "get_device",
+    "process_weinreb",
+    "safe_norm",
 ]

@@ -1,8 +1,10 @@
 """Euclidean space manifold implementation."""
-import jax
+
 import equinox as eqx
+import jax
 
 from ham.geometry.manifold import Manifold
+
 
 class EuclideanSpace(Manifold):
     """Flat Euclidean space R^N.
@@ -10,6 +12,7 @@ class EuclideanSpace(Manifold):
     Args:
         dim: Dimension N.
     """
+
     _dim: int = eqx.field(static=True)
 
     def __init__(self, dim: int):
@@ -54,4 +57,4 @@ class EuclideanSpace(Manifold):
 
     def random_sample(self, key: jax.Array, shape: tuple[int, ...] = ()) -> jax.Array:
         """Gaussian random sampling from N(0, I)."""
-        return jax.random.normal(key, shape + (self._dim,))
+        return jax.random.normal(key, (*shape, self._dim))

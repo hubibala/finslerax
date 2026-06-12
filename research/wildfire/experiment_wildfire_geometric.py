@@ -32,23 +32,22 @@ import argparse
 import os
 import time
 
-import numpy as np
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
 import matplotlib
+import numpy as np
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection
-from jax import config
+
+from ham.data.wildfire import WildfireScenario
+from ham.geometry.curvature import flag_curvature_sample
 
 # config.update("jax_enable_x64", True)
-
 from ham.geometry.manifolds import EuclideanSpace
 from ham.models.wildfire import CovariateConditionedRanders
 from ham.solvers.avbd import AVBDSolver
-from ham.geometry.curvature import flag_curvature_sample, scalar_curvature
-from ham.data.wildfire import WildfireScenario
 
 FIG_DIR = "results/phaseW3/figs"
 
@@ -57,8 +56,10 @@ FIG_DIR = "results/phaseW3/figs"
 # Geodesic fan
 # ---------------------------------------------------------------------------
 
-def shoot_geodesic_fan(metric, solver, source_world, domain_size,
-                        n_directions=64, n_steps=50):
+
+def shoot_geodesic_fan(
+    metric, solver, source_world, domain_size, n_directions=64, n_steps=50
+):
     """Shoot n_directions geodesics from source_world in uniformly-spaced angles.
 
     Args:
@@ -83,6 +84,7 @@ def shoot_geodesic_fan(metric, solver, source_world, domain_size,
     @eqx.filter_jit
     def all_paths_fn(ts):
         """vmap over all target directions in a single compiled call."""
+
         def one(target):
             traj = solver.solve(metric, source_world, target, n_steps=n_steps)
             path = traj.xs  # (n_steps+1, 2)
@@ -90,6 +92,7 @@ def shoot_geodesic_fan(metric, solver, source_world, domain_size,
             mids = (path[:-1] + path[1:]) / 2.0
             costs = jax.vmap(metric.metric_fn)(mids, segs)
             return path, jnp.sum(costs)
+
         return jax.vmap(one)(ts)
 
     paths_jax, arcs_jax = all_paths_fn(targets)
@@ -99,6 +102,7 @@ def shoot_geodesic_fan(metric, solver, source_world, domain_size,
 # ---------------------------------------------------------------------------
 # Jacobi divergence
 # ---------------------------------------------------------------------------
+
 
 def compute_jacobi_divergence(paths):
     """Estimate geodesic bundle divergence over time.
@@ -115,15 +119,14 @@ def compute_jacobi_divergence(paths):
     """
     D, T1, _ = paths.shape
     # Adjacent pairs: (i, i+1 mod D)
-    diffs = np.linalg.norm(
-        paths - np.roll(paths, shift=1, axis=0), axis=-1
-    )  # (D, T+1)
+    diffs = np.linalg.norm(paths - np.roll(paths, shift=1, axis=0), axis=-1)  # (D, T+1)
     return diffs.mean(axis=0)  # (T+1,)
 
 
 # ---------------------------------------------------------------------------
 # Curvature field
 # ---------------------------------------------------------------------------
+
 
 def compute_curvature_field(metric, grid_xy, seed=0):
     """Sample scalar Finsler flag curvature on a set of 2D points.
@@ -158,17 +161,24 @@ def compute_curvature_field(metric, grid_xy, seed=0):
 # Plotting helpers
 # ---------------------------------------------------------------------------
 
+
 def _setup_style():
-    plt.rcParams.update({
-        "font.size": 11, "font.family": "serif",
-        "axes.labelsize": 12, "axes.titlesize": 13,
-        "figure.dpi": 150, "savefig.dpi": 300,
-        "savefig.bbox": "tight",
-    })
+    plt.rcParams.update(
+        {
+            "font.size": 11,
+            "font.family": "serif",
+            "axes.labelsize": 12,
+            "axes.titlesize": 13,
+            "figure.dpi": 150,
+            "savefig.dpi": 300,
+            "savefig.bbox": "tight",
+        }
+    )
 
 
-def plot_fire_corridors(paths, arc_lengths, arrival_field, domain_shape,
-                        source_world, output_dir, suffix=""):
+def plot_fire_corridors(
+    paths, arc_lengths, arrival_field, domain_shape, source_world, output_dir, suffix=""
+):
     """Plot geodesic paths over arrival time heatmap background.
 
     Args:
@@ -186,8 +196,14 @@ def plot_fire_corridors(paths, arc_lengths, arrival_field, domain_shape,
     H, W = domain_shape
     if arrival_field is not None:
         arr = np.where(np.isinf(arrival_field), np.nan, arrival_field)
-        im = ax.imshow(arr, origin="lower", cmap="YlOrRd", alpha=0.55,
-                       extent=[0, W, 0, H], aspect="auto")
+        im = ax.imshow(
+            arr,
+            origin="lower",
+            cmap="YlOrRd",
+            alpha=0.55,
+            extent=[0, W, 0, H],
+            aspect="auto",
+        )
         plt.colorbar(im, ax=ax, shrink=0.75, label="GT arrival time")
 
     # Color each path by its arc length (predicted arrival time)
@@ -198,12 +214,21 @@ def plot_fire_corridors(paths, arc_lengths, arrival_field, domain_shape,
         c = cmap((arc - t_min) / (t_max - t_min))
         ax.plot(path[:, 0], path[:, 1], color=c, linewidth=1.2, alpha=0.8)
 
-    ax.plot(float(source_world[0]), float(source_world[1]),
-            "r*", markersize=14, markeredgecolor="black",
-            markeredgewidth=0.5, zorder=5, label="Ignition")
+    ax.plot(
+        float(source_world[0]),
+        float(source_world[1]),
+        "r*",
+        markersize=14,
+        markeredgecolor="black",
+        markeredgewidth=0.5,
+        zorder=5,
+        label="Ignition",
+    )
     ax.set_xlabel("x (pixels)")
     ax.set_ylabel("y (pixels)")
-    ax.set_title("Fire Corridor Geodesics\n(HAMTools exclusive — no eikonal equivalent)")
+    ax.set_title(
+        "Fire Corridor Geodesics\n(HAMTools exclusive — no eikonal equivalent)"
+    )
     ax.legend(loc="lower right")
 
     sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(t_min, t_max))
@@ -229,13 +254,20 @@ def plot_jacobi_divergence(divergence, output_dir, suffix=""):
     t_axis = np.linspace(0.0, 1.0, len(divergence))
     ax.plot(t_axis, divergence, linewidth=2.0, color="#E53935")
     peak_t = t_axis[np.argmax(divergence)]
-    ax.axvline(peak_t, color="gray", linestyle="--", alpha=0.6,
-               label=f"Peak spread at t={peak_t:.2f}")
+    ax.axvline(
+        peak_t,
+        color="gray",
+        linestyle="--",
+        alpha=0.6,
+        label=f"Peak spread at t={peak_t:.2f}",
+    )
     ax.fill_between(t_axis, divergence, alpha=0.15, color="#E53935")
     ax.set_xlabel("Normalized time along geodesic")
     ax.set_ylabel("Mean inter-geodesic distance")
-    ax.set_title("Jacobi Divergence (Fire Spread Stability)\n"
-                 "Rising = unstable spread,  Flat/falling = channelled")
+    ax.set_title(
+        "Jacobi Divergence (Fire Spread Stability)\n"
+        "Rising = unstable spread,  Flat/falling = channelled"
+    )
     ax.legend()
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
@@ -264,15 +296,23 @@ def plot_curvature_field(kappa, grid_xy, domain_shape, output_dir, suffix=""):
         plt.close(fig)
         return
 
-    sc = ax.scatter(grid_xy[valid, 0], grid_xy[valid, 1],
-                    c=kappa[valid], cmap="RdBu_r", s=12, alpha=0.85)
+    sc = ax.scatter(
+        grid_xy[valid, 0],
+        grid_xy[valid, 1],
+        c=kappa[valid],
+        cmap="RdBu_r",
+        s=12,
+        alpha=0.85,
+    )
     plt.colorbar(sc, ax=ax, shrink=0.8, label="Flag curvature κ")
     ax.set_xlim(0, W)
     ax.set_ylim(0, H)
     ax.set_xlabel("x (pixels)")
     ax.set_ylabel("y (pixels)")
-    ax.set_title("Finsler Flag Curvature Anomaly Map\n"
-                 "High |κ| → abrupt metric change (fuel boundary / wind shear)")
+    ax.set_title(
+        "Finsler Flag Curvature Anomaly Map\n"
+        "High |κ| → abrupt metric change (fuel boundary / wind shear)"
+    )
     ax.set_aspect("equal")
     plt.tight_layout()
     os.makedirs(output_dir, exist_ok=True)
@@ -286,6 +326,7 @@ def plot_curvature_field(kappa, grid_xy, domain_shape, output_dir, suffix=""):
 # Synthetic scenario
 # ---------------------------------------------------------------------------
 
+
 def _make_synthetic_scenario():
     """Build a 20x20 synthetic WildfireScenario for smoke-testing."""
     H, W = 20, 20
@@ -294,8 +335,7 @@ def _make_synthetic_scenario():
     rows, cols = np.meshgrid(np.arange(H), np.arange(W), indexing="ij")
     elev = 100.0 + 30.0 * np.sin(np.pi * rows / H) * np.cos(np.pi * cols / W)
     slope = np.abs(np.gradient(elev, spacing)[0]) / spacing
-    aspect = np.arctan2(np.gradient(elev, spacing)[1],
-                        np.gradient(elev, spacing)[0])
+    aspect = np.arctan2(np.gradient(elev, spacing)[1], np.gradient(elev, spacing)[0])
     canopy = rng.uniform(0, 1, (H, W))
     fuel_codes = np.ones((H, W), dtype=np.int32) * 5
 
@@ -340,38 +380,45 @@ def _make_and_train_synthetic_metric(scenario, n_epochs=5):
     Returns a bound CovariateConditionedRanders ready for geometric analysis.
     """
     import optax
+
     from ham.training.losses import ArrivalTimeLoss
 
     manifold = EuclideanSpace(2)
     key = jax.random.PRNGKey(0)
     # Keep metric UNBOUND during training — bind_scene is called inside the loss
     # so that the gradient tree stays consistent (no int32 rasters in grad tree).
-    metric = CovariateConditionedRanders(manifold, key, hidden_dim=64,
-                                          fuel_emb_dim=4, use_wind=True)
+    metric = CovariateConditionedRanders(
+        manifold, key, hidden_dim=64, fuel_emb_dim=4, use_wind=True
+    )
 
     solver = AVBDSolver(step_size=0.05, iterations=50, energy_tol=1e-6, parallel=True)
     loss_fn = ArrivalTimeLoss(solver=solver, solver_steps=15)
 
     H, W = scenario.elev_raster.shape
-    source_world = jnp.array([
-        scenario.ignition_pixel[1] * scenario.pixel_spacing_m,
-        scenario.ignition_pixel[0] * scenario.pixel_spacing_m,
-    ])
+    source_world = jnp.array(
+        [
+            scenario.ignition_pixel[1] * scenario.pixel_spacing_m,
+            scenario.ignition_pixel[0] * scenario.pixel_spacing_m,
+        ]
+    )
     x_obs_world = jnp.asarray(
-        np.stack([
-            scenario.obs_pixels[:, 1] * scenario.pixel_spacing_m,
-            scenario.obs_pixels[:, 0] * scenario.pixel_spacing_m,
-        ], axis=-1)
+        np.stack(
+            [
+                scenario.obs_pixels[:, 1] * scenario.pixel_spacing_m,
+                scenario.obs_pixels[:, 0] * scenario.pixel_spacing_m,
+            ],
+            axis=-1,
+        )
     )
     t_obs = jnp.asarray(scenario.obs_arrival_times)
 
     # Pre-cache scene arrays as JAX arrays (used inside loss closure)
-    j_elev   = jnp.asarray(scenario.elev_raster)
-    j_slope  = jnp.asarray(scenario.slope_raster)
+    j_elev = jnp.asarray(scenario.elev_raster)
+    j_slope = jnp.asarray(scenario.slope_raster)
     j_aspect = jnp.asarray(scenario.aspect_raster)
     j_canopy = jnp.asarray(scenario.canopy_raster)
-    j_fuel   = jnp.asarray(scenario.fuel_code_raster)
-    j_wx     = jnp.asarray(scenario.weather_vec)
+    j_fuel = jnp.asarray(scenario.fuel_code_raster)
+    j_wx = jnp.asarray(scenario.weather_vec)
 
     optimizer = optax.adam(1e-3)
     opt_state = optimizer.init(eqx.filter(metric, eqx.is_inexact_array))
@@ -379,11 +426,19 @@ def _make_and_train_synthetic_metric(scenario, n_epochs=5):
     @eqx.filter_jit
     def compute_grads(m, bx, bt):
         def _loss(mm):
-            bound = mm.bind_scene(j_elev, j_slope, j_aspect, j_canopy, j_fuel,
-                                  j_wx, scenario.pixel_spacing_m,
-                                  jnp.zeros(2))
+            bound = mm.bind_scene(
+                j_elev,
+                j_slope,
+                j_aspect,
+                j_canopy,
+                j_fuel,
+                j_wx,
+                scenario.pixel_spacing_m,
+                jnp.zeros(2),
+            )
             bound = bound.precompute_metric_field()  # required after CNN refactor
             return loss_fn(bound, source_world, bx, bt)
+
         return eqx.filter_value_and_grad(_loss)(m)
 
     for epoch in range(n_epochs):
@@ -396,7 +451,7 @@ def _make_and_train_synthetic_metric(scenario, n_epochs=5):
             eqx.filter(metric, eqx.is_inexact_array),
         )
         metric = eqx.apply_updates(metric, updates)
-        print(f"  Epoch {epoch+1}/{n_epochs}: loss={float(loss_val):.4f}")
+        print(f"  Epoch {epoch + 1}/{n_epochs}: loss={float(loss_val):.4f}")
 
     # Bind once after training and precompute the field for geometric analysis
     bound_metric = metric.bind_scene(
@@ -417,9 +472,19 @@ def _make_and_train_synthetic_metric(scenario, n_epochs=5):
 # Main analysis runner
 # ---------------------------------------------------------------------------
 
-def run_geometric_analysis(metric, solver, source_world, scenario, domain_shape,
-                             output_dir, suffix="", n_directions=64, n_steps=50,
-                             compute_curvature=True):
+
+def run_geometric_analysis(
+    metric,
+    solver,
+    source_world,
+    scenario,
+    domain_shape,
+    output_dir,
+    suffix="",
+    n_directions=64,
+    n_steps=50,
+    compute_curvature=True,
+):
     """Run all three geometric analyses for a given scenario + trained metric.
 
     Args:
@@ -440,47 +505,66 @@ def run_geometric_analysis(metric, solver, source_world, scenario, domain_shape,
     print(f"\n  [W3.1] Shooting geodesic fan ({n_directions} directions)...")
     t0 = time.time()
     paths, arcs = shoot_geodesic_fan(
-        metric, solver, source_world, domain_size,
-        n_directions=n_directions, n_steps=n_steps,
+        metric,
+        solver,
+        source_world,
+        domain_size,
+        n_directions=n_directions,
+        n_steps=n_steps,
     )
-    print(f"  Done in {time.time()-t0:.1f}s. Arc length range: "
-          f"[{arcs.min():.3f}, {arcs.max():.3f}]")
+    print(
+        f"  Done in {time.time() - t0:.1f}s. Arc length range: "
+        f"[{arcs.min():.3f}, {arcs.max():.3f}]"
+    )
     # Convert world coords to pixel coords for display
-    paths_px = paths / scenario.pixel_spacing_m  # (D, T+1, 2) — (x,y) / spacing = (col, row)
+    paths_px = (
+        paths / scenario.pixel_spacing_m
+    )  # (D, T+1, 2) — (x,y) / spacing = (col, row)
     source_px = source_world / scenario.pixel_spacing_m
     plot_fire_corridors(
-        paths_px, arcs, scenario.arrival_times, domain_shape,
-        source_px, output_dir, suffix=suffix,
+        paths_px,
+        arcs,
+        scenario.arrival_times,
+        domain_shape,
+        source_px,
+        output_dir,
+        suffix=suffix,
     )
 
-    print(f"\n  [W3.2] Computing Jacobi divergence...")
+    print("\n  [W3.2] Computing Jacobi divergence...")
     div = compute_jacobi_divergence(paths_px)
     plot_jacobi_divergence(div, output_dir, suffix=suffix)
     peak_t = np.argmax(div) / len(div)
-    print(f"  Peak spread at normalized t={peak_t:.2f} — "
-          + ("DIVERGING (open terrain)" if peak_t > 0.5
-             else "CHANNELLED (terrain focusing)"))
+    print(
+        f"  Peak spread at normalized t={peak_t:.2f} — "
+        + (
+            "DIVERGING (open terrain)"
+            if peak_t > 0.5
+            else "CHANNELLED (terrain focusing)"
+        )
+    )
 
     if compute_curvature:
-        print(f"\n  [W3.3] Sampling flag curvature...")
+        print("\n  [W3.3] Sampling flag curvature...")
         # Sparse 8x8 grid for speed
         n_curv = 8
-        xs = np.linspace(
-            source_px[0] - 0.35 * W, source_px[0] + 0.35 * W, n_curv
-        )
-        ys = np.linspace(
-            source_px[1] - 0.35 * H, source_px[1] + 0.35 * H, n_curv
-        )
+        xs = np.linspace(source_px[0] - 0.35 * W, source_px[0] + 0.35 * W, n_curv)
+        ys = np.linspace(source_px[1] - 0.35 * H, source_px[1] + 0.35 * H, n_curv)
         gx, gy = np.meshgrid(xs, ys)
         # Convert pixel coords back to world coords for metric_fn
         grid_world = np.stack(
-            [gx.ravel() * scenario.pixel_spacing_m,
-             gy.ravel() * scenario.pixel_spacing_m], axis=-1
+            [
+                gx.ravel() * scenario.pixel_spacing_m,
+                gy.ravel() * scenario.pixel_spacing_m,
+            ],
+            axis=-1,
         )
         t0 = time.time()
         kappa = compute_curvature_field(metric, grid_world)
-        print(f"  Done in {time.time()-t0:.1f}s. kappa range: "
-              f"[{np.nanmin(kappa):.3f}, {np.nanmax(kappa):.3f}]")
+        print(
+            f"  Done in {time.time() - t0:.1f}s. kappa range: "
+            f"[{np.nanmin(kappa):.3f}, {np.nanmax(kappa):.3f}]"
+        )
         grid_px = np.stack([gx.ravel(), gy.ravel()], axis=-1)
         plot_curvature_field(kappa, grid_px, domain_shape, output_dir, suffix=suffix)
     else:
@@ -491,25 +575,44 @@ def run_geometric_analysis(metric, solver, source_world, scenario, domain_shape,
 # Entry point
 # ---------------------------------------------------------------------------
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="Phase W3: Geometric analysis of trained wildfire metrics"
     )
-    parser.add_argument("--synthetic", action="store_true",
-                        help="Run on synthetic 20x20 scenario (no dataset)")
-    parser.add_argument("--output_dir", default="results/phaseW3",
-                        help="Output directory for figures")
-    parser.add_argument("--n_directions", type=int, default=32,
-                        help="Number of geodesic fan directions (default 32)")
-    parser.add_argument("--n_epochs", type=int, default=5,
-                        help="Training epochs for synthetic mode (default 5)")
-    parser.add_argument("--no_curvature", action="store_true",
-                        help="Skip curvature computation (slow)")
-    parser.add_argument("--device", default="cpu", choices=["cpu", "gpu", "tpu"],
-                        help="JAX device to use (default: cpu).")
+    parser.add_argument(
+        "--synthetic",
+        action="store_true",
+        help="Run on synthetic 20x20 scenario (no dataset)",
+    )
+    parser.add_argument(
+        "--output_dir", default="results/phaseW3", help="Output directory for figures"
+    )
+    parser.add_argument(
+        "--n_directions",
+        type=int,
+        default=32,
+        help="Number of geodesic fan directions (default 32)",
+    )
+    parser.add_argument(
+        "--n_epochs",
+        type=int,
+        default=5,
+        help="Training epochs for synthetic mode (default 5)",
+    )
+    parser.add_argument(
+        "--no_curvature", action="store_true", help="Skip curvature computation (slow)"
+    )
+    parser.add_argument(
+        "--device",
+        default="cpu",
+        choices=["cpu", "gpu", "tpu"],
+        help="JAX device to use (default: cpu).",
+    )
     args = parser.parse_args()
 
     from ham.utils import configure_device
+
     configure_device(args.device)
 
     fig_dir = os.path.join(args.output_dir, "figs")
@@ -524,11 +627,16 @@ def main():
         scenario = _make_synthetic_scenario()
 
         print(f"\nTraining flat-grid metric ({args.n_epochs} epochs)...")
-        metric, solver, source_world, domain_shape = \
-            _make_and_train_synthetic_metric(scenario, n_epochs=args.n_epochs)
+        metric, solver, source_world, domain_shape = _make_and_train_synthetic_metric(
+            scenario, n_epochs=args.n_epochs
+        )
 
         run_geometric_analysis(
-            metric, solver, source_world, scenario, domain_shape,
+            metric,
+            solver,
+            source_world,
+            scenario,
+            domain_shape,
             output_dir=fig_dir,
             suffix="_synthetic",
             n_directions=args.n_directions,
@@ -538,9 +646,11 @@ def main():
 
         print(f"\nAll figures saved to: {os.path.abspath(fig_dir)}")
     else:
-        print("\nFor real-data analysis, provide a trained metric checkpoint "
-              "and implement the load_checkpoint() call.\n"
-              "For now, use --synthetic to verify the analysis pipeline.")
+        print(
+            "\nFor real-data analysis, provide a trained metric checkpoint "
+            "and implement the load_checkpoint() call.\n"
+            "For now, use --synthetic to verify the analysis pipeline."
+        )
         return
 
     print("\n" + "=" * 65)

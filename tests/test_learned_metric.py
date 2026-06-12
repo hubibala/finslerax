@@ -4,16 +4,22 @@ Covers NeuralRanders (convexity, gradients, jit/vmap), NeuralRiemannian,
 PullbackRiemannian, PullbackGNet, and KernelWindField.
 """
 
+import unittest
+
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import unittest
-import equinox as eqx
 import numpy as np
+
 from ham.geometry.manifold import Manifold
 from ham.models.learned import (
-    NeuralRanders, NeuralRiemannian,
-    PullbackRiemannian, PullbackGNet, KernelWindField,
+    KernelWindField,
+    NeuralRanders,
+    NeuralRiemannian,
+    PullbackGNet,
+    PullbackRiemannian,
 )
+
 
 class MockManifold(Manifold):
     """Trivial R^3 manifold for testing."""
@@ -24,12 +30,12 @@ class MockManifold(Manifold):
     def project(self, x): return x
     def to_tangent(self, x, v): return v
     def retract(self, x, v): return x + v
-    def random_sample(self, key, shape): 
+    def random_sample(self, key, shape):
         return jax.random.normal(key, shape + (3,))
 
 
 class TestNeuralRanders(unittest.TestCase):
-    
+
     def setUp(self):
         self.key = jax.random.PRNGKey(0)
         self.manifold = MockManifold()
@@ -38,17 +44,17 @@ class TestNeuralRanders(unittest.TestCase):
     def test_zermelo_convexity_enforcement(self):
         """Even with huge wind weights, causality ||W||_h < 1 must hold."""
         x = jnp.zeros(3)
-        
+
         huge_w_net = eqx.tree_at(
             lambda m: m.mlp.layers[-1].weight,
             self.metric.w_net,
             jnp.ones_like(self.metric.w_net.mlp.layers[-1].weight) * 1000.0
         )
         broken_metric = eqx.tree_at(lambda m: m.w_net, self.metric, huge_w_net)
-        
+
         H, W, lam = broken_metric.zermelo_data(x)
         w_norm = jnp.sqrt(jnp.dot(W, jnp.dot(H, W)))
-        
+
         self.assertLess(float(w_norm), 1.0, "Wind vector violated convexity constraint!")
         self.assertGreater(float(lam), 0.0, "Lambda became non-positive!")
 
@@ -56,23 +62,23 @@ class TestNeuralRanders(unittest.TestCase):
         """Metric must be differentiable w.r.t input x and parameters."""
         x = jnp.array([0.5, 0.5, 0.5])
         v = jnp.array([1.0, 0.0, 0.0])
-        
+
         # 1. Grad w.r.t Input (Needed for Solver)
         grad_x = jax.grad(self.metric.energy, argnums=0)(x, v)
         self.assertEqual(grad_x.shape, (3,))
         self.assertTrue(jnp.isfinite(grad_x).all())
-        
+
         # 2. Grad w.r.t Weights (Needed for Training)
         def loss(m):
             return m.energy(x, v)
-            
+
         grads = eqx.filter_grad(loss)(self.metric)
-        
+
         # Check gradient flow to both H and W nets
         w_grad = grads.w_net.mlp.layers[0].weight
         self.assertGreater(float(jnp.abs(w_grad).max()), 1e-10,
                            "No gradient flow to Wind Network")
-        
+
         h_grad = grads.h_net.mlp.layers[0].weight
         self.assertGreater(float(jnp.abs(h_grad).max()), 1e-10,
                            "No gradient flow to H Network")

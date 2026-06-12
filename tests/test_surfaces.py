@@ -1,40 +1,40 @@
 import unittest
+
 import jax
 import jax.numpy as jnp
 import numpy as np
-from jax import config
 
 # Use 64-bit precision for geometric checks
 # config.update("jax_enable_x64", True)
+from ham.geometry import EuclideanSpace, Hyperboloid, Paraboloid, Sphere, Torus
 
-from ham.geometry import Sphere, Torus, Paraboloid, Hyperboloid, EuclideanSpace
 
 class SurfaceTestMixin:
     """Common tests for all manifolds."""
     manifold = None
-    
+
     def setUp(self):
         self.key = jax.random.PRNGKey(42)
-        
+
     def test_dimensions(self):
         self.assertIsInstance(self.manifold.ambient_dim, int)
         self.assertIsInstance(self.manifold.intrinsic_dim, int)
-        
+
     def test_jit_compatibility(self):
         x = self.manifold.random_sample(self.key, ())
         v = self.manifold.random_sample(self.key, ())
         v = self.manifold.to_tangent(x, v)
-        
+
         jitted_project = jax.jit(self.manifold.project)
         jitted_exp = jax.jit(self.manifold.exp_map)
-        
+
         np.testing.assert_allclose(jitted_project(x), self.manifold.project(x), atol=1e-5)
         np.testing.assert_allclose(jitted_exp(x, v), self.manifold.exp_map(x, v), atol=1e-5)
 
     def test_vmap_compatibility(self):
         keys = jax.random.split(self.key, 5)
         pts = jax.vmap(self.manifold.random_sample, in_axes=(0, None))(keys, ())
-        
+
         vmapped_project = jax.vmap(self.manifold.project)
         results = vmapped_project(pts)
         self.assertEqual(results.shape, pts.shape)
@@ -45,11 +45,11 @@ class SurfaceTestMixin:
         k1, k2 = jax.random.split(self.key)
         pts = self.manifold.random_sample(k1, shape)
         self.assertEqual(pts.shape, shape + (self.manifold.ambient_dim,))
-        
+
         # Test project
         proj = self.manifold.project(pts)
         self.assertEqual(proj.shape, pts.shape)
-        
+
         # Test to_tangent
         v = jax.random.normal(k2, pts.shape)
         v_tan = self.manifold.to_tangent(pts, v)
@@ -77,7 +77,7 @@ class TestSphere(SurfaceTestMixin, unittest.TestCase):
         x = self.manifold.random_sample(self.key, ())
         k1, k2 = jax.random.split(self.key)
         v = self.manifold.to_tangent(x, jax.random.normal(k1, x.shape) * 0.1)
-        
+
         y = self.manifold.exp_map(x, v)
         v_rec = self.manifold.log_map(x, y)
         np.testing.assert_allclose(v_rec, v, atol=1e-5)
@@ -87,7 +87,7 @@ class TestSphere(SurfaceTestMixin, unittest.TestCase):
         x = self.manifold.random_sample(k1, ())
         y = self.manifold.random_sample(k2, ())
         v = self.manifold.to_tangent(x, jax.random.normal(k3, x.shape))
-        
+
         v_trans = self.manifold.parallel_transport(x, y, v)
         # Check tangency at y
         np.testing.assert_allclose(jnp.sum(y * v_trans, axis=-1), 0.0, atol=1e-5)
@@ -107,7 +107,7 @@ class TestSphere(SurfaceTestMixin, unittest.TestCase):
         # Near antipodal point, using larger offset for float32 stability
         y = jnp.array([-self.radius + 1e-3, 1e-3, 0.0])
         y = self.manifold.project(y)
-        
+
         v_log = self.manifold.log_map(x, y)
         y_rec = self.manifold.exp_map(x, v_log)
         np.testing.assert_allclose(y_rec, y, atol=1e-3)
@@ -127,7 +127,7 @@ class TestTorus(SurfaceTestMixin, unittest.TestCase):
         x = self.manifold.random_sample(self.key, ())
         k1, k2 = jax.random.split(self.key)
         v = self.manifold.to_tangent(x, jax.random.normal(k1, x.shape) * 0.01)
-        
+
         y = self.manifold.exp_map(x, v)
         v_rec = self.manifold.log_map(x, y)
         # For very small v, the approximation should be decent
@@ -147,7 +147,7 @@ class TestParaboloid(SurfaceTestMixin, unittest.TestCase):
         x = self.manifold.random_sample(self.key, ())
         v = jax.random.normal(jax.random.split(self.key)[1], x.shape)
         v_tan = self.manifold.to_tangent(x, v)
-        
+
         # Normal vector to z = x^2 + y^2 is (-2x, -2y, 1)
         n = jnp.array([-2*x[0], -2*x[1], 1.0])
         n = n / jnp.linalg.norm(n)
@@ -172,7 +172,7 @@ class TestHyperboloid(SurfaceTestMixin, unittest.TestCase):
         x = self.manifold.random_sample(self.key, ())
         k1, k2 = jax.random.split(self.key)
         v = self.manifold.to_tangent(x, jax.random.normal(k1, x.shape) * 0.1)
-        
+
         y = self.manifold.exp_map(x, v)
         v_rec = self.manifold.log_map(x, y)
         np.testing.assert_allclose(v_rec, v, atol=1e-5)
@@ -182,7 +182,7 @@ class TestHyperboloid(SurfaceTestMixin, unittest.TestCase):
         x = self.manifold.random_sample(k1, ())
         y = self.manifold.random_sample(k2, ())
         v = self.manifold.to_tangent(x, jax.random.normal(k3, x.shape))
-        
+
         v_trans = self.manifold.parallel_transport(x, y, v)
         # Check tangency at y
         np.testing.assert_allclose(self.minkowski_dot(y, v_trans), 0.0, atol=1e-5)
@@ -200,7 +200,7 @@ class TestEuclideanSpace(SurfaceTestMixin, unittest.TestCase):
         x = jnp.array([1.0, 2.0, 3.0])
         y = jnp.array([4.0, 5.0, 6.0])
         v = y - x
-        
+
         np.testing.assert_allclose(self.manifold.project(x), x, atol=1e-5)
         np.testing.assert_allclose(self.manifold.to_tangent(x, v), v, atol=1e-5)
         np.testing.assert_allclose(self.manifold.exp_map(x, v), y, atol=1e-5)

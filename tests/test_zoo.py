@@ -1,15 +1,16 @@
+import unittest
+
 import jax
 import jax.numpy as jnp
-import unittest
 import numpy as np
-from jax import config
+
+from ham.geometry import DiscreteRanders, Euclidean, Randers, Riemannian
 
 # Ensure 64-bit precision for rigorous geometric testing
 # config.update("jax_enable_x64", True)
-
 from ham.geometry.manifold import Manifold
-from ham.geometry import Euclidean, Riemannian, Randers, DiscreteRanders
-from ham.utils.math import GRAD_EPS, PSD_EPS
+from ham.utils.math import PSD_EPS
+
 
 class FlatPlane(Manifold):
     @property
@@ -19,7 +20,7 @@ class FlatPlane(Manifold):
     def project(self, x): return x
     def to_tangent(self, x, v): return v
     def retract(self, x, delta): return x + delta
-    def random_sample(self, key, shape): 
+    def random_sample(self, key, shape):
         return jax.random.normal(key, shape + (2,))
 
 class MockMesh(Manifold):
@@ -31,7 +32,7 @@ class MockMesh(Manifold):
     def project(self, x): return x
     def to_tangent(self, x, v): return v
     def retract(self, x, delta): return x + delta
-    def random_sample(self, key, shape): 
+    def random_sample(self, key, shape):
         return jax.random.normal(key, shape + (2,))
     def get_face_weights(self, x):
         return jnp.array([1.0, 0.0])
@@ -53,7 +54,7 @@ class TestMetricZoo(unittest.TestCase):
 class TestRiemannian(unittest.TestCase):
     def setUp(self):
         self.manifold = FlatPlane()
-        
+
     def test_riemannian_scaling(self):
         # g_net returns the metric tensor G directly (not a Cholesky factor).
         # PSDMatrixField handles the A @ A.T + PSD_EPS*I construction internally;
@@ -87,15 +88,15 @@ class TestRanders(unittest.TestCase):
         metric = Randers(self.manifold, h_net, w_net)
         x = jnp.zeros(2)
         v_east = jnp.array([1.0, 0.0])
-        
+
         cost_east = metric.metric_fn(x, v_east)
-        
+
         h_val = 1.0  # H = I, so v^T H v = 1.0
         wv_h = -0.1 * h_val   # W^T H v = -0.1
         lam = 1.0 - 0.01 * h_val  # 1 - w_norm_sq = 0.99
         # Disc = lam * ||v||_h^2 + <w,v>_h^2 = 0.99 + 0.01 = 1.0 = h_val
         expected = (jnp.sqrt(h_val) - wv_h) / lam
-        
+
         np.testing.assert_allclose(float(cost_east), float(expected), atol=1e-5)
 
     def test_randers_zero_vector(self):
@@ -111,13 +112,13 @@ class TestRanders(unittest.TestCase):
         metric = Randers(self.manifold, h_net, w_net)
         x = jnp.array([0.5, 0.5])
         v = jnp.array([1.0, 0.0])
-        
+
         jitted = jax.jit(metric.metric_fn)
         np.testing.assert_allclose(jitted(x, v), metric.metric_fn(x, v))
-        
+
         vmapped = jax.vmap(metric.metric_fn)
         self.assertEqual(vmapped(jnp.tile(x, (5, 1)), jnp.tile(v, (5, 1))).shape, (5,))
-        
+
         def energy(x, v): return 0.5 * metric.metric_fn(x, v)**2
         grad_x = jax.grad(energy, argnums=0)(x, v)
         self.assertTrue(jnp.all(jnp.isfinite(grad_x)))

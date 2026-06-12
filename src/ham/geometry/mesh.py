@@ -7,14 +7,16 @@ DiscreteRanders (zoo.py) for anisotropic mesh-based metrics.
 See also: spec/ARCH_SPEC.md § 5 (Module Structure).
 """
 
-from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
+
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
-import equinox as eqx
-from typing import Tuple, List, Union
+
+from ham.utils.config import DEFAULT_JNP_DTYPE
+from ham.utils.math import GRAD_EPS, NORM_EPS, safe_norm
+
 from .manifold import Manifold
-from ham.utils.math import safe_norm, GRAD_EPS, NORM_EPS
 
 __all__ = ["TriangularMesh"]
 
@@ -23,7 +25,7 @@ def _build_spatial_grid(
     vertices: jax.Array,
     faces: jax.Array,
     grid_size: int,
-) -> Tuple[jax.Array, jax.Array, jax.Array, int]:
+) -> tuple[jax.Array, jax.Array, jax.Array, int]:
     """Build a 2D spatial hash grid mapping XY cells → face index lists.
 
     Runs entirely on the CPU with numpy at construction time (not under JIT).
@@ -44,7 +46,7 @@ def _build_spatial_grid(
     # Work in numpy so the build is pure Python, not JAX-traced.
     verts_np = np.asarray(jax.device_get(vertices))
     faces_np = np.asarray(jax.device_get(faces), dtype=np.int32)
-    tris_np = verts_np[faces_np]          # (F, 3, N)
+    tris_np = verts_np[faces_np]  # (F, 3, N)
 
     # XY bounding box
     xy = verts_np[:, :2]
@@ -57,14 +59,22 @@ def _build_spatial_grid(
     # This prevents misses when large triangles span multiple cells.
     grid: list = [[[] for _ in range(grid_size)] for _ in range(grid_size)]
     for face_idx in range(len(faces_np)):
-        tri_xy = tris_np[face_idx, :, :2]   # (3, 2)
+        tri_xy = tris_np[face_idx, :, :2]  # (3, 2)
         bb_min = tri_xy.min(axis=0)
         bb_max = tri_xy.max(axis=0)
         # Cell range the bounding box covers (inclusive on both ends)
-        ci_lo = int(np.clip(np.floor((bb_min[0] - min_xy[0]) / cell_size[0]), 0, grid_size - 1))
-        ci_hi = int(np.clip(np.floor((bb_max[0] - min_xy[0]) / cell_size[0]), 0, grid_size - 1))
-        cj_lo = int(np.clip(np.floor((bb_min[1] - min_xy[1]) / cell_size[1]), 0, grid_size - 1))
-        cj_hi = int(np.clip(np.floor((bb_max[1] - min_xy[1]) / cell_size[1]), 0, grid_size - 1))
+        ci_lo = int(
+            np.clip(np.floor((bb_min[0] - min_xy[0]) / cell_size[0]), 0, grid_size - 1)
+        )
+        ci_hi = int(
+            np.clip(np.floor((bb_max[0] - min_xy[0]) / cell_size[0]), 0, grid_size - 1)
+        )
+        cj_lo = int(
+            np.clip(np.floor((bb_min[1] - min_xy[1]) / cell_size[1]), 0, grid_size - 1)
+        )
+        cj_hi = int(
+            np.clip(np.floor((bb_max[1] - min_xy[1]) / cell_size[1]), 0, grid_size - 1)
+        )
         for ci in range(ci_lo, ci_hi + 1):
             for cj in range(cj_lo, cj_hi + 1):
                 grid[ci][cj].append(face_idx)
@@ -94,25 +104,26 @@ def _build_spatial_grid(
 class TriangularMesh(Manifold):
     """A discrete 2-manifold defined by a triangular mesh in R^N.
 
-    This class represents a surface embedded in N-dimensional space as a 
-    collection of flat triangular faces. It provides differentiable projection, 
+    This class represents a surface embedded in N-dimensional space as a
+    collection of flat triangular faces. It provides differentiable projection,
     tangent space operations, and area-weighted sampling.
 
     Attributes:
         vertices: Array of shape (V, N) containing vertex positions.
         faces: Integer array of shape (F, 3) indexing three vertices per face.
-        triangles: Array of shape (F, 3, N) containing the coordinates of 
+        triangles: Array of shape (F, 3, N) containing the coordinates of
             each triangle vertex. Computed as ``vertices[faces]``.
     """
+
     vertices: jax.Array
     faces: jax.Array
     triangles: jax.Array
     # Spatial hash grid for O(max_M) nearest-face lookup instead of O(F).
     # Built once at construction time from the XY bounding box of the mesh.
-    _grid_indices: jax.Array   # (G, G, max_M) int32 — padded face index grid
-    _grid_origin: jax.Array    # (2,) float64 — XY origin of the grid
-    _grid_cell_size: jax.Array # (2,) float64 — cell dimensions in metres
-    _grid_size: int = eqx.field(static=True)   # G (number of cells per axis)
+    _grid_indices: jax.Array  # (G, G, max_M) int32 — padded face index grid
+    _grid_origin: jax.Array  # (2,) float64 — XY origin of the grid
+    _grid_cell_size: jax.Array  # (2,) float64 — cell dimensions in metres
+    _grid_size: int = eqx.field(static=True)  # G (number of cells per axis)
     _grid_max_m: int = eqx.field(static=True)  # max faces per cell (static for XLA)
 
     def __init__(self, vertices: jax.Array, faces: jax.Array, grid_size: int = 16):
@@ -143,7 +154,7 @@ class TriangularMesh(Manifold):
     def ambient_dim(self) -> int:
         """The dimension N of the ambient embedding space R^N."""
         return self.vertices.shape[-1]
-    
+
     @property
     def intrinsic_dim(self) -> int:
         """The intrinsic dimension of the mesh (always 2 for a surface)."""
@@ -151,7 +162,7 @@ class TriangularMesh(Manifold):
 
     def _point_triangle_distance(
         self, p: jax.Array, tri: jax.Array
-    ) -> Tuple[jax.Array, jax.Array]:
+    ) -> tuple[jax.Array, jax.Array]:
         """Compute squared distance and closest point from p to triangle tri.
 
         Uses barycentric coordinates to test interior containment, then
@@ -167,22 +178,22 @@ class TriangularMesh(Manifold):
         """
         a, b, c = tri[0], tri[1], tri[2]
         ab, ac, ap = b - a, c - a, p - a
-        
+
         # Edge-vector Gram matrix entries
         d1, d2 = jnp.dot(ab, ap), jnp.dot(ac, ap)
         d3, d4, d5 = jnp.dot(ab, ab), jnp.dot(ab, ac), jnp.dot(ac, ac)
-        
+
         det_raw = d3 * d5 - d4 * d4
         det = jnp.maximum(det_raw, 1e-10)
         s = (d5 * d1 - d4 * d2) / det
         t = (d3 * d2 - d4 * d1) / det
-        
+
         # Clamp barycentric coordinates to avoid overflow in near-degenerate triangles
         # during reverse-mode AD through the unused p_in branch.
         s_clamped = jnp.clip(s, -10.0, 10.0)
         t_clamped = jnp.clip(t, -10.0, 10.0)
         p_in = a + s_clamped * ab + t_clamped * ac
-        
+
         # Edge projections for fallback
         def project_segment(u, v):
             uv = v - u
@@ -195,17 +206,19 @@ class TriangularMesh(Manifold):
         p_ab = project_segment(a, b)
         p_bc = project_segment(b, c)
         p_ca = project_segment(c, a)
-        
+
         # Correctly identify interior only for non-degenerate triangles
         is_inside = (s >= 0) & (t >= 0) & (s + t <= 1) & (det_raw > 1e-8)
-        
-        def dist_sq_fn(x): return jnp.sum((x - p)**2)
+
+        def dist_sq_fn(x):
+            return jnp.sum((x - p) ** 2)
+
         d_edge_vals = jnp.array([dist_sq_fn(p_ab), dist_sq_fn(p_bc), dist_sq_fn(p_ca)])
-        
+
         # Select best edge if outside triangle
         best_edge_idx = jnp.argmin(d_edge_vals)
         p_edge = jnp.stack([p_ab, p_bc, p_ca])[best_edge_idx]
-        
+
         closest = jnp.where(is_inside, p_in, p_edge)
         return dist_sq_fn(closest), closest
 
@@ -229,9 +242,10 @@ class TriangularMesh(Manifold):
         all_candidate_indices = self._candidate_face_indices(x)
         # Replace dummy index -1 with 0 for safe gather (we mask those out below)
         safe_indices = jnp.maximum(all_candidate_indices, 0)
-        local_triangles = self.triangles[safe_indices]   # (9*max_M, 3, N)
+        local_triangles = self.triangles[safe_indices]  # (9*max_M, 3, N)
 
-        dist_fn = lambda tri: self._point_triangle_distance(x, tri)
+        def dist_fn(tri):
+            return self._point_triangle_distance(x, tri)
         dists_sq, points = jax.vmap(dist_fn)(local_triangles)
 
         # Mask out dummy slots with infinite distance
@@ -252,14 +266,17 @@ class TriangularMesh(Manifold):
         frac = (x[:2] - self._grid_origin) / self._grid_cell_size
         ci = jnp.clip(jnp.floor(frac[0]).astype(jnp.int32), 0, G - 1)
         cj = jnp.clip(jnp.floor(frac[1]).astype(jnp.int32), 0, G - 1)
-        return jnp.concatenate([
-            self._grid_indices[
-                jnp.clip(ci + di, 0, G - 1),
-                jnp.clip(cj + dj, 0, G - 1),
-            ]
-            for di in (-1, 0, 1)
-            for dj in (-1, 0, 1)
-        ], axis=0)
+        return jnp.concatenate(
+            [
+                self._grid_indices[
+                    jnp.clip(ci + di, 0, G - 1),
+                    jnp.clip(cj + dj, 0, G - 1),
+                ]
+                for di in (-1, 0, 1)
+                for dj in (-1, 0, 1)
+            ],
+            axis=0,
+        )
 
     @eqx.filter_jit
     def get_face_index(self, x: jax.Array) -> jax.Array:
@@ -276,7 +293,8 @@ class TriangularMesh(Manifold):
         all_indices = self._candidate_face_indices(x)
         safe_indices = jnp.maximum(all_indices, 0)
         local_triangles = self.triangles[safe_indices]
-        dist_fn = lambda tri: self._point_triangle_distance(x, tri)[0]
+        def dist_fn(tri):
+            return self._point_triangle_distance(x, tri)[0]
         dists_sq = jax.vmap(dist_fn)(local_triangles)
         is_valid = all_indices >= 0
         masked_dists = jnp.where(is_valid, dists_sq, jnp.inf)
@@ -305,7 +323,8 @@ class TriangularMesh(Manifold):
         Returns:
             Array of shape (F,) summing to 1, giving each face's weight.
         """
-        dist_fn = lambda tri: self._point_triangle_distance(x, tri)[0]
+        def dist_fn(tri):
+            return self._point_triangle_distance(x, tri)[0]
         dists_sq = jax.vmap(dist_fn)(self.triangles)
         return jax.nn.softmax(-dists_sq * temperature)
 
@@ -313,8 +332,8 @@ class TriangularMesh(Manifold):
     def to_tangent(self, x: jax.Array, v: jax.Array) -> jax.Array:
         """Project an ambient vector onto the tangent plane of the nearest face.
 
-        Constructs an orthonormal basis {e1, e2} for the face closest to x 
-        via Gram-Schmidt on edge vectors (B-A) and (C-A), then returns the 
+        Constructs an orthonormal basis {e1, e2} for the face closest to x
+        via Gram-Schmidt on edge vectors (B-A) and (C-A), then returns the
         component of v in that subspace.
 
         Args:
@@ -327,25 +346,25 @@ class TriangularMesh(Manifold):
         idx = self.get_face_index(x)
         tri = self.triangles[idx]
         a, b, c = tri[0], tri[1], tri[2]
-        
+
         # Gram-Schmidt for tangent basis
         u = b - a
         w = c - a
-        
+
         # Use safe_norm to avoid NaN in basis construction for degenerate faces
         norm_u = safe_norm(u, eps=GRAD_EPS)
         e1 = u / norm_u
-        
+
         w_perp = w - jnp.dot(w, e1) * e1
         norm_w_perp = safe_norm(w_perp, eps=GRAD_EPS)
         e2 = w_perp / norm_w_perp
-        
+
         # If the triangle is degenerate (collinear edges), the basis is ill-defined.
         # safe_norm prevents NaN, but we should guard the final projection.
         d3, d4, d5 = jnp.dot(u, u), jnp.dot(u, w), jnp.dot(w, w)
         det = d3 * d5 - d4 * d4
         is_degenerate = det < NORM_EPS**2
-        
+
         v_proj = jnp.dot(v, e1) * e1 + jnp.dot(v, e2) * e2
         return jnp.where(is_degenerate, jnp.zeros_like(v), v_proj)
 
@@ -363,11 +382,11 @@ class TriangularMesh(Manifold):
         candidate = x + delta
         return self.project(candidate)
 
-    def random_sample(self, key: jax.Array, shape: Tuple[int, ...]) -> jax.Array:
+    def random_sample(self, key: jax.Array, shape: tuple[int, ...]) -> jax.Array:
         """Sample points uniformly on the mesh surface.
 
         Triangles are selected with probability proportional to area. Points
-        within each triangle are sampled uniformly via the standard fold-over 
+        within each triangle are sampled uniformly via the standard fold-over
         method.
 
         Args:
@@ -379,33 +398,33 @@ class TriangularMesh(Manifold):
         """
         A, B, C = self.triangles[:, 0], self.triangles[:, 1], self.triangles[:, 2]
         u, w = B - A, C - A
-        
+
         # Area = 0.5 * sqrt(|u|^2|w|^2 - (u.w)^2)
         u_sq, w_sq = jnp.sum(u**2, axis=1), jnp.sum(w**2, axis=1)
         uw_dot = jnp.sum(u * w, axis=1)
         areas = 0.5 * jnp.sqrt(jnp.maximum(u_sq * w_sq - uw_dot**2, 1e-10))
-        
+
         k1, k2 = jax.random.split(key)
-        
+
         # Fixed: calculate n using Python to avoid ConcretizationTypeError in JIT
         n = 1
         for s in shape:
             n *= s
-            
+
         indices = jax.random.choice(
-            k1, len(self.faces), shape=(n,), p=areas/jnp.sum(areas)
+            k1, len(self.faces), shape=(n,), p=areas / jnp.sum(areas)
         )
-        
+
         coords = jax.random.uniform(k2, (n, 2))
         r1, r2 = coords[:, 0], coords[:, 1]
         mask = r1 + r2 > 1
         r1 = jnp.where(mask, 1 - r1, r1)
         r2 = jnp.where(mask, 1 - r2, r2)
-        
+
         tris = self.triangles[indices]
         pts = (
-            (1 - r1[:, None] - r2[:, None]) * tris[:, 0] + 
-            r1[:, None] * tris[:, 1] + 
-            r2[:, None] * tris[:, 2]
+            (1 - r1[:, None] - r2[:, None]) * tris[:, 0]
+            + r1[:, None] * tris[:, 1]
+            + r2[:, None] * tris[:, 2]
         )
-        return pts.reshape(shape + (self.ambient_dim,))
+        return pts.reshape((*shape, self.ambient_dim))

@@ -1,26 +1,29 @@
 """Sphere manifold implementation."""
+
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
 
 from ham.geometry.manifold import Manifold
-from ham.utils import GRAD_EPS, NORM_EPS, TAYLOR_EPS, safe_norm
 from ham.geometry.manifolds.utils import _safe_arccos
+from ham.utils import GRAD_EPS, NORM_EPS, TAYLOR_EPS, safe_norm
+
 
 class Sphere(Manifold):
     """The n-sphere S^n(r) of radius r, embedded in R^{n+1}.
 
-    The sphere uses the standard round metric inherited from ambient Euclidean space. 
-    Exponential and logarithmic maps are exact (closed-form geodesic formulae). 
+    The sphere uses the standard round metric inherited from ambient Euclidean space.
+    Exponential and logarithmic maps are exact (closed-form geodesic formulae).
     See `spec/MATH_SPEC.md` § 4.
 
     Args:
         intrinsic_dim: Dimension n of the sphere. Default: 2 (S^2).
         radius: Radius r. Default: 1.0.
-    
+
     Example:
         See `examples/demo_trajectories.py`.
     """
+
     radius: float = eqx.field(static=True)
     _intrinsic_dim: int = eqx.field(static=True)
 
@@ -67,7 +70,7 @@ class Sphere(Manifold):
         Returns:
             Tangent vector in Tx S^n(r), shape `(..., n+1)`.
         """
-        proj = jnp.einsum('...i,...i->...', x, v)[..., None] / (self.radius ** 2)
+        proj = jnp.einsum("...i,...i->...", x, v)[..., None] / (self.radius**2)
         return v - proj * x
 
     def exp_map(self, x: jax.Array, v: jax.Array) -> jax.Array:
@@ -77,12 +80,12 @@ class Sphere(Manifold):
         safe_theta = jnp.maximum(theta, TAYLOR_EPS)
         sin_theta_over_theta = jnp.where(
             theta < TAYLOR_EPS,
-            1.0 - (theta ** 2) / 6.0,
+            1.0 - (theta**2) / 6.0,
             jnp.sin(safe_theta) / safe_theta,
         )
         cos_theta = jnp.where(
             theta < TAYLOR_EPS,
-            1.0 - (theta ** 2) / 2.0,
+            1.0 - (theta**2) / 2.0,
             jnp.cos(safe_theta),
         )
         return cos_theta * x + sin_theta_over_theta * v
@@ -99,13 +102,13 @@ class Sphere(Manifold):
         an epsilon-clamped denominator, so double-regularising would skew
         the gradients for nearly-identical or antipodal point pairs.
         """
-        u = jnp.sum(x * y, axis=-1, keepdims=True) / (self.radius ** 2)
+        u = jnp.sum(x * y, axis=-1, keepdims=True) / (self.radius**2)
         dist = _safe_arccos(u)
         diff = y - u * x
         norm_diff = safe_norm(diff, axis=-1, keepdims=True)
         scale = jnp.where(
             dist < TAYLOR_EPS,
-            1.0 + (dist ** 2) / 6.0,
+            1.0 + (dist**2) / 6.0,
             dist / jnp.maximum(norm_diff / self.radius, GRAD_EPS),
         )
         return scale * diff
@@ -113,12 +116,12 @@ class Sphere(Manifold):
     def parallel_transport(self, x: jax.Array, y: jax.Array, v: jax.Array) -> jax.Array:
         """Parallel transports v from Tx S^n to Ty S^n along the geodesic x -> y."""
         xy = jnp.sum(x * y, axis=-1, keepdims=True)
-        denominator = self.radius ** 2 + xy
+        denominator = self.radius**2 + xy
         denominator = jnp.maximum(denominator, GRAD_EPS)
         y_dot_v = jnp.sum(y * v, axis=-1, keepdims=True)
         return v - (y_dot_v / denominator) * (x + y)
 
     def random_sample(self, key: jax.Array, shape: tuple[int, ...] = ()) -> jax.Array:
         """Samples uniformly on S^n(r) via Gaussian projection."""
-        z = jax.random.normal(key, shape + (self.ambient_dim,))
+        z = jax.random.normal(key, (*shape, self.ambient_dim))
         return self.project(z)

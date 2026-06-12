@@ -40,50 +40,49 @@ Usage::
 import argparse
 import os
 import sys
+
 sys.stdout.reconfigure(line_buffering=True)
 import time
-from pathlib import Path
 
-import numpy as np
-
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
-import optax
 import matplotlib
+import numpy as np
+import optax
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from jax import config
+
+from ham.data.wildfire import (
+    SceneNormalizer,
+    WildfireScenario,
+    compute_slope_std,
+    load_wildfire_scenario,
+    stratified_sample_observations,
+    train_val_test_split,
+)
 
 # config.update("jax_enable_x64", True)
-
 # ---------------------------------------------------------------------------
 # HAMTools imports
 # ---------------------------------------------------------------------------
 from ham.geometry.mesh import TriangularMesh
 from ham.geometry.mesh_adjacency import MeshAdjacency
-from ham.utils.terrain import (
-    dem_to_mesh,
-    compute_face_slopes_aspects,
-    interpolate_covariates_to_vertices,
-    CovariateMeshRanders,
-)
-from ham.data.wildfire import (
-    WildfireScenario,
-    load_wildfire_scenario,
-    SceneNormalizer,
-    train_val_test_split,
-    compute_slope_std,
-    stratified_sample_observations,
-)
 from ham.solvers.mesh_eikonal import MeshEikonalSolver
-from ham.training.losses import curriculum_alpha
+from ham.utils.terrain import (
+    CovariateMeshRanders,
+    compute_face_slopes_aspects,
+    dem_to_mesh,
+    interpolate_covariates_to_vertices,
+)
 
 # ---------------------------------------------------------------------------
 # Optional Gahtan loader
 # ---------------------------------------------------------------------------
 try:
     from ham.data.sim2real_loader import Sim2RealFireLoader
+
     HAS_GAHTAN_LOADER = True
 except ImportError:
     HAS_GAHTAN_LOADER = False
@@ -92,6 +91,7 @@ except ImportError:
 # ===========================================================================
 # Configuration
 # ===========================================================================
+
 
 def get_config(quick: bool = False) -> dict:
     """Return experiment hyperparameters.
@@ -127,6 +127,7 @@ def get_config(quick: bool = False) -> dict:
 # Mesh construction helpers
 # ===========================================================================
 
+
 def build_scene_mesh(
     scenario: WildfireScenario,
     mesh_resolution_fraction: float = 1.0,
@@ -161,12 +162,12 @@ def build_scene_mesh(
         spec/ARCH_SPEC.md § 5; spec/MATH_SPEC.md §§ 1–2.
     """
     step = max(1, int(round(1.0 / mesh_resolution_fraction)))
-    elev_r   = scenario.elev_raster[::step, ::step]
-    slope_r  = scenario.slope_raster[::step, ::step]
+    elev_r = scenario.elev_raster[::step, ::step]
+    slope_r = scenario.slope_raster[::step, ::step]
     aspect_r = scenario.aspect_raster[::step, ::step]
     canopy_r = scenario.canopy_raster[::step, ::step]
-    fuel_r   = scenario.fuel_code_raster[::step, ::step]
-    spacing  = float(scenario.pixel_spacing_m) * step
+    fuel_r = scenario.fuel_code_raster[::step, ::step]
+    spacing = float(scenario.pixel_spacing_m) * step
 
     H_use, W_use = elev_r.shape
 
@@ -179,7 +180,7 @@ def build_scene_mesh(
 
     # ---- Vertex-level covariates -------------------------------------
     raster_dict = {
-        "elev":   elev_r,
+        "elev": elev_r,
         "canopy": canopy_r,
     }
     vert_covs = interpolate_covariates_to_vertices(
@@ -188,31 +189,34 @@ def build_scene_mesh(
 
     # ---- Face-level aggregation -------------------------------------
     # face_elev = mean Z of the 3 vertices  (absolute elevation, metres)
-    face_elev_m = jnp.mean(mesh.vertices[mesh.faces, 2], axis=1)   # (F,)
+    face_elev_m = jnp.mean(mesh.vertices[mesh.faces, 2], axis=1)  # (F,)
 
     # face_canopy = mean canopy of the 3 vertices
-    vert_canopy = vert_covs[:, 1]                                   # (V,)
-    face_canopy = jnp.mean(vert_canopy[mesh.faces], axis=1)         # (F,)
+    vert_canopy = vert_covs[:, 1]  # (V,)
+    face_canopy = jnp.mean(vert_canopy[mesh.faces], axis=1)  # (F,)
 
     # face_fuel = FBFM-13 code at vertex 0 of each face
-    vert_fuel = jnp.asarray(fuel_r.ravel(), dtype=jnp.int32)        # (V,)
-    face_fuel_codes = vert_fuel[mesh.faces[:, 0]]                   # (F,)
+    vert_fuel = jnp.asarray(fuel_r.ravel(), dtype=jnp.int32)  # (V,)
+    face_fuel_codes = vert_fuel[mesh.faces[:, 0]]  # (F,)
 
     # ---- Assemble (F, 5) covariate matrix ----------------------------
     # [face_elev_norm, face_slope, sin(face_aspect), cos(face_aspect), face_canopy]
     # Normalise face_elev to zero-mean unit-std across this scene
     fe_mean = float(jnp.mean(face_elev_m))
-    fe_std  = float(jnp.std(face_elev_m))
-    fe_std  = fe_std if fe_std > 1e-8 else 1.0
+    fe_std = float(jnp.std(face_elev_m))
+    fe_std = fe_std if fe_std > 1e-8 else 1.0
     face_elev_norm = (face_elev_m - fe_mean) / fe_std
 
-    face_cov_5 = jnp.stack([
-        face_elev_norm,
-        face_slopes,
-        jnp.sin(face_aspects),
-        jnp.cos(face_aspects),
-        face_canopy,
-    ], axis=-1).astype(jnp.float32)   # (F, 5)
+    face_cov_5 = jnp.stack(
+        [
+            face_elev_norm,
+            face_slopes,
+            jnp.sin(face_aspects),
+            jnp.cos(face_aspects),
+            face_canopy,
+        ],
+        axis=-1,
+    ).astype(jnp.float32)  # (F, 5)
 
     return mesh, face_cov_5, face_fuel_codes, face_elev_m
 
@@ -240,10 +244,8 @@ def bind_mesh_scenario(
         Bound :class:`~ham.utils.terrain.CovariateMeshRanders` with
         ``face_covariates`` and ``weather_vec`` set.
     """
-    fuel_codes_clipped = jnp.clip(
-        jnp.asarray(face_fuel_codes, dtype=jnp.int32), 0, 12
-    )
-    fuel_embs = metric.fuel_embedding[fuel_codes_clipped]   # (F, fuel_emb_dim)
+    fuel_codes_clipped = jnp.clip(jnp.asarray(face_fuel_codes, dtype=jnp.int32), 0, 12)
+    fuel_embs = metric.fuel_embedding[fuel_codes_clipped]  # (F, fuel_emb_dim)
 
     face_cov_full = jnp.concatenate(
         [
@@ -251,7 +253,7 @@ def bind_mesh_scenario(
             fuel_embs.astype(jnp.float32),
         ],
         axis=-1,
-    )   # (F, 5 + fuel_emb_dim)
+    )  # (F, 5 + fuel_emb_dim)
 
     return metric.bind_scene(
         face_cov_full,
@@ -262,6 +264,7 @@ def bind_mesh_scenario(
 # ===========================================================================
 # Coordinate helpers (3-D)
 # ===========================================================================
+
 
 def _pixels_to_world_3d(
     pixels: np.ndarray,
@@ -314,6 +317,7 @@ def _ignition_to_world_3d(
 # Statistics helpers
 # ===========================================================================
 
+
 def pearson_r(a: np.ndarray, b: np.ndarray) -> float:
     """Pearson correlation coefficient between two 1-D arrays.
 
@@ -362,6 +366,7 @@ def compute_rmse(pred: np.ndarray, gt: np.ndarray) -> float:
 # Chunked arrival-time prediction on mesh
 # ===========================================================================
 
+
 def _predict_arrivals_mesh_chunked(
     bound_metric: CovariateMeshRanders,
     solver: MeshEikonalSolver,
@@ -374,16 +379,18 @@ def _predict_arrivals_mesh_chunked(
 ) -> np.ndarray:
     """Predict geodesic arc lengths for eval pixels via global Eikonal solver."""
     source_coords = jnp.expand_dims(source_3d, axis=0)
-    T_all = solver.solve(bound_metric, adjacency, mesh.vertices, mesh.faces, source_coords)
-    
+    T_all = solver.solve(
+        bound_metric, adjacency, mesh.vertices, mesh.faces, source_coords
+    )
+
     eval_3d = jnp.asarray(
         _pixels_to_world_3d(eval_pixels, elev_raster, pixel_spacing_m),
         dtype=jnp.float32,
     )
-    
+
     def get_closest_v(src):
-        return jnp.argmin(jnp.sum((mesh.vertices - src)**2, axis=-1))
-        
+        return jnp.argmin(jnp.sum((mesh.vertices - src) ** 2, axis=-1))
+
     closest_vs = jax.vmap(get_closest_v)(eval_3d)
     return np.array(T_all[closest_vs], dtype=np.float32)
 
@@ -391,6 +398,7 @@ def _predict_arrivals_mesh_chunked(
 # ===========================================================================
 # Make / init metric and solver
 # ===========================================================================
+
 
 def make_mesh_metric(
     mesh: TriangularMesh,
@@ -437,6 +445,7 @@ def make_solver(cfg: dict) -> MeshEikonalSolver:
 # Validation helper
 # ===========================================================================
 
+
 def compute_sparse_mesh_eikonal_loss(
     metric,
     solver,
@@ -448,13 +457,13 @@ def compute_sparse_mesh_eikonal_loss(
 ):
     source_coords = jnp.expand_dims(source_world, axis=0)
     T_all = solver.solve(metric, adjacency, mesh.vertices, mesh.faces, source_coords)
-    
+
     def get_closest_v(src):
-        return jnp.argmin(jnp.sum((mesh.vertices - src)**2, axis=-1))
-        
+        return jnp.argmin(jnp.sum((mesh.vertices - src) ** 2, axis=-1))
+
     closest_vs = jax.vmap(get_closest_v)(x_obs_world)
     t_pred = T_all[closest_vs]
-    return jnp.mean((t_pred - t_obs)**2)
+    return jnp.mean((t_pred - t_obs) ** 2)
 
 
 def _val_pearson_r_mesh(
@@ -468,15 +477,22 @@ def _val_pearson_r_mesh(
     cfg: dict,
 ) -> float:
     """Fast validation: Pearson r over observation pixels only."""
-    bound = bind_mesh_scenario(metric, face_cov_5, face_fuel_codes, scenario.weather_vec)
+    bound = bind_mesh_scenario(
+        metric, face_cov_5, face_fuel_codes, scenario.weather_vec
+    )
 
     source_3d = _ignition_to_world_3d(
         scenario.ignition_pixel, scenario.elev_raster, scenario.pixel_spacing_m
     )
     pred = _predict_arrivals_mesh_chunked(
-        bound, solver, mesh, adjacency, source_3d,
-        scenario.obs_pixels, scenario.elev_raster,
-        scenario.pixel_spacing_m
+        bound,
+        solver,
+        mesh,
+        adjacency,
+        source_3d,
+        scenario.obs_pixels,
+        scenario.elev_raster,
+        scenario.pixel_spacing_m,
     )
     gt = np.asarray(scenario.obs_arrival_times, dtype=np.float32)
     return pearson_r(pred, gt)
@@ -485,6 +501,7 @@ def _val_pearson_r_mesh(
 # ===========================================================================
 # Per-scene training loop
 # ===========================================================================
+
 
 def train_scene_mesh(
     data_root: str,
@@ -525,9 +542,11 @@ def train_scene_mesh(
     if not os.path.exists(data_root):
         raise FileNotFoundError(f"Dataset not found at {data_root}.")
 
-    print(f"\n{'='*60}")
-    print(f"Phase W2  Scene {scene_id}  seed={seed}  wind={'yes' if use_wind else 'no'}")
-    print(f"{'='*60}")
+    print(f"\n{'=' * 60}")
+    print(
+        f"Phase W2  Scene {scene_id}  seed={seed}  wind={'yes' if use_wind else 'no'}"
+    )
+    print(f"{'=' * 60}")
     t_scene_start = time.time()
 
     loader = Sim2RealFireLoader(data_root)
@@ -547,11 +566,12 @@ def train_scene_mesh(
             except AttributeError:
                 # Final fallback: scan Satellite_Images_Mask for event folders
                 # that have a matching weather file — mirrors W1 logic exactly.
-                mask_dir   = os.path.join(data_root, scene_id, "Satellite_Images_Mask")
+                mask_dir = os.path.join(data_root, scene_id, "Satellite_Images_Mask")
                 weather_dir = os.path.join(data_root, scene_id, "Weather_Data")
                 if os.path.isdir(mask_dir):
                     event_ids = [
-                        d for d in sorted(os.listdir(mask_dir))
+                        d
+                        for d in sorted(os.listdir(mask_dir))
                         if os.path.isdir(os.path.join(mask_dir, d))
                         and os.path.exists(os.path.join(weather_dir, f"{d}.txt"))
                     ]
@@ -586,14 +606,15 @@ def train_scene_mesh(
 
     def _load(pairs):
         return [
-            load_wildfire_scenario(loader, s, e, normalizer,
-                                   k_train_obs=cfg["k_train_obs"], seed=seed)
+            load_wildfire_scenario(
+                loader, s, e, normalizer, k_train_obs=cfg["k_train_obs"], seed=seed
+            )
             for s, e in pairs
         ]
 
     train_scens = _load(train_list)
-    val_scens   = _load(val_list)
-    test_scens  = _load(test_list)
+    val_scens = _load(val_list)
+    test_scens = _load(test_list)
 
     # ---- Build mesh once from the first scenario's DEM ---------------
     ref_sc = train_scens[0]
@@ -615,14 +636,17 @@ def train_scene_mesh(
     n_batches_per_epoch = max(1, len(train_scens) // cfg["batch_size_fires"])
     total_steps = cfg["n_epochs"] * n_batches_per_epoch
     warmup_steps = min(5 * n_batches_per_epoch, max(1, total_steps // 10))
-    lr_schedule = optax.join_schedules([
-        optax.linear_schedule(
-            init_value=1e-5, end_value=cfg["lr"], transition_steps=warmup_steps
-        ),
-        optax.cosine_decay_schedule(
-            init_value=cfg["lr"], decay_steps=max(1, total_steps - warmup_steps)
-        ),
-    ], boundaries=[warmup_steps])
+    lr_schedule = optax.join_schedules(
+        [
+            optax.linear_schedule(
+                init_value=1e-5, end_value=cfg["lr"], transition_steps=warmup_steps
+            ),
+            optax.cosine_decay_schedule(
+                init_value=cfg["lr"], decay_steps=max(1, total_steps - warmup_steps)
+            ),
+        ],
+        boundaries=[warmup_steps],
+    )
     optimizer = optax.chain(
         optax.clip_by_global_norm(1.0),
         optax.adam(lr_schedule),
@@ -651,7 +675,9 @@ def train_scene_mesh(
 
             def _fire_loss(m, _fc5, _ffc, _wv, _src, _x, _t):
                 bound = bind_mesh_scenario(m, _fc5, _ffc, _wv)
-                return compute_sparse_mesh_eikonal_loss(bound, solver, mesh, adjacency, _src, _x, _t)
+                return compute_sparse_mesh_eikonal_loss(
+                    bound, solver, mesh, adjacency, _src, _x, _t
+                )
 
             for idx in batch_idx:
                 sc = train_scens[int(idx)]
@@ -706,7 +732,7 @@ def train_scene_mesh(
         val_r_history.append(mean_val_r)
 
         print(
-            f"  Epoch {epoch+1:3d}/{cfg['n_epochs']}: "
+            f"  Epoch {epoch + 1:3d}/{cfg['n_epochs']}: "
             f"loss={mean_loss:.5f}  val_r={mean_val_r:.4f}  "
             f"time={epoch_runtimes[-1]:.1f}s"
         )
@@ -718,7 +744,9 @@ def train_scene_mesh(
         else:
             patience_counter += 1
             if patience_counter >= cfg["early_stopping_patience"]:
-                print(f"  Early stopping at epoch {epoch+1}  (best_loss={best_loss:.4f})")
+                print(
+                    f"  Early stopping at epoch {epoch + 1}  (best_loss={best_loss:.4f})"
+                )
                 break
 
     # ---- Test evaluation -------------------------------------------
@@ -742,34 +770,45 @@ def train_scene_mesh(
             continue
 
         pred = _predict_arrivals_mesh_chunked(
-            bound, solver, mesh, adjacency, source_3d, eval_pix,
-            sc.elev_raster, sc.pixel_spacing_m
+            bound,
+            solver,
+            mesh,
+            adjacency,
+            source_3d,
+            eval_pix,
+            sc.elev_raster,
+            sc.pixel_spacing_m,
         )
         gt = np.array(
             [sc.arrival_times[int(r), int(c)] for r, c in eval_pix],
             dtype=np.float32,
         )
-        r_val   = pearson_r(pred, gt)
+        r_val = pearson_r(pred, gt)
         rmse_val = compute_rmse(pred, gt)
-        slope_s  = compute_slope_std(sc)
-        test_results.append(dict(
-            pearson_r=r_val, rmse=rmse_val, slope_std=slope_s,
-            pred=pred, gt=gt,
-        ))
+        slope_s = compute_slope_std(sc)
+        test_results.append(
+            dict(
+                pearson_r=r_val,
+                rmse=rmse_val,
+                slope_std=slope_s,
+                pred=pred,
+                gt=gt,
+            )
+        )
 
-    test_rs    = [x["pearson_r"] for x in test_results]
-    test_rmses = [x["rmse"]      for x in test_results]
-    test_r_mean = float(np.mean(test_rs))   if test_rs else 0.0
-    test_r_std  = float(np.std(test_rs))    if test_rs else 0.0
-    test_rmse   = float(np.mean(test_rmses)) if test_rmses else 0.0
-    runtime     = float(np.mean(epoch_runtimes)) if epoch_runtimes else 0.0
+    test_rs = [x["pearson_r"] for x in test_results]
+    test_rmses = [x["rmse"] for x in test_results]
+    test_r_mean = float(np.mean(test_rs)) if test_rs else 0.0
+    test_r_std = float(np.std(test_rs)) if test_rs else 0.0
+    test_rmse = float(np.mean(test_rmses)) if test_rmses else 0.0
+    runtime = float(np.mean(epoch_runtimes)) if epoch_runtimes else 0.0
 
     print(
         f"\n  RESULTS  scene={scene_id}  seed={seed}\n"
         f"    test Pearson r  = {test_r_mean:.4f} ± {test_r_std:.4f}\n"
         f"    test RMSE       = {test_rmse:.4f}\n"
         f"    epoch runtime   = {runtime:.1f} s/epoch\n"
-        f"    total time      = {time.time()-t_scene_start:.1f} s"
+        f"    total time      = {time.time() - t_scene_start:.1f} s"
     )
 
     ckpt_dir = os.path.join(output_dir, "checkpoints")
@@ -795,6 +834,7 @@ def train_scene_mesh(
 # ===========================================================================
 # Synthetic smoke test
 # ===========================================================================
+
 
 def _make_synthetic_scenario_mesh(
     slope_level: str = "moderate",
@@ -827,20 +867,19 @@ def _make_synthetic_scenario_mesh(
 
     amp = {"flat": 0.0, "moderate": 10.0, "rugged": 40.0}[slope_level]
     elev_raster = (
-        100.0
-        + amp * np.sin(np.pi * rows_g / H) * np.cos(np.pi * cols_g / W)
+        100.0 + amp * np.sin(np.pi * rows_g / H) * np.cos(np.pi * cols_g / W)
     ).astype(np.float32)
 
-    slope_raster  = np.zeros((H, W), dtype=np.float32)
+    slope_raster = np.zeros((H, W), dtype=np.float32)
     aspect_raster = np.zeros((H, W), dtype=np.float32)
     canopy_raster = np.zeros((H, W), dtype=np.float32)
     fuel_code_raster = np.full((H, W), 5, dtype=np.int32)
-    weather_vec   = np.zeros(4, dtype=np.float32)
-    origin_xy     = np.zeros(2, dtype=np.float32)
+    weather_vec = np.zeros(4, dtype=np.float32)
+    origin_xy = np.zeros(2, dtype=np.float32)
 
     dr = rows_g - ign_row
     dc = cols_g - ign_col
-    arrival_hours = np.sqrt(dr ** 2 + dc ** 2).astype(np.float32) * 0.03
+    arrival_hours = np.sqrt(dr**2 + dc**2).astype(np.float32) * 0.03
     arrival_hours[ign_row, ign_col] = 0.0
 
     t_max = float(arrival_hours.max())
@@ -907,7 +946,8 @@ def run_synthetic_mesh(cfg: dict, output_dir: str, use_wind: bool = True) -> lis
     for slope_level in slope_levels:
         print(f"\n-- Slope level: {slope_level} --")
         scenario = _make_synthetic_scenario_mesh(
-            slope_level=slope_level, seed=cfg["seed"],
+            slope_level=slope_level,
+            seed=cfg["seed"],
             mesh_resolution_fraction=cfg["mesh_resolution_fraction"],
         )
 
@@ -916,8 +956,7 @@ def run_synthetic_mesh(cfg: dict, output_dir: str, use_wind: bool = True) -> lis
         )
         adjacency = MeshAdjacency.build(mesh.vertices, mesh.faces)
         print(
-            f"   Mesh: {mesh.vertices.shape[0]} vertices, "
-            f"{mesh.faces.shape[0]} faces"
+            f"   Mesh: {mesh.vertices.shape[0]} vertices, {mesh.faces.shape[0]} faces"
         )
 
         key = jax.random.PRNGKey(cfg["seed"])
@@ -930,8 +969,6 @@ def run_synthetic_mesh(cfg: dict, output_dir: str, use_wind: bool = True) -> lis
         )
         optimizer = optax.adam(lr_schedule)
         opt_state = optimizer.init(eqx.filter(metric, eqx.is_inexact_array))
-
-
 
         obs_3d = jnp.asarray(
             _pixels_to_world_3d(
@@ -951,10 +988,19 @@ def run_synthetic_mesh(cfg: dict, output_dir: str, use_wind: bool = True) -> lis
 
         # Define _loss once outside the epoch loop so JAX can cache the traced
         # computation graph across epochs (Code RISK #3 fix).
-        def _loss(m, _fc5=face_cov_5, _ffc=face_fuel_codes,
-                  _wv=w_vec, _src=source_3d, _x=obs_3d, _t=t_obs):
+        def _loss(
+            m,
+            _fc5=face_cov_5,
+            _ffc=face_fuel_codes,
+            _wv=w_vec,
+            _src=source_3d,
+            _x=obs_3d,
+            _t=t_obs,
+        ):
             bound = bind_mesh_scenario(m, _fc5, _ffc, _wv)
-            return compute_sparse_mesh_eikonal_loss(bound, solver, mesh, adjacency, _src, _x, _t)
+            return compute_sparse_mesh_eikonal_loss(
+                bound, solver, mesh, adjacency, _src, _x, _t
+            )
 
         for epoch in range(n_epochs):
             loss_val, grads = eqx.filter_value_and_grad(_loss)(metric)
@@ -963,34 +1009,38 @@ def run_synthetic_mesh(cfg: dict, output_dir: str, use_wind: bool = True) -> lis
             )
             metric = eqx.apply_updates(metric, updates)
             train_loss_history.append(float(loss_val))
-            print(f"   Epoch {epoch+1:3d}/{n_epochs}: loss={float(loss_val):.6f}")
+            print(f"   Epoch {epoch + 1:3d}/{n_epochs}: loss={float(loss_val):.6f}")
 
         train_time = time.time() - t0
 
         # ---- Evaluate on 200 random pixels ---------------------------
         rng = np.random.default_rng(cfg["seed"])
         H, W = scenario.arrival_times.shape
-        all_pix = np.array(
-            [[r, c] for r in range(H) for c in range(W)], dtype=np.int64
-        )
-        eval_idx = rng.choice(
-            len(all_pix), size=min(200, len(all_pix)), replace=False
-        )
+        all_pix = np.array([[r, c] for r in range(H) for c in range(W)], dtype=np.int64)
+        eval_idx = rng.choice(len(all_pix), size=min(200, len(all_pix)), replace=False)
         eval_pixels = all_pix[eval_idx]
 
         # Bind final metric
-        bound = bind_mesh_scenario(metric, face_cov_5, face_fuel_codes, scenario.weather_vec)
+        bound = bind_mesh_scenario(
+            metric, face_cov_5, face_fuel_codes, scenario.weather_vec
+        )
 
         print(f"   Evaluating on {len(eval_pixels)} pixels...")
         pred = _predict_arrivals_mesh_chunked(
-            bound, solver, mesh, adjacency, source_3d, eval_pixels,
-            scenario.elev_raster, scenario.pixel_spacing_m
+            bound,
+            solver,
+            mesh,
+            adjacency,
+            source_3d,
+            eval_pixels,
+            scenario.elev_raster,
+            scenario.pixel_spacing_m,
         )
         gt = np.array(
             [scenario.arrival_times[int(r), int(c)] for r, c in eval_pixels],
             dtype=np.float32,
         )
-        r_val    = pearson_r(pred, gt)
+        r_val = pearson_r(pred, gt)
         rmse_val = compute_rmse(pred, gt)
 
         # Slope std from mesh face angles (degrees)
@@ -1007,20 +1057,24 @@ def run_synthetic_mesh(cfg: dict, output_dir: str, use_wind: bool = True) -> lis
 
         ckpt_dir = os.path.join(output_dir, "checkpoints")
         os.makedirs(ckpt_dir, exist_ok=True)
-        ckpt_path = os.path.join(ckpt_dir, f"w2_synthetic_{slope_level}_seed{cfg['seed']}.eqx")
+        ckpt_path = os.path.join(
+            ckpt_dir, f"w2_synthetic_{slope_level}_seed{cfg['seed']}.eqx"
+        )
         eqx.tree_serialise_leaves(ckpt_path, metric)
         print(f"     Saved checkpoint to {ckpt_path}")
 
-        all_results.append(dict(
-            slope_level=slope_level,
-            slope_std_deg=slope_std_deg,
-            test_pearson_r_mean=r_val,
-            test_rmse=rmse_val,
-            train_loss_history=train_loss_history,
-            pred=pred,
-            gt=gt,
-            train_time=train_time,
-        ))
+        all_results.append(
+            dict(
+                slope_level=slope_level,
+                slope_std_deg=slope_std_deg,
+                test_pearson_r_mean=r_val,
+                test_rmse=rmse_val,
+                train_loss_history=train_loss_history,
+                pred=pred,
+                gt=gt,
+                train_time=train_time,
+            )
+        )
 
     # ---- Overall summary -------------------------------------------
     mean_r = float(np.mean([r["test_pearson_r_mean"] for r in all_results]))
@@ -1034,6 +1088,7 @@ def run_synthetic_mesh(cfg: dict, output_dir: str, use_wind: bool = True) -> lis
 # ===========================================================================
 # Figures
 # ===========================================================================
+
 
 def _slope_bin_label(slope_std_deg: float) -> str:
     """Map slope-std in degrees to a stratification bin label."""
@@ -1065,15 +1120,18 @@ def _save_figures(results: list, output_dir: str) -> None:
     # ---- Slope-stratified bar chart ---------------------------------
     # Assign each result to a slope bin
     bins_order = ["Flat (≤3°)", "Moderate (3–8°)", "Rugged (>8°)"]
-    bin_r:    dict = {b: [] for b in bins_order}
+    bin_r: dict = {b: [] for b in bins_order}
     bin_rmse: dict = {b: [] for b in bins_order}
 
     for res in results:
         # Support both per-fire (real) and per-scenario (synthetic) entries
         if "test_per_fire" in res:
             for fire in res["test_per_fire"]:
-                lbl = _slope_bin_label(float(fire["slope_std"]) if "slope_std" in fire
-                                       else fire.get("slope_std_deg", 0.0))
+                lbl = _slope_bin_label(
+                    float(fire["slope_std"])
+                    if "slope_std" in fire
+                    else fire.get("slope_std_deg", 0.0)
+                )
                 bin_r[lbl].append(fire["pearson_r"])
                 bin_rmse[lbl].append(fire["rmse"])
         else:
@@ -1082,11 +1140,11 @@ def _save_figures(results: list, output_dir: str) -> None:
             bin_r[lbl].append(res["test_pearson_r_mean"])
             bin_rmse[lbl].append(res.get("test_rmse", 0.0))
 
-    r_means   = [float(np.mean(bin_r[b]))   if bin_r[b]   else 0.0 for b in bins_order]
-    r_stds    = [float(np.std(bin_r[b]))    if len(bin_r[b]) > 1 else 0.0
-                 for b in bins_order]
-    rmse_means = [float(np.mean(bin_rmse[b])) if bin_rmse[b] else 0.0
-                  for b in bins_order]
+    r_means = [float(np.mean(bin_r[b])) if bin_r[b] else 0.0 for b in bins_order]
+    r_stds = [float(np.std(bin_r[b])) if len(bin_r[b]) > 1 else 0.0 for b in bins_order]
+    rmse_means = [
+        float(np.mean(bin_rmse[b])) if bin_rmse[b] else 0.0 for b in bins_order
+    ]
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
     x = np.arange(len(bins_order))
@@ -1107,21 +1165,19 @@ def _save_figures(results: list, output_dir: str) -> None:
 
     plt.tight_layout()
     for ext in ("pdf", "png"):
-        fig.savefig(
-            os.path.join(fig_dir, f"phaseW2_slope_stratified.{ext}"), dpi=150
-        )
+        fig.savefig(os.path.join(fig_dir, f"phaseW2_slope_stratified.{ext}"), dpi=150)
     plt.close(fig)
 
     # ---- W1 proxy vs W2 mesh comparison scatter ----------------------
     # Use 2-D Euclidean distance predictions as W1 proxy (ignoring Z)
     all_pred_w2: list = []
     all_pred_w1: list = []
-    all_gt:      list = []
+    all_gt: list = []
 
     for res in results:
         if "pred" in res and "gt" in res:
             pred_w2 = np.asarray(res["pred"], dtype=np.float32)
-            gt      = np.asarray(res["gt"],   dtype=np.float32)
+            gt = np.asarray(res["gt"], dtype=np.float32)
             # DISCLAIMER: This W1 proxy is a synthetic stand-in for code testing purposes.
             # It simulates a flat-grid metric that ignores elevation.
             # For scientific publication, load actual W1 predictions from Phase W1 outputs!
@@ -1135,22 +1191,28 @@ def _save_figures(results: list, output_dir: str) -> None:
     if all_pred_w2:
         preds_w2 = np.concatenate(all_pred_w2)
         preds_w1 = np.concatenate(all_pred_w1)
-        gts      = np.concatenate(all_gt)
+        gts = np.concatenate(all_gt)
 
         # Normalise to [0, 1] for visual clarity
         p_max = max(float(preds_w2.max()), float(preds_w1.max()), 1e-8)
         preds_w2_n = preds_w2 / p_max
         preds_w1_n = preds_w1 / p_max
-        gts_n      = gts / max(float(gts.max()), 1e-8)
+        gts_n = gts / max(float(gts.max()), 1e-8)
 
         fig, ax = plt.subplots(figsize=(5, 4))
         sc = ax.scatter(
-            preds_w1_n, preds_w2_n,
-            c=gts_n, cmap="plasma", s=8, alpha=0.6,
+            preds_w1_n,
+            preds_w2_n,
+            c=gts_n,
+            cmap="plasma",
+            s=8,
+            alpha=0.6,
         )
         plt.colorbar(sc, ax=ax, label="GT arrival time (norm.)")
-        lims = [min(preds_w1_n.min(), preds_w2_n.min()),
-                max(preds_w1_n.max(), preds_w2_n.max())]
+        lims = [
+            min(preds_w1_n.min(), preds_w2_n.min()),
+            max(preds_w1_n.max(), preds_w2_n.max()),
+        ]
         ax.plot(lims, lims, "k--", linewidth=0.8, label="y = x")
         ax.set_xlabel("W1 proxy predictions (norm.)")
         ax.set_ylabel("W2 mesh predictions (norm.)")
@@ -1173,6 +1235,7 @@ def _save_figures(results: list, output_dir: str) -> None:
 # ===========================================================================
 # Multi-scene experiment runner
 # ===========================================================================
+
 
 def run_experiment_mesh(
     data_root: str,
@@ -1212,54 +1275,70 @@ def run_experiment_mesh(
 # CLI
 # ===========================================================================
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description=(
-            "Phase W2: CovariateMeshRanders training on 3D triangular mesh"
-        ),
+        description=("Phase W2: CovariateMeshRanders training on 3D triangular mesh"),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "--data_root", type=str, default="data/sim2real_fire",
+        "--data_root",
+        type=str,
+        default="data/sim2real_fire",
         help="Path to Sim2Real-Fire dataset root directory.",
     )
     parser.add_argument(
-        "--scenes", nargs="+", default=["0014_00426"], metavar="SCENE_ID",
+        "--scenes",
+        nargs="+",
+        default=["0014_00426"],
+        metavar="SCENE_ID",
         help="Scene IDs to train on (space-separated).",
     )
     parser.add_argument(
-        "--output_dir", type=str, default="results/phaseW2",
+        "--output_dir",
+        type=str,
+        default="results/phaseW2",
         help="Output directory for figures and logs.",
     )
     parser.add_argument(
-        "--quick", action="store_true",
+        "--quick",
+        action="store_true",
         help=(
             "Reduced config (20 epochs, 15 AVBD steps, half mesh resolution, "
             "32/12/12 train/val/test fires) to verify the pipeline in ~15 min on CPU."
         ),
     )
     parser.add_argument(
-        "--no_wind", action="store_true",
+        "--no_wind",
+        action="store_true",
         help="Riemannian ablation: disable the Randers drift term (b=0).",
     )
     parser.add_argument(
-        "--seeds", nargs="+", type=int, default=None, metavar="SEED",
+        "--seeds",
+        nargs="+",
+        type=int,
+        default=None,
+        metavar="SEED",
         help="Override training seeds (default: from config).",
     )
     parser.add_argument(
-        "--synthetic", action="store_true",
+        "--synthetic",
+        action="store_true",
         help=(
             "Run the synthetic smoke test on generated 20×20 DEMs — "
             "no real dataset required.  Combine with --quick for fast CI."
         ),
     )
     parser.add_argument(
-        "--device", default="cpu", choices=["cpu", "gpu", "tpu"],
+        "--device",
+        default="cpu",
+        choices=["cpu", "gpu", "tpu"],
         help="JAX device to use (default: cpu).",
     )
 
     args = parser.parse_args()
     from ham.utils import configure_device
+
     configure_device(args.device)
     cfg = get_config(quick=args.quick)
     use_wind = not args.no_wind
@@ -1273,9 +1352,9 @@ def main() -> None:
         results = run_synthetic_mesh(cfg, output_dir=args.output_dir, use_wind=use_wind)
         r_vals = [r["test_pearson_r_mean"] for r in results]
         print(
-            f"\n{'='*60}\n"
+            f"\n{'=' * 60}\n"
             f"  AGGREGATE Pearson r = {np.mean(r_vals):.4f} ± {np.std(r_vals):.4f}\n"
-            f"{'='*60}"
+            f"{'=' * 60}"
         )
         return
 
@@ -1288,14 +1367,14 @@ def main() -> None:
     )
 
     if all_results:
-        r_vals   = [r["test_pearson_r_mean"] for r in all_results]
+        r_vals = [r["test_pearson_r_mean"] for r in all_results]
         rmse_vals = [r["test_rmse"] for r in all_results]
         print(
-            f"\n{'='*60}\n"
+            f"\n{'=' * 60}\n"
             f"  AGGREGATE RESULTS  ({len(all_results)} runs)\n"
             f"  Mean Pearson r  : {np.mean(r_vals):.4f} ± {np.std(r_vals):.4f}\n"
             f"  Mean RMSE       : {np.mean(rmse_vals):.4f}\n"
-            f"{'='*60}"
+            f"{'=' * 60}"
         )
     else:
         print("  No results collected — check data root and scene IDs.")

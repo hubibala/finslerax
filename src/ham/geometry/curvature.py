@@ -30,11 +30,14 @@ Sign convention:
 
 import jax
 import jax.numpy as jnp
+
 from ham.geometry.metric import FinslerMetric
-from ham.utils.math import safe_norm, NORM_EPS
+from ham.utils.math import NORM_EPS
 
 
-def _nonlinear_connection(metric: FinslerMetric, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+def _nonlinear_connection(
+    metric: FinslerMetric, x: jnp.ndarray, v: jnp.ndarray
+) -> jnp.ndarray:
     """
     Nonlinear connection coefficients N^i_j = partial G^i / partial v^j.
 
@@ -52,7 +55,9 @@ def _nonlinear_connection(metric: FinslerMetric, x: jnp.ndarray, v: jnp.ndarray)
     return jax.jacfwd(metric.spray, argnums=1)(x, v)
 
 
-def riemann_curvature_tensor(metric: FinslerMetric, x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
+def riemann_curvature_tensor(
+    metric: FinslerMetric, x: jnp.ndarray, v: jnp.ndarray
+) -> jnp.ndarray:
     """
     Riemann curvature tensor R^i_jk of the nonlinear connection.
 
@@ -79,6 +84,7 @@ def riemann_curvature_tensor(metric: FinslerMetric, x: jnp.ndarray, v: jnp.ndarr
     Returns:
         R: shape (D, D, D), where R[i, j, k] = R^i_jk.
     """
+
     def N_fn(pos, vel):
         return _nonlinear_connection(metric, pos, vel)
 
@@ -101,16 +107,17 @@ def riemann_curvature_tensor(metric: FinslerMetric, x: jnp.ndarray, v: jnp.ndarr
 
     # Term 3: +N^l_j dN^i_k / dv^l
     # N[l, j], dN_dv[i, k, l] -> sum over l
-    term3 = jnp.einsum('lj,ikl->ijk', N, dN_dv)
+    term3 = jnp.einsum("lj,ikl->ijk", N, dN_dv)
 
     # Term 4: -N^l_k dN^i_j / dv^l
-    term4 = -jnp.einsum('lk,ijl->ijk', N, dN_dv)
+    term4 = -jnp.einsum("lk,ijl->ijk", N, dN_dv)
 
     return term1 + term2 + term3 + term4
 
 
-def sectional_curvature(metric: FinslerMetric, x: jnp.ndarray,
-                        v1: jnp.ndarray, v2: jnp.ndarray) -> jnp.ndarray:
+def sectional_curvature(
+    metric: FinslerMetric, x: jnp.ndarray, v1: jnp.ndarray, v2: jnp.ndarray
+) -> jnp.ndarray:
     """
     Flag (sectional) curvature K(x, v1; v2) for the plane spanned by v1 and v2.
 
@@ -145,7 +152,7 @@ def sectional_curvature(metric: FinslerMetric, x: jnp.ndarray,
     R_tensor = riemann_curvature_tensor(metric, x, v1)
 
     # Jacobi endomorphism: R^i = R^i_jk v1^j v2^k
-    R_i = jnp.einsum('ijk,j,k->i', R_tensor, v1, v2)
+    R_i = jnp.einsum("ijk,j,k->i", R_tensor, v1, v2)
 
     # Numerator: g_{im}(x, v1) R^i v2^m = g_v1(R_i, v2)
     numerator = metric.inner_product(x, v1, R_i, v2)
@@ -161,8 +168,9 @@ def sectional_curvature(metric: FinslerMetric, x: jnp.ndarray,
     return jnp.where(denominator < NORM_EPS, 0.0, numerator / safe_denom)
 
 
-def flag_curvature_sample(metric: FinslerMetric, x: jnp.ndarray,
-                          key: jax.Array) -> jnp.ndarray:
+def flag_curvature_sample(
+    metric: FinslerMetric, x: jnp.ndarray, key: jax.Array
+) -> jnp.ndarray:
     """
     Sample the flag curvature at x using a random pair of metric-orthogonal tangent vectors.
 
@@ -208,9 +216,7 @@ def flag_curvature_sample(metric: FinslerMetric, x: jnp.ndarray,
     # Metric Gram-Schmidt: remove the t1 component from t2
     g_t1_t2 = metric.inner_product(x, t1, t1, t2)
     g_t1_t1_normed = metric.inner_product(x, t1, t1, t1)
-    projection = jnp.where(g_t1_t1_normed > NORM_EPS,
-                           g_t1_t2 / g_t1_t1_normed,
-                           0.0)
+    projection = jnp.where(g_t1_t1_normed > NORM_EPS, g_t1_t2 / g_t1_t1_normed, 0.0)
     t2 = t2 - projection * t1
 
     # Normalize t2 w.r.t. the metric

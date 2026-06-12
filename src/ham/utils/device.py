@@ -22,9 +22,10 @@ importing JAX::
 """
 
 import logging
+
 import jax
 
-__all__ = ["get_device", "configure_device"]
+__all__ = ["configure_device", "get_device"]
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +47,7 @@ def get_device(device: str = "cpu") -> jax.Device:
     except RuntimeError as exc:
         available = [str(d) for d in jax.devices()]
         raise RuntimeError(
-            f"Device '{device}' not available. "
-            f"Available devices: {available}"
+            f"Device '{device}' not available. Available devices: {available}"
         ) from exc
 
 

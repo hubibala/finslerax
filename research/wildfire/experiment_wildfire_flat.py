@@ -44,36 +44,33 @@ Usage::
 
 import argparse
 import os
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
 
-import numpy as np
-
+import equinox as eqx
 import jax
 import jax.numpy as jnp
-import equinox as eqx
-import optax
 import matplotlib
+import numpy as np
+import optax
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from jax import config
+
+from ham.data.wildfire import (
+    SceneNormalizer,
+    WildfireScenario,
+    load_wildfire_scenario,
+    stratified_sample_observations,
+    train_val_test_split,
+)
 
 # config.update("jax_enable_x64", True)
-
 # ---------------------------------------------------------------------------
 # HAMTools imports
 # ---------------------------------------------------------------------------
 from ham.geometry.manifolds import EuclideanSpace
 from ham.models.wildfire import CovariateConditionedRanders
-from ham.data.wildfire import (
-    WildfireScenario,
-    load_wildfire_scenario,
-    SceneNormalizer,
-    train_val_test_split,
-    stratified_sample_observations,
-)
 from ham.solvers.avbd import AVBDSolver
 from ham.training.losses import ArrivalTimeLoss, curriculum_alpha
 
@@ -82,6 +79,7 @@ from ham.training.losses import ArrivalTimeLoss, curriculum_alpha
 # ---------------------------------------------------------------------------
 try:
     from ham.data.sim2real_loader import Sim2RealFireLoader
+
     HAS_GAHTAN_LOADER = True
 except ImportError:
     HAS_GAHTAN_LOADER = False
@@ -90,6 +88,7 @@ except ImportError:
 # ===========================================================================
 # Configuration
 # ===========================================================================
+
 
 def get_config(quick: bool = False) -> dict:
     """Return experiment hyperparameters.
@@ -130,6 +129,7 @@ def get_config(quick: bool = False) -> dict:
 # ===========================================================================
 # Model helpers
 # ===========================================================================
+
 
 def make_metric(
     cfg: dict,
@@ -245,12 +245,19 @@ def make_batched_train_step(
         ``obs_world_batch`` shape: ``(B, K, 2)``.
         ``obs_times_batch`` shape: ``(B, K)``.
     """
+
     @eqx.filter_jit
-    def batched_step(metric, opt_state,
-                     weather_batch, source_batch,
-                     obs_world_batch, obs_times_batch,
-                     alpha: jax.Array):
+    def batched_step(
+        metric,
+        opt_state,
+        weather_batch,
+        source_batch,
+        obs_world_batch,
+        obs_times_batch,
+        alpha: jax.Array,
+    ):
         """Single JIT dispatch: vmap/lax.map over B fires, then one optimizer update."""
+
         def total_loss(m):
             def fire_loss(args):
                 w, s, ow, ot = args
@@ -291,8 +298,8 @@ def make_solver(cfg: dict) -> AVBDSolver:
         :class:`~ham.solvers.avbd.AVBDSolver`.
     """
     return AVBDSolver(
-        step_size=0.05,         # Mathematically stable step size to prevent path divergence
-        grad_clip=10.0,          # Consistent with IFT fixed-point assumption; 100x was too large
+        step_size=0.05,  # Mathematically stable step size to prevent path divergence
+        grad_clip=10.0,  # Consistent with IFT fixed-point assumption; 100x was too large
         iterations=cfg["avbd_iters"],
         energy_tol=1e-6,
         implicit_diff=True,
@@ -302,6 +309,7 @@ def make_solver(cfg: dict) -> AVBDSolver:
 # ===========================================================================
 # Coordinate helpers
 # ===========================================================================
+
 
 def _pixels_to_world(pixels: np.ndarray, pixel_spacing_m: float) -> np.ndarray:
     """Convert (row, col) pixel indices to (x, y) world coordinates.
@@ -334,13 +342,15 @@ def _ignition_to_world(ignition_pixel: np.ndarray, pixel_spacing_m: float) -> ja
         Shape (2,) float64 JAX array ``[x_m, y_m]``.
     """
     row, col = float(ignition_pixel[0]), float(ignition_pixel[1])
-    return jnp.array([col * float(pixel_spacing_m), row * float(pixel_spacing_m)],
-                     dtype=jnp.float32)
+    return jnp.array(
+        [col * float(pixel_spacing_m), row * float(pixel_spacing_m)], dtype=jnp.float32
+    )
 
 
 # ===========================================================================
 # Pearson r
 # ===========================================================================
+
 
 def pearson_r(a: np.ndarray, b: np.ndarray) -> float:
     """Pearson correlation coefficient between two 1-D arrays.
@@ -395,6 +405,7 @@ def spearman_r(a: np.ndarray, b: np.ndarray) -> float:
 # Chunked arrival-time prediction
 # ===========================================================================
 
+
 @eqx.filter_jit
 def _predict_chunk_jit(
     bound_metric: CovariateConditionedRanders,
@@ -421,6 +432,7 @@ def _predict_chunk_jit(
     Returns:
         Shape (C,) float64 arc lengths.
     """
+
     def _single(x_world: jax.Array) -> jax.Array:
         traj = solver.solve(bound_metric, source_world, x_world, n_steps=n_steps)
         path = traj.xs
@@ -479,6 +491,7 @@ def _predict_arrivals_chunked(
 # Per-fire training step
 # ===========================================================================
 
+
 def train_one_fire(
     metric: CovariateConditionedRanders,
     solver: AVBDSolver,
@@ -511,7 +524,7 @@ def train_one_fire(
     obs_world = jnp.asarray(
         _pixels_to_world(scenario.obs_pixels, scenario.pixel_spacing_m),
         dtype=jnp.float32,
-    )                                           # (K, 2)
+    )  # (K, 2)
     t_obs = jnp.asarray(scenario.obs_arrival_times, dtype=jnp.float32)  # (K,)
     source = _ignition_to_world(scenario.ignition_pixel, scenario.pixel_spacing_m)
     # alpha=0 (pure Pearson-r) is the safe default for one-off calls
@@ -532,6 +545,7 @@ def train_one_fire(
 # ===========================================================================
 # Per-fire evaluation
 # ===========================================================================
+
 
 def evaluate_fire(
     metric: CovariateConditionedRanders,
@@ -579,8 +593,13 @@ def evaluate_fire(
 
     n_burned = int(np.sum(scenario.burned_mask))
     if len(eval_pixels) == 0:
-        return dict(pearson_r=0.0, spearman_r=0.0, iou_50=0.0,
-                    eval_coverage=0.0, n_eval_pixels=0)
+        return dict(
+            pearson_r=0.0,
+            spearman_r=0.0,
+            iou_50=0.0,
+            eval_coverage=0.0,
+            n_eval_pixels=0,
+        )
 
     bound_metric = bind_scenario_to_metric(metric, scenario)
     bound_metric = bound_metric.precompute_metric_field()
@@ -601,9 +620,9 @@ def evaluate_fire(
         dtype=np.float32,
     )
 
-    r_pearson  = pearson_r(pred_arrivals, gt_arrival)
+    r_pearson = pearson_r(pred_arrivals, gt_arrival)
     r_spearman = spearman_r(pred_arrivals, gt_arrival)
-    coverage   = len(eval_pixels) / max(n_burned, 1)
+    coverage = len(eval_pixels) / max(n_burned, 1)
 
     # --- Calibrated IoU@50 (Gahtan-compatible) ----------------------------
     # Map arc-lengths to the GT time scale with a single post-hoc scalar
@@ -618,20 +637,20 @@ def evaluate_fire(
         p_valid = pred_arrivals[valid]
         g_valid = gt_arrival[valid]
         mean_pred = float(np.mean(p_valid))
-        mean_gt   = float(np.mean(g_valid))
+        mean_gt = float(np.mean(g_valid))
         s = mean_gt / max(mean_pred, 1e-8)  # post-hoc calibration scalar
 
         # Build full-raster prediction (H, W); default = 1.0 ("late")
         pred_raster = np.ones_like(scenario.arrival_times)
-        cal_values  = np.clip(s * pred_arrivals, 0.0, 1.0)
+        cal_values = np.clip(s * pred_arrivals, 0.0, 1.0)
         for (row, col), t in zip(eval_pixels, cal_values):
             pred_raster[int(row), int(col)] = float(t)
 
         burned = scenario.burned_mask
         pred_bin = (pred_raster <= 0.5) & burned
-        gt_bin   = (scenario.arrival_times <= 0.5) & burned
+        gt_bin = (scenario.arrival_times <= 0.5) & burned
         intersect = int(np.sum(pred_bin & gt_bin))
-        union     = int(np.sum(pred_bin | gt_bin))
+        union = int(np.sum(pred_bin | gt_bin))
         iou50 = float(intersect / max(union, 1))
     else:
         iou50 = 0.0
@@ -641,13 +660,14 @@ def evaluate_fire(
         spearman_r=r_spearman,
         iou_50=iou50,
         eval_coverage=coverage,
-        n_eval_pixels=int(len(eval_pixels)),
+        n_eval_pixels=len(eval_pixels),
     )
 
 
 # ===========================================================================
 # Validation pass (uses obs pixels for speed)
 # ===========================================================================
+
 
 def _val_pearson_r(
     metric: CovariateConditionedRanders,
@@ -681,6 +701,7 @@ def _val_pearson_r(
 # ===========================================================================
 # Per-scene training loop
 # ===========================================================================
+
 
 def train_scene(
     data_root: str,
@@ -729,9 +750,11 @@ def train_scene(
             f"  python experiments/wildfire/download_data.py --output_dir {data_root}"
         )
 
-    print(f"\n{'='*60}")
-    print(f"Scene {scene_id}  seed={seed}  wind={'yes' if use_wind else 'no (Riemannian)'}")
-    print(f"{'='*60}")
+    print(f"\n{'=' * 60}")
+    print(
+        f"Scene {scene_id}  seed={seed}  wind={'yes' if use_wind else 'no (Riemannian)'}"
+    )
+    print(f"{'=' * 60}")
 
     t_scene_start = time.time()
 
@@ -752,7 +775,8 @@ def train_scene(
                 weather_dir = os.path.join(data_root, scene_id, "Weather_Data")
                 if os.path.isdir(mask_dir):
                     event_ids = [
-                        d for d in sorted(os.listdir(mask_dir))
+                        d
+                        for d in sorted(os.listdir(mask_dir))
                         if os.path.isdir(os.path.join(mask_dir, d))
                         and os.path.exists(os.path.join(weather_dir, f"{d}.txt"))
                     ]
@@ -783,10 +807,12 @@ def train_scene(
     print("  Fitting SceneNormalizer on training fires...")
     n_workers = min(8, os.cpu_count() or 1)
     with ThreadPoolExecutor(max_workers=n_workers) as pool:
-        raw_train_for_norm = list(pool.map(
-            lambda p: loader.load_scenario(p[0], p[1]),
-            train_list[:20],
-        ))
+        raw_train_for_norm = list(
+            pool.map(
+                lambda p: loader.load_scenario(p[0], p[1]),
+                train_list[:20],
+            )
+        )
     normalizer = SceneNormalizer.fit(raw_train_for_norm)
 
     # Load all processed scenarios in parallel (I/O-bound: PIL + rasterio release GIL)
@@ -795,8 +821,12 @@ def train_scene(
     def _load_one(pair):
         sid, eid = pair
         return load_wildfire_scenario(
-            loader, sid, eid, normalizer,
-            k_train_obs=cfg["k_train_obs"], seed=seed,
+            loader,
+            sid,
+            eid,
+            normalizer,
+            k_train_obs=cfg["k_train_obs"],
+            seed=seed,
         )
 
     def _load(pairs):
@@ -805,8 +835,8 @@ def train_scene(
             return list(pool.map(_load_one, pairs))
 
     train_scenarios = _load(train_list)
-    val_scenarios   = _load(val_list)
-    test_scenarios  = _load(test_list)
+    val_scenarios = _load(val_list)
+    test_scenarios = _load(test_list)
     print(
         f"  Loaded {len(train_scenarios)} / {len(val_scenarios)} / "
         f"{len(test_scenarios)} train/val/test scenarios"
@@ -821,14 +851,17 @@ def train_scene(
     n_batches_per_epoch = max(1, len(train_scenarios) // cfg["batch_size_fires"])
     total_steps = cfg["n_epochs"] * n_batches_per_epoch
     warmup_steps = min(10 * n_batches_per_epoch, max(1, total_steps // 10))
-    lr_schedule = optax.join_schedules([
-        optax.linear_schedule(
-            init_value=1e-5, end_value=cfg["lr"], transition_steps=warmup_steps
-        ),
-        optax.cosine_decay_schedule(
-            init_value=cfg["lr"], decay_steps=max(1, total_steps - warmup_steps)
-        ),
-    ], boundaries=[warmup_steps])
+    lr_schedule = optax.join_schedules(
+        [
+            optax.linear_schedule(
+                init_value=1e-5, end_value=cfg["lr"], transition_steps=warmup_steps
+            ),
+            optax.cosine_decay_schedule(
+                init_value=cfg["lr"], decay_steps=max(1, total_steps - warmup_steps)
+            ),
+        ],
+        boundaries=[warmup_steps],
+    )
     optimizer = optax.chain(
         optax.clip_by_global_norm(1.0),  # guard against IFT gradient spikes
         optax.adam(lr_schedule),
@@ -860,7 +893,9 @@ def train_scene(
     opt_state = optimizer.init(eqx.filter(terrain_metric, eqx.is_inexact_array))
     metric = terrain_metric  # from here on, metric always carries terrain
     batched_step = make_batched_train_step(
-        terrain_metric, arrival_loss_obj, optimizer,
+        terrain_metric,
+        arrival_loss_obj,
+        optimizer,
         sequential=use_sequential_fires,
     )
 
@@ -868,25 +903,40 @@ def train_scene(
     # All fires in the scene share the same K (obs per fire) after stratified
     # sampling, so stacking is safe.
     K = cfg["k_train_obs"]
-    _obs_world_all = jnp.asarray(np.stack([
-        _pixels_to_world(sc.obs_pixels[:K], sc.pixel_spacing_m)
-        for sc in train_scenarios
-    ], axis=0), dtype=jnp.float32)   # (N_train, K, 2)
-    _obs_times_all = jnp.asarray(np.stack([
-        sc.obs_arrival_times[:K] for sc in train_scenarios
-    ], axis=0), dtype=jnp.float32)   # (N_train, K)
-    _sources_all = jnp.asarray(np.stack([
-        _ignition_to_world(sc.ignition_pixel, sc.pixel_spacing_m)
-        for sc in train_scenarios
-    ], axis=0), dtype=jnp.float32)   # (N_train, 2)
-    _weather_all = jnp.asarray(np.stack([
-        sc.weather_vec for sc in train_scenarios
-    ], axis=0), dtype=jnp.float32)   # (N_train, 4)
+    _obs_world_all = jnp.asarray(
+        np.stack(
+            [
+                _pixels_to_world(sc.obs_pixels[:K], sc.pixel_spacing_m)
+                for sc in train_scenarios
+            ],
+            axis=0,
+        ),
+        dtype=jnp.float32,
+    )  # (N_train, K, 2)
+    _obs_times_all = jnp.asarray(
+        np.stack([sc.obs_arrival_times[:K] for sc in train_scenarios], axis=0),
+        dtype=jnp.float32,
+    )  # (N_train, K)
+    _sources_all = jnp.asarray(
+        np.stack(
+            [
+                _ignition_to_world(sc.ignition_pixel, sc.pixel_spacing_m)
+                for sc in train_scenarios
+            ],
+            axis=0,
+        ),
+        dtype=jnp.float32,
+    )  # (N_train, 2)
+    _weather_all = jnp.asarray(
+        np.stack([sc.weather_vec for sc in train_scenarios], axis=0), dtype=jnp.float32
+    )  # (N_train, 4)
 
     B = cfg["batch_size_fires"]  # vmap batch size
-    print(f"  Batched training: B={B} fires/step, "
-          f"{n_batches_per_epoch} steps/epoch, "
-          f"vmap kernel size={B * K} obs-paths")
+    print(
+        f"  Batched training: B={B} fires/step, "
+        f"{n_batches_per_epoch} steps/epoch, "
+        f"vmap kernel size={B * K} obs-paths"
+    )
 
     for epoch in range(cfg["n_epochs"]):
         t_epoch = time.time()
@@ -906,10 +956,10 @@ def train_scene(
         for batch_start in range(0, len(perm) - B + 1, B):
             batch_idx = perm[batch_start : batch_start + B]
 
-            weather_b  = _weather_all[batch_idx]       # (B, 4)
-            source_b   = _sources_all[batch_idx]        # (B, 2)
-            obs_w_b    = _obs_world_all[batch_idx]      # (B, K, 2)
-            obs_t_b    = _obs_times_all[batch_idx]      # (B, K)
+            weather_b = _weather_all[batch_idx]  # (B, 4)
+            source_b = _sources_all[batch_idx]  # (B, 2)
+            obs_w_b = _obs_world_all[batch_idx]  # (B, K, 2)
+            obs_t_b = _obs_times_all[batch_idx]  # (B, K)
 
             metric, opt_state, loss_val = batched_step(
                 metric, opt_state, weather_b, source_b, obs_w_b, obs_t_b, alpha
@@ -930,7 +980,7 @@ def train_scene(
         val_r_history.append(mean_val_r)
 
         print(
-            f"  Epoch {epoch+1:3d}/{cfg['n_epochs']}: "
+            f"  Epoch {epoch + 1:3d}/{cfg['n_epochs']}: "
             f"loss={mean_loss:.5f}  val_r={mean_val_r:.4f}  "
             f"alpha={alpha:.2f}  "
             f"time={epoch_runtimes[-1]:.1f}s"
@@ -944,30 +994,36 @@ def train_scene(
         else:
             patience_counter += 1
             if patience_counter >= cfg["early_stopping_patience"]:
-                print(f"  Early stopping at epoch {epoch+1}  (best_loss={best_loss:.4f})")
+                print(
+                    f"  Early stopping at epoch {epoch + 1}  (best_loss={best_loss:.4f})"
+                )
                 break
 
     # Test evaluation — parallelise across fires (each is independent; JAX GIL is released)
-    print(f"\n  Evaluating on {len(test_scenarios)} test fires (dense, n_workers={n_workers})...")
-    test_rs: list       = [0.0] * len(test_scenarios)
-    test_sprs: list     = [0.0] * len(test_scenarios)
-    test_ious: list     = [0.0] * len(test_scenarios)
+    print(
+        f"\n  Evaluating on {len(test_scenarios)} test fires (dense, n_workers={n_workers})..."
+    )
+    test_rs: list = [0.0] * len(test_scenarios)
+    test_sprs: list = [0.0] * len(test_scenarios)
+    test_ious: list = [0.0] * len(test_scenarios)
     test_coverages: list = [0.0] * len(test_scenarios)
     with ThreadPoolExecutor(max_workers=n_workers) as pool:
-        futs = {pool.submit(evaluate_fire, best_metric, solver, sc, cfg): i
-                for i, sc in enumerate(test_scenarios)}
+        futs = {
+            pool.submit(evaluate_fire, best_metric, solver, sc, cfg): i
+            for i, sc in enumerate(test_scenarios)
+        }
         for fut in as_completed(futs):
             i = futs[fut]
             res = fut.result()
-            test_rs[i]        = res["pearson_r"]
-            test_sprs[i]      = res["spearman_r"]
-            test_ious[i]      = res["iou_50"]
+            test_rs[i] = res["pearson_r"]
+            test_sprs[i] = res["spearman_r"]
+            test_ious[i] = res["iou_50"]
             test_coverages[i] = res["eval_coverage"]
 
-    test_r_mean   = float(np.mean(test_rs))   if test_rs   else 0.0
-    test_r_std    = float(np.std(test_rs))    if test_rs   else 0.0
+    test_r_mean = float(np.mean(test_rs)) if test_rs else 0.0
+    test_r_std = float(np.std(test_rs)) if test_rs else 0.0
     test_spr_mean = float(np.mean(test_sprs)) if test_sprs else 0.0
-    test_iou50    = float(np.mean(test_ious)) if test_ious else 0.0
+    test_iou50 = float(np.mean(test_ious)) if test_ious else 0.0
     mean_coverage = float(np.mean(test_coverages)) if test_coverages else 0.0
     runtime_per_epoch = float(np.mean(epoch_runtimes)) if epoch_runtimes else 0.0
 
@@ -977,7 +1033,7 @@ def train_scene(
         f"    test Spearman r = {test_spr_mean:.4f}   (Gahtan cross-scene target ≈ 0.695)\n"
         f"    test IoU@50     = {test_iou50:.4f}   (coverage={mean_coverage:.1%})\n"
         f"    epoch runtime   = {runtime_per_epoch:.1f} s/epoch\n"
-        f"    total time      = {time.time()-t_scene_start:.1f} s"
+        f"    total time      = {time.time() - t_scene_start:.1f} s"
     )
 
     ckpt_dir = os.path.join(output_dir, "checkpoints")
@@ -1005,6 +1061,7 @@ def train_scene(
 # Multi-scene experiment runner
 # ===========================================================================
 
+
 def run_experiment(
     data_root: str,
     scene_ids: list,
@@ -1029,7 +1086,15 @@ def run_experiment(
 
     for scene_id in scene_ids:
         for seed in cfg["train_seeds"]:
-            result = train_scene(data_root, scene_id, cfg, seed, use_wind=use_wind, use_sequential_fires=use_sequential_fires, output_dir=output_dir)
+            result = train_scene(
+                data_root,
+                scene_id,
+                cfg,
+                seed,
+                use_wind=use_wind,
+                use_sequential_fires=use_sequential_fires,
+                output_dir=output_dir,
+            )
             if result is not None:
                 all_results.append(result)
 
@@ -1042,6 +1107,7 @@ def run_experiment(
 # ===========================================================================
 # Figures
 # ===========================================================================
+
 
 def _save_figures(results: list, output_dir: str, cfg: dict) -> None:
     """Generate and save Phase W1 publication figures.
@@ -1057,7 +1123,7 @@ def _save_figures(results: list, output_dir: str, cfg: dict) -> None:
     # ---- Per-scene correlation bar chart --------------------------------
     scene_ids = sorted({r["scene_id"] for r in results})
     r_means = []
-    r_stds  = []
+    r_stds = []
     for sid in scene_ids:
         vals = [r["test_pearson_r_mean"] for r in results if r["scene_id"] == sid]
         r_means.append(float(np.mean(vals)))
@@ -1066,10 +1132,16 @@ def _save_figures(results: list, output_dir: str, cfg: dict) -> None:
     fig, ax = plt.subplots(figsize=(max(6, len(scene_ids) * 0.8), 4))
     x = np.arange(len(scene_ids))
     ax.bar(x, r_means, yerr=r_stds, capsize=4, color="#4477AA", label="HAMTools W1")
-    ax.axhline(0.70, color="red", linestyle="--", linewidth=1.2,
-               label="Target (r=0.70)")
-    ax.axhline(0.824, color="orange", linestyle=":", linewidth=1.2,
-               label="Gahtan et al. mean (0.824)")
+    ax.axhline(
+        0.70, color="red", linestyle="--", linewidth=1.2, label="Target (r=0.70)"
+    )
+    ax.axhline(
+        0.824,
+        color="orange",
+        linestyle=":",
+        linewidth=1.2,
+        label="Gahtan et al. mean (0.824)",
+    )
     ax.set_xticks(x)
     ax.set_xticklabels(scene_ids, rotation=45, ha="right", fontsize=8)
     ax.set_ylabel("Pearson r (test)")
@@ -1078,7 +1150,9 @@ def _save_figures(results: list, output_dir: str, cfg: dict) -> None:
     ax.set_ylim(0, 1.05)
     plt.tight_layout()
     for ext in ("pdf", "png"):
-        fig.savefig(os.path.join(fig_dir, f"phaseW1_correlation_comparison.{ext}"), dpi=150)
+        fig.savefig(
+            os.path.join(fig_dir, f"phaseW1_correlation_comparison.{ext}"), dpi=150
+        )
     plt.close(fig)
 
     # ---- Loss convergence (first scene, first seed) ----------------------
@@ -1094,8 +1168,11 @@ def _save_figures(results: list, output_dir: str, cfg: dict) -> None:
         ax1.set_ylabel("Train loss (MSE)")
         ax1.set_title(f"Loss convergence — scene {first['scene_id']}")
 
-        ax2.plot(epochs[:len(first["val_r_history"])], first["val_r_history"],
-                 color="#CC4444")
+        ax2.plot(
+            epochs[: len(first["val_r_history"])],
+            first["val_r_history"],
+            color="#CC4444",
+        )
         ax2.set_xlabel("Epoch")
         ax2.set_ylabel("Val Pearson r")
         ax2.set_title(f"Validation r — scene {first['scene_id']}")
@@ -1107,8 +1184,8 @@ def _save_figures(results: list, output_dir: str, cfg: dict) -> None:
         plt.close(fig)
 
     # ---- Runtime vs. correlation scatter --------------------------------
-    rts  = [r["runtime_per_epoch_s"]    for r in results]
-    cors = [r["test_pearson_r_mean"]    for r in results]
+    rts = [r["runtime_per_epoch_s"] for r in results]
+    cors = [r["test_pearson_r_mean"] for r in results]
     fig, ax = plt.subplots(figsize=(5, 4))
     ax.scatter(rts, cors, s=40, alpha=0.7, color="#4477AA")
     ax.set_xlabel("Runtime (s / epoch)")
@@ -1116,9 +1193,7 @@ def _save_figures(results: list, output_dir: str, cfg: dict) -> None:
     ax.set_title("Phase W1 — Runtime–correlation tradeoff")
     plt.tight_layout()
     for ext in ("pdf", "png"):
-        fig.savefig(
-            os.path.join(fig_dir, f"phaseW1_runtime_tradeoff.{ext}"), dpi=150
-        )
+        fig.savefig(os.path.join(fig_dir, f"phaseW1_runtime_tradeoff.{ext}"), dpi=150)
     plt.close(fig)
 
     print(f"\n  Figures saved to {fig_dir}/")
@@ -1127,6 +1202,7 @@ def _save_figures(results: list, output_dir: str, cfg: dict) -> None:
 # ===========================================================================
 # Synthetic smoke test
 # ===========================================================================
+
 
 def _make_synthetic_scenario(seed: int = 0) -> WildfireScenario:
     """Generate a 20×20 synthetic fire scenario for pipeline validation.
@@ -1148,13 +1224,13 @@ def _make_synthetic_scenario(seed: int = 0) -> WildfireScenario:
 
     # Terrain rasters
     rows_g, cols_g = np.mgrid[0:H, 0:W]
-    elev_raster   = (100.0 + 10.0 * np.sin(np.pi * rows_g / H)).astype(np.float32)
-    slope_raster  = np.zeros((H, W), dtype=np.float32)
+    elev_raster = (100.0 + 10.0 * np.sin(np.pi * rows_g / H)).astype(np.float32)
+    slope_raster = np.zeros((H, W), dtype=np.float32)
     aspect_raster = np.zeros((H, W), dtype=np.float32)
     canopy_raster = np.zeros((H, W), dtype=np.float32)
     fuel_code_raster = np.full((H, W), 5, dtype=np.int32)
-    weather_vec   = np.zeros(4, dtype=np.float32)
-    origin_xy     = np.zeros(2, dtype=np.float32)
+    weather_vec = np.zeros(4, dtype=np.float32)
+    origin_xy = np.zeros(2, dtype=np.float32)
 
     # Arrival times
     dr = rows_g - ign_row
@@ -1166,15 +1242,15 @@ def _make_synthetic_scenario(seed: int = 0) -> WildfireScenario:
     if t_max < 1e-8:
         t_max = 1.0
     arrival_norm = arrival_hours / t_max
-    burned_mask  = np.ones((H, W), dtype=bool)
+    burned_mask = np.ones((H, W), dtype=bool)
 
     # Observation sampling (50 pixels, stratified)
     obs_pixels = stratified_sample_observations(arrival_hours, n_samples=50, seed=seed)
     obs_arrival_times = arrival_norm[obs_pixels[:, 0], obs_pixels[:, 1]]
 
     # Normaliser (fit on this single "scene")
-    elev_std  = float(elev_raster.std()) or 1.0
-    normalizer_elev  = (elev_raster  - elev_raster.mean())  / elev_std
+    elev_std = float(elev_raster.std()) or 1.0
+    normalizer_elev = (elev_raster - elev_raster.mean()) / elev_std
     normalizer_slope = slope_raster  # already zero
     normalizer_canopy = canopy_raster
 
@@ -1230,20 +1306,23 @@ def run_synthetic(cfg: dict, output_dir: str, use_wind: bool = True) -> dict:
 
     key = jax.random.PRNGKey(cfg["seed"])
     manifold = EuclideanSpace(2)
-    metric  = make_metric(cfg, manifold, key, use_wind=use_wind)
-    solver  = make_solver(cfg)
+    metric = make_metric(cfg, manifold, key, use_wind=use_wind)
+    solver = make_solver(cfg)
 
     n_epochs = cfg["n_epochs"]
     total_steps = max(n_epochs, 1)
     warmup_steps = min(10, max(1, total_steps // 10))
-    lr_schedule = optax.join_schedules([
-        optax.linear_schedule(
-            init_value=1e-5, end_value=cfg["lr"], transition_steps=warmup_steps
-        ),
-        optax.cosine_decay_schedule(
-            init_value=cfg["lr"], decay_steps=max(1, total_steps - warmup_steps)
-        ),
-    ], boundaries=[warmup_steps])
+    lr_schedule = optax.join_schedules(
+        [
+            optax.linear_schedule(
+                init_value=1e-5, end_value=cfg["lr"], transition_steps=warmup_steps
+            ),
+            optax.cosine_decay_schedule(
+                init_value=cfg["lr"], decay_steps=max(1, total_steps - warmup_steps)
+            ),
+        ],
+        boundaries=[warmup_steps],
+    )
     optimizer = optax.chain(
         optax.clip_by_global_norm(1.0),  # guard against IFT gradient spikes
         optax.adam(lr_schedule),
@@ -1255,7 +1334,7 @@ def run_synthetic(cfg: dict, output_dir: str, use_wind: bool = True) -> dict:
         _pixels_to_world(scenario.obs_pixels, scenario.pixel_spacing_m),
         dtype=jnp.float32,
     )
-    t_obs  = jnp.asarray(scenario.obs_arrival_times, dtype=jnp.float32)
+    t_obs = jnp.asarray(scenario.obs_arrival_times, dtype=jnp.float32)
     source = _ignition_to_world(scenario.ignition_pixel, scenario.pixel_spacing_m)
 
     train_loss_history: list = []
@@ -1281,17 +1360,19 @@ def run_synthetic(cfg: dict, output_dir: str, use_wind: bool = True) -> dict:
         metric = eqx.apply_updates(metric, updates)
 
         train_loss_history.append(float(loss_val))
-        print(f"  Epoch {epoch+1:3d}/{n_epochs}: loss={float(loss_val):.6f}  alpha={alpha:.2f}")
+        print(
+            f"  Epoch {epoch + 1:3d}/{n_epochs}: loss={float(loss_val):.6f}  alpha={alpha:.2f}"
+        )
 
     train_time = time.time() - t0
 
     # Evaluate on 200 random pixels
     rng = np.random.default_rng(cfg["seed"])
     H, W = scenario.arrival_times.shape
-    all_pixels = np.array(
-        [[r, c] for r in range(H) for c in range(W)], dtype=np.int64
+    all_pixels = np.array([[r, c] for r in range(H) for c in range(W)], dtype=np.int64)
+    eval_idx = rng.choice(
+        len(all_pixels), size=min(200, len(all_pixels)), replace=False
     )
-    eval_idx = rng.choice(len(all_pixels), size=min(200, len(all_pixels)), replace=False)
     eval_pixels = all_pixels[eval_idx]
 
     print(f"\n  Evaluating on {len(eval_pixels)} pixels...")
@@ -1310,11 +1391,16 @@ def run_synthetic(cfg: dict, output_dir: str, use_wind: bool = True) -> dict:
         os.makedirs(fig_dir, exist_ok=True)
 
         fig, ax = plt.subplots(figsize=(5, 3))
-        ax.plot(np.arange(1, len(train_loss_history) + 1), train_loss_history,
-                color="#4477AA")
+        ax.plot(
+            np.arange(1, len(train_loss_history) + 1),
+            train_loss_history,
+            color="#4477AA",
+        )
         ax.set_xlabel("Epoch")
         ax.set_ylabel("MSE loss")
-        ax.set_title(f"Synthetic smoke test — loss convergence  (r={result['pearson_r']:.3f})")
+        ax.set_title(
+            f"Synthetic smoke test — loss convergence  (r={result['pearson_r']:.3f})"
+        )
         plt.tight_layout()
         for ext in ("pdf", "png"):
             fig.savefig(os.path.join(fig_dir, f"phaseW1_synthetic_loss.{ext}"), dpi=150)
@@ -1346,38 +1432,50 @@ def run_synthetic(cfg: dict, output_dir: str, use_wind: bool = True) -> dict:
 # CLI
 # ===========================================================================
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Phase W1: CovariateConditionedRanders training on Sim2Real-Fire",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "--data_root", type=str,
-        default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "sim2real_fire"),
+        "--data_root",
+        type=str,
+        default=os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "data", "sim2real_fire"
+        ),
         help="Path to Sim2Real-Fire dataset root directory.",
     )
     parser.add_argument(
-        "--scenes", nargs="+", default=None,
+        "--scenes",
+        nargs="+",
+        default=None,
         metavar="SCENE_ID",
         help="Scene IDs to train on (space-separated). Defaults to all scenes found in data_root.",
     )
     parser.add_argument(
-        "--output_dir", type=str, default="results/phaseW1",
+        "--output_dir",
+        type=str,
+        default="results/phaseW1",
         help="Output directory for figures and result logs.",
     )
     parser.add_argument(
-        "--quick", action="store_true",
+        "--quick",
+        action="store_true",
         help=(
             "Reduced config (5 epochs, 15 AVBD steps, 50 obs) "
             "to verify the pipeline without long runtime."
         ),
     )
     parser.add_argument(
-        "--no_wind", action="store_true",
+        "--no_wind",
+        action="store_true",
         help="Riemannian ablation: disable the Randers drift term (b=0).",
     )
     parser.add_argument(
-        "--batch_fires", type=int, default=None,
+        "--batch_fires",
+        type=int,
+        default=None,
         metavar="B",
         help=(
             "Number of fires per vmapped training step (default: from config, 16). "
@@ -1386,7 +1484,8 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--sequential", action="store_true",
+        "--sequential",
+        action="store_true",
         help=(
             "Use jax.lax.map instead of jax.vmap for the per-fire training loop. "
             "Reduces peak memory from O(B×grid) to O(grid) — required on "
@@ -1395,24 +1494,31 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--seeds", nargs="+", type=int, default=None,
+        "--seeds",
+        nargs="+",
+        type=int,
+        default=None,
         metavar="SEED",
         help="Override training seeds (default: from config).",
     )
     parser.add_argument(
-        "--synthetic", action="store_true",
+        "--synthetic",
+        action="store_true",
         help=(
             "Run the synthetic smoke test on a generated 20×20 grid — "
             "no real dataset required.  Combine with --quick for fast CI."
         ),
     )
     parser.add_argument(
-        "--device", default="cpu", choices=["cpu", "gpu", "tpu"],
+        "--device",
+        default="cpu",
+        choices=["cpu", "gpu", "tpu"],
         help="JAX device to use (default: cpu).",
     )
 
     args = parser.parse_args()
     from ham.utils import configure_device
+
     configure_device(args.device)
     cfg = get_config(quick=args.quick)
     use_wind = not args.no_wind
@@ -1434,9 +1540,9 @@ def main() -> None:
     scene_ids = args.scenes
     if scene_ids is None:
         scene_ids = [
-            d for d in sorted(os.listdir(args.data_root))
-            if os.path.isdir(os.path.join(args.data_root, d))
-            and not d.startswith(".")
+            d
+            for d in sorted(os.listdir(args.data_root))
+            if os.path.isdir(os.path.join(args.data_root, d)) and not d.startswith(".")
         ]
         if not scene_ids:
             print(f"No scene folders found in {args.data_root}")
@@ -1452,17 +1558,17 @@ def main() -> None:
     )
 
     if all_results:
-        r_vals   = [r["test_pearson_r_mean"]  for r in all_results]
+        r_vals = [r["test_pearson_r_mean"] for r in all_results]
         spr_vals = [r.get("test_spearman_r_mean", 0.0) for r in all_results]
-        iou_vals = [r["test_iou50"]            for r in all_results]
+        iou_vals = [r["test_iou50"] for r in all_results]
         cov_vals = [r.get("eval_coverage", 1.0) for r in all_results]
         print(
-            f"\n{'='*60}\n"
+            f"\n{'=' * 60}\n"
             f"  AGGREGATE RESULTS  ({len(all_results)} runs)\n"
             f"  Mean Pearson r  : {np.mean(r_vals):.4f} ± {np.std(r_vals):.4f}\n"
             f"  Mean Spearman r : {np.mean(spr_vals):.4f}   (Gahtan target ≈ 0.695)\n"
             f"  Mean IoU@50     : {np.mean(iou_vals):.4f}   (coverage={np.mean(cov_vals):.1%})\n"
-            f"{'='*60}"
+            f"{'=' * 60}"
         )
     else:
         print("  No results collected — check data root and scene IDs.")

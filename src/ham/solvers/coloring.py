@@ -16,8 +16,8 @@ Reference:
 See also: spec/ARCH_SPEC.md § 4.2.
 """
 
+
 import jax.numpy as jnp
-from typing import List, Tuple, Dict, Set
 
 __all__ = [
     "chain_coloring",
@@ -26,7 +26,7 @@ __all__ = [
 ]
 
 
-def chain_coloring(n_inner: int) -> Tuple[jnp.ndarray, jnp.ndarray]:
+def chain_coloring(n_inner: int) -> tuple[jnp.ndarray, jnp.ndarray]:
     """2-color a 1D chain of inner path vertices.
 
     For a path graph with vertices at positions 1..n_inner in the full
@@ -55,9 +55,9 @@ def chain_coloring(n_inner: int) -> Tuple[jnp.ndarray, jnp.ndarray]:
 
 
 def greedy_coloring(
-    adjacency: Dict[int, Set[int]],
+    adjacency: dict[int, set[int]],
     n_vertices: int,
-) -> List[List[int]]:
+) -> list[list[int]]:
     """Greedy graph coloring for general adjacency structures.
 
     Assigns colors to vertices such that no two adjacent vertices share
@@ -78,7 +78,7 @@ def greedy_coloring(
 
     for v in range(n_vertices):
         # Collect colors used by neighbors
-        neighbor_colors: Set[int] = set()
+        neighbor_colors: set[int] = set()
         for u in adjacency.get(v, set()):
             if colors[u] >= 0:
                 neighbor_colors.add(colors[u])
@@ -91,7 +91,7 @@ def greedy_coloring(
         num_colors = max(num_colors, c + 1)
 
     # Group vertices by color
-    groups: List[List[int]] = [[] for _ in range(num_colors)]
+    groups: list[list[int]] = [[] for _ in range(num_colors)]
     for v, c in enumerate(colors):
         groups[c].append(v)
 
@@ -101,7 +101,7 @@ def greedy_coloring(
 def mesh_vertex_coloring(
     faces: jnp.ndarray,
     n_vertices: int,
-) -> List[jnp.ndarray]:
+) -> list[jnp.ndarray]:
     """Color the vertices of a triangular mesh.
 
     Builds the vertex adjacency graph from the face array and applies
@@ -117,8 +117,8 @@ def mesh_vertex_coloring(
         indices assigned to that color.
     """
     # Build adjacency from faces
-    adjacency: Dict[int, Set[int]] = {v: set() for v in range(n_vertices)}
-    faces_np = faces if hasattr(faces, '__iter__') else faces.tolist()
+    adjacency: dict[int, set[int]] = {v: set() for v in range(n_vertices)}
+    faces_np = faces if hasattr(faces, "__iter__") else faces.tolist()
 
     for face in faces_np:
         f = [int(face[0]), int(face[1]), int(face[2])]
