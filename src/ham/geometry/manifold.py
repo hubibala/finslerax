@@ -213,6 +213,49 @@ class Manifold(eqx.Module, ABC):
 
         return v * scale
 
+    def tangent_dot(self, x: jax.Array, u: jax.Array, v: jax.Array) -> jax.Array:
+        """Ambient inner product of two tangent vectors at ``x``.
+
+        Default implementation is the Euclidean dot product, which is the
+        correct *induced* tangent-space metric for every manifold embedded as a
+        Riemannian submanifold of Euclidean R^N (Sphere, Torus, Paraboloid,
+        TriangularMesh, EuclideanSpace).  Manifolds whose ambient space carries
+        an indefinite metric (e.g. :class:`~ham.geometry.manifolds.hyperboloid.Hyperboloid`,
+        which lives in Minkowski space) must override this.
+
+        Providing this on the ABC removes the need for downstream code (losses,
+        VAE) to reach into manifold-private helpers such as ``_minkowski_dot``,
+        which would raise ``AttributeError`` on non-hyperboloid manifolds
+        (review finding W-MK).
+
+        Args:
+            x: Base point on M (unused for position-independent ambient metrics,
+                but kept in the signature for generality).
+            u: First tangent vector, shape ``(..., ambient_dim)``.
+            v: Second tangent vector, shape ``(..., ambient_dim)``.
+
+        Returns:
+            Scalar inner product ``<u, v>``, shape ``(...,)``.
+        """
+        return jnp.sum(u * v, axis=-1)
+
+    def tangent_norm(self, x: jax.Array, v: jax.Array) -> jax.Array:
+        """Norm of a tangent vector at ``x`` induced by :meth:`tangent_dot`.
+
+        Computed as ``sqrt(max(<v, v>, 0))`` so it stays real even when the
+        ambient metric is indefinite and round-off pushes the squared norm
+        slightly negative.  Override alongside :meth:`tangent_dot` if a manifold
+        needs bespoke gradient-safe handling.
+
+        Args:
+            x: Base point on M.
+            v: Tangent vector, shape ``(..., ambient_dim)``.
+
+        Returns:
+            Scalar norm, shape ``(...,)``.
+        """
+        return jnp.sqrt(jnp.maximum(self.tangent_dot(x, v, v), 0.0))
+
     def parallel_transport(self, x: jax.Array, y: jax.Array, v: jax.Array) -> jax.Array:
         """
         Parallel transports vector v from T_x M to T_y M along the geodesic x -> y.

@@ -30,10 +30,13 @@ class DiscreteRanders(AsymmetricMetric):
         W_raw = jnp.dot(weights, self.face_winds)
         w_norm = safe_norm(W_raw)
 
+        # Smooth causal squash applied for ALL wind magnitudes -- see the W-RAND
+        # note in ham.geometry.zoo.randers.Randers.zermelo_data.  The previous
+        # ``jnp.where(w_norm < 0.5, ...)`` gate left a C0 jump at the boundary;
+        # applying ``max_speed * tanh(w_norm)/w_norm`` everywhere keeps F in C^1
+        # and guarantees ||W||_H = max_speed*tanh(w_norm) < 1.
         max_speed = 1.0 - self.epsilon
-        scale = jnp.where(
-            w_norm < 0.5, 1.0, (max_speed * jnp.tanh(w_norm)) / (w_norm + GRAD_EPS)
-        )
+        scale = (max_speed * jnp.tanh(w_norm)) / (w_norm + GRAD_EPS)
         W = W_raw * scale
         lam = 1.0 - (w_norm * scale) ** 2
 

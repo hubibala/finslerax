@@ -4,9 +4,15 @@ Phase W1 Training Script: CovariateConditionedRanders on Sim2Real-Fire (Flat Gri
 ===================================================================================
 
 Trains a :class:`~ham.models.wildfire.CovariateConditionedRanders` Finsler metric
-on the Sim2Real-Fire dataset (Gahtan et al., 2026).  The AVBD solver computes
-geodesics from the ignition point to observed fire-front pixels; the metric is
-updated so geodesic arc lengths match normalised pixel arrival times.
+on the Sim2Real-Fire dataset (Gahtan et al., 2026).  The fast-sweeping eikonal
+solver computes the dense arrival-time field from the ignition point; the
+metric is updated so predicted arrival times match the observed (normalised)
+fire-front rasters.
+
+Coordinate convention: world ``x = col * pixel_spacing``, ``y = row *
+pixel_spacing``; the eikonal solver's array axis 0 is the world x-axis, so all
+dense solves go through :func:`solve_arrival_raster`, which calls the solver
+with shape ``(W, H)`` and transposes back to raster ``(H, W)`` layout.
 
 **Scientific question (Phase W1):**
     Can the Lagrangian covariate-conditioned Randers approach achieve per-scene
@@ -30,16 +36,16 @@ updated so geodesic arc lengths match normalised pixel arrival times.
 Usage::
 
     # Synthetic smoke-test (no dataset required):
-    python examples/experiment_wildfire_flat.py --synthetic --quick
+    python experiments/wildfire/eikonal/experiment_eikonal_flat.py --synthetic --quick
 
     # Real data:
-    python examples/experiment_wildfire_flat.py \\
+    python experiments/wildfire/eikonal/experiment_eikonal_flat.py \\
         --data_root /data/sim2real_fire \\
         --scenes 0014_00426 0023_00512 \\
         --output_dir results/phaseW1
 
     # Without wind drift (Riemannian ablation):
-    python examples/experiment_wildfire_flat.py --synthetic --quick --no_wind
+    python experiments/wildfire/eikonal/experiment_eikonal_flat.py --synthetic --quick --no_wind
 """
 
 import argparse
@@ -116,6 +122,10 @@ def get_config(quick: bool = False) -> dict:
         "eikonal_iters": 50,
         "lambda_tv": 0.005,  # single TV weight, matches Gahtan lambda_G=lambda_B=0.005
         "k_train_obs": 500,  # obs pixels sampled per fire by the loader (for val_pixels field)
+        # Curriculum for the sparse loss (synthetic smoke test): Pearson-only
+        # warmup, then ramp in the scale-aware relative-MSE term.
+        "curriculum_warmup_epochs": 10 if quick else 20,
+        "curriculum_ramp_epochs": 30 if quick else 60,
         "train_ratio": 0.70,
         "val_ratio": 0.15,
         "seed": 42,
@@ -229,13 +239,36 @@ def _bilinear_interp_point(grid: jax.Array, pt_pixel: jax.Array) -> jax.Array:
     )
 
 
+def solve_arrival_raster(
+    bound_metric,
+    solver: EikonalSolver,
+    source_world: jax.Array,
+    grid_shape_hw: tuple,
+    pixel_spacing_m: float,
+) -> jax.Array:
+    """Dense eikonal solve returning the arrival raster in ``(H, W)`` [row, col] layout.
+
+    The eikonal solver's array axis 0 is the world **x**-axis, and the data
+    convention is ``x = col * spacing``, ``y = row * spacing`` — so the solver
+    must be called with shape ``(W, H)`` / extent ``((W-1)s, (H-1)s)`` and the
+    result transposed back to raster layout. This mirrors
+    ``evaluate_real_fire.py`` and ``evaluate_eikonal_generalization.py``;
+    calling with ``(H, W)`` un-transposed silently compares transposed rasters
+    on square grids.
+    """
+    H, W = grid_shape_hw
+    s = float(pixel_spacing_m)
+    extent = (0.0, (W - 1) * s, 0.0, (H - 1) * s)
+    T, _, _ = solver.solve(bound_metric, source_world, extent, (W, H))
+    return T.T
+
+
 def compute_dense_gahtan_loss(
     bound_metric,
     solver: EikonalSolver,
     source_world,
     arrival_times_gt,
-    grid_extent: tuple,
-    grid_shape: tuple,
+    pixel_spacing_m: float,
 ):
     """Computes dense MSE loss and TV regularization on the Randers-Finsler metric.
 
@@ -243,8 +276,8 @@ def compute_dense_gahtan_loss(
     - Data Loss: MSE = 0.5 * mean( (T_pred - T_gt) ** 2 ) over valid pixels.
     - Regularisation: TV on G and B parameters.
     """
-    t_pred_dense, _, _ = solver.solve(
-        bound_metric, source_world, grid_extent, grid_shape
+    t_pred_dense = solve_arrival_raster(
+        bound_metric, solver, source_world, arrival_times_gt.shape, pixel_spacing_m
     )
 
     # Valid mask (where GT is finite and pred converged)
@@ -266,12 +299,10 @@ def compute_dense_gahtan_loss(
 
 
 def make_batched_train_step(
-    terrain_metric: CovariateConditionedRanders,
     solver: EikonalSolver,
     optimizer,
-    grid_extent: tuple,
-    grid_shape: tuple,
     pixel_spacing_m: float,
+    lambda_tv: float,
     sequential: bool = False,
 ):
     """Return a JIT-compiled training step over a batch of fires.
@@ -290,9 +321,9 @@ def make_batched_train_step(
                 w, s, gt = args
                 bound = m.bind_weather(w).precompute_metric_field()
                 data_l, tv_l = compute_dense_gahtan_loss(
-                    bound, solver, s, gt, grid_extent, grid_shape
+                    bound, solver, s, gt, pixel_spacing_m
                 )
-                return data_l + 0.005 * tv_l
+                return data_l + lambda_tv * tv_l
 
             stacked = (weather_batch, source_batch, arrival_times_gt_batch)
             if sequential:
@@ -432,12 +463,13 @@ def _predict_arrivals_dense(
     bound_metric: CovariateConditionedRanders,
     solver: EikonalSolver,
     source_world: jax.Array,
-    grid_extent: tuple,
-    grid_shape: tuple,
+    grid_shape_hw: tuple,
+    pixel_spacing_m: float,
 ) -> jax.Array:
-    """JIT-compiled dense arc-length prediction over the grid."""
-    t_pred, _, _ = solver.solve(bound_metric, source_world, grid_extent, grid_shape)
-    return t_pred
+    """JIT-compiled dense arrival prediction, ``(H, W)`` [row, col] layout."""
+    return solve_arrival_raster(
+        bound_metric, solver, source_world, grid_shape_hw, pixel_spacing_m
+    )
 
 
 def _predict_arrivals_eval(
@@ -446,8 +478,7 @@ def _predict_arrivals_eval(
     source_world: jax.Array,
     eval_pixels: np.ndarray,
     pixel_spacing_m: float,
-    grid_extent: tuple,
-    grid_shape: tuple,
+    grid_shape_hw: tuple,
 ) -> np.ndarray:
     """Predict geodesic arc lengths for *eval_pixels* by querying the dense grid.
 
@@ -457,15 +488,16 @@ def _predict_arrivals_eval(
         source_world:    Ignition world coordinate, shape (2,).
         eval_pixels:     Shape (N, 2) int — ``[row, col]`` pairs.
         pixel_spacing_m: Metres per pixel.
+        grid_shape_hw:   Raster shape ``(H, W)``.
 
     Returns:
-        Shape (N,) float64 — predicted arrival arc lengths.
+        Shape (N,) float32 — predicted arrival arc lengths.
     """
     t_pred_dense = _predict_arrivals_dense(
-        bound_metric, solver, source_world, grid_extent, grid_shape
+        bound_metric, solver, source_world, grid_shape_hw, pixel_spacing_m
     )
 
-    # We can just extract exactly at the integer pixels:
+    # Dense raster is in [row, col] layout — extract at the integer pixels:
     rows = eval_pixels[:, 0]
     cols = eval_pixels[:, 1]
     pred = np.array(t_pred_dense)[rows, cols]
@@ -474,54 +506,66 @@ def _predict_arrivals_eval(
 
 
 # ===========================================================================
-# Per-fire training step
+# Sparse arrival-time loss (used by the synthetic smoke test)
 # ===========================================================================
 
 
-def train_one_fire(
-    metric: CovariateConditionedRanders,
+def compute_sparse_eikonal_loss(
+    bound_metric,
     solver: EikonalSolver,
-    scenario: WildfireScenario,
-    cfg: dict,
-    opt_state,
-    optimizer,
-    key: jax.Array,
-):
-    obs_world = jnp.asarray(
-        _pixels_to_world(scenario.obs_pixels, scenario.pixel_spacing_m),
-        dtype=jnp.float32,
-    )  # (K, 2)
-    t_obs = jnp.asarray(scenario.obs_arrival_times, dtype=jnp.float32)  # (K,)
-    source = _ignition_to_world(scenario.ignition_pixel, scenario.pixel_spacing_m)
-    alpha = jnp.asarray(0.0, dtype=jnp.float32)
-    grid_shape = scenario.arrival_times.shape
-    grid_extent = (
-        0.0,
-        grid_shape[1] * scenario.pixel_spacing_m,
-        0.0,
-        grid_shape[0] * scenario.pixel_spacing_m,
+    source_world: jax.Array,
+    obs_pixels: jax.Array,
+    t_obs: jax.Array,
+    alpha: jax.Array,
+    grid_shape_hw: tuple,
+    pixel_spacing_m: float,
+) -> jax.Array:
+    """Sparse arrival-time loss: dense eikonal solve gathered at observed pixels.
+
+    Curriculum blend matching :class:`ham.training.losses.ArrivalTimeLoss`:
+        L = (1 - alpha) * (1 - Pearson_r) + alpha * relative MSE.
+    Pearson-r is scale-invariant (predictions are arc lengths in metres while
+    ``t_obs`` is normalised to [0, 1]); the relative-MSE term ramps in once
+    the metric's overall speed scale has had time to adapt.
+
+    Args:
+        bound_metric:    Fully bound metric.
+        solver:          Eikonal solver.
+        source_world:    Ignition world coordinate, shape (2,).
+        obs_pixels:      (K, 2) int ``[row, col]`` observation pixels.
+        t_obs:           (K,) observed (normalised) arrival times.
+        alpha:           Curriculum coefficient in [0, 1].
+        grid_shape_hw:   Raster shape ``(H, W)``.
+        pixel_spacing_m: Metres per pixel.
+
+    Returns:
+        Scalar loss.
+    """
+    t_dense = solve_arrival_raster(
+        bound_metric, solver, source_world, grid_shape_hw, pixel_spacing_m
     )
+    t_pred = t_dense[obs_pixels[:, 0], obs_pixels[:, 1]]  # (K,)
 
-    @eqx.filter_jit
-    def _loss(m: CovariateConditionedRanders) -> jax.Array:
-        bound = bind_scenario_to_metric(m, scenario)
-        bound = bound.precompute_metric_field()
-        return compute_sparse_eikonal_loss(  # type: ignore[name-defined]
-            bound,
-            solver,
-            source,
-            obs_world,
-            t_obs,
-            alpha,
-            grid_extent,
-            grid_shape,
-            scenario.pixel_spacing_m,
-        )
+    valid = jnp.isfinite(t_obs) & (t_pred < 1e5)
+    n_valid = jnp.maximum(jnp.sum(valid), 1)
 
-    loss_val, grads = eqx.filter_value_and_grad(_loss)(metric)
-    updates, new_opt_state = optimizer.update(grads, opt_state, metric)
-    new_metric = eqx.apply_updates(metric, updates)
-    return new_metric, new_opt_state, float(loss_val)
+    tp = jnp.where(valid, t_pred, 0.0)
+    to = jnp.where(valid, t_obs, 0.0)
+
+    # Pearson-r component (scale & shift invariant)
+    mu_p = jnp.sum(tp) / n_valid
+    mu_o = jnp.sum(to) / n_valid
+    dp = jnp.where(valid, tp - mu_p, 0.0)
+    do = jnp.where(valid, to - mu_o, 0.0)
+    num = jnp.sum(dp * do)
+    denom = jnp.sqrt(jnp.sum(dp**2) * jnp.sum(do**2) + 1e-8)
+    l_pearson = 1.0 - num / denom
+
+    # Relative MSE component (scale-aware)
+    t_scale = jnp.maximum(jnp.max(jnp.abs(to)), 1e-6)
+    l_relmse = jnp.sum(jnp.where(valid, ((tp - to) / t_scale) ** 2, 0.0)) / n_valid
+
+    return (1.0 - alpha) * l_pearson + alpha * l_relmse
 
 
 # ===========================================================================
@@ -555,9 +599,9 @@ def evaluate_fire(
 
     Args:
         metric:      Trained metric (unbound; scene is bound internally).
-        solver:      AVBD solver.
+        solver:      Eikonal solver.
         scenario:    Fire scenario providing GT arrival times.
-        cfg:         Configuration dict (provides ``avbd_n_steps``).
+        cfg:         Configuration dict (``quick`` limits eval pixel count).
         eval_pixels: Shape (N, 2) int ``[row, col]`` pixels to evaluate.
             If None, all burned pixels in the scenario are used.
 
@@ -587,22 +631,13 @@ def evaluate_fire(
     bound_metric = bound_metric.precompute_metric_field()
     source = _ignition_to_world(scenario.ignition_pixel, scenario.pixel_spacing_m)
 
-    grid_shape = scenario.arrival_times.shape
-    grid_extent = (
-        0.0,
-        grid_shape[1] * scenario.pixel_spacing_m,
-        0.0,
-        grid_shape[0] * scenario.pixel_spacing_m,
-    )
-
     pred_arrivals = _predict_arrivals_eval(
         bound_metric,
         solver,
         source,
         eval_pixels,
         scenario.pixel_spacing_m,
-        grid_extent,
-        grid_shape,
+        scenario.arrival_times.shape,
     )
 
     gt_arrival = np.array(
@@ -676,16 +711,10 @@ def _val_metrics(
     bound_metric = bound_metric.precompute_metric_field()
     source = _ignition_to_world(scenario.ignition_pixel, scenario.pixel_spacing_m)
 
-    grid_shape = gt_full.shape
-    grid_extent = (
-        0.0,
-        grid_shape[1] * scenario.pixel_spacing_m,
-        0.0,
-        grid_shape[0] * scenario.pixel_spacing_m,
-    )
-
     pred_dense = np.array(
-        _predict_arrivals_dense(bound_metric, solver, source, grid_extent, grid_shape),
+        _predict_arrivals_dense(
+            bound_metric, solver, source, gt_full.shape, scenario.pixel_spacing_m
+        ),
         dtype=np.float32,
     )  # (H, W)
 
@@ -900,20 +929,12 @@ def train_scene(
     opt_state = optimizer.init(eqx.filter(terrain_metric, eqx.is_inexact_array))
     metric = terrain_metric  # from here on, metric always carries terrain
     grid_shape = train_scenarios[0].arrival_times.shape
-    grid_extent = (
-        0.0,
-        grid_shape[1] * train_scenarios[0].pixel_spacing_m,
-        0.0,
-        grid_shape[0] * train_scenarios[0].pixel_spacing_m,
-    )
 
     batched_step = make_batched_train_step(
-        terrain_metric,
         solver,
         optimizer,
-        grid_extent=grid_extent,
-        grid_shape=grid_shape,
         pixel_spacing_m=train_scenarios[0].pixel_spacing_m,
+        lambda_tv=cfg["lambda_tv"],
         sequential=use_sequential_fires,
     )
 
@@ -1358,10 +1379,7 @@ def run_synthetic(cfg: dict, output_dir: str, use_wind: bool = True) -> dict:
     )
     opt_state = optimizer.init(eqx.filter(metric, eqx.is_array))
 
-    obs_world = jnp.asarray(
-        _pixels_to_world(scenario.obs_pixels, scenario.pixel_spacing_m),
-        dtype=jnp.float32,
-    )
+    obs_pixels = jnp.asarray(scenario.obs_pixels, dtype=jnp.int32)
     t_obs = jnp.asarray(scenario.obs_arrival_times, dtype=jnp.float32)
     source = _ignition_to_world(scenario.ignition_pixel, scenario.pixel_spacing_m)
 
@@ -1381,22 +1399,14 @@ def run_synthetic(cfg: dict, output_dir: str, use_wind: bool = True) -> dict:
         def _loss(m):
             bound = bind_scenario_to_metric(m, scenario)
             bound = bound.precompute_metric_field()
-            grid_shape = scenario.arrival_times.shape
-            grid_extent = (
-                0.0,
-                grid_shape[1] * scenario.pixel_spacing_m,
-                0.0,
-                grid_shape[0] * scenario.pixel_spacing_m,
-            )
-            return compute_sparse_eikonal_loss(  # type: ignore[name-defined]
+            return compute_sparse_eikonal_loss(
                 bound,
                 solver,
                 source,
-                obs_world,
+                obs_pixels,
                 t_obs,
                 alpha,
-                grid_extent,
-                grid_shape,
+                scenario.arrival_times.shape,
                 scenario.pixel_spacing_m,
             )
 

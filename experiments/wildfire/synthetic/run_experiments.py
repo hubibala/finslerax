@@ -57,6 +57,7 @@ def get_all_experiments() -> Dict[str, List]:
         A7_SpatiallyVaryingMetric,
         A8_MultiSource,
         A9_IterationComplexity,
+        A10_EikonalVsAVBD,
     )
 
     experiments["A"] = [
@@ -69,6 +70,7 @@ def get_all_experiments() -> Dict[str, List]:
         ("A7", A7_SpatiallyVaryingMetric, {}, {"N": 100}),
         ("A8", A8_MultiSource, {}, {"N": 100}),
         ("A9", A9_IterationComplexity, {}, {"grid_sizes": [50, 100, 200]}),
+        ("A10", A10_EikonalVsAVBD, {}, {"N": 50}),
     ]
 
     # Category B: Gradient Verification
@@ -104,6 +106,7 @@ def get_all_experiments() -> Dict[str, List]:
         C8_ObservationDensity,
         C9_NoiseRobustness,
         C10_MultipleSources,
+        C11_IdentifiabilityAnalysis,
     )
 
     experiments["C"] = [
@@ -117,6 +120,7 @@ def get_all_experiments() -> Dict[str, List]:
         ("C8", C8_ObservationDensity, {}, {"N": 30, "n_iter": 100}),
         ("C9", C9_NoiseRobustness, {}, {"N": 30, "n_iter": 100}),
         ("C10", C10_MultipleSources, {}, {"N": 30, "n_iter": 100}),
+        ("C11", C11_IdentifiabilityAnalysis, {}, {"N": 30, "n_iter": 150, "n_seeds": 3}),
     ]
 
     # Category D: Synthetic Wildfire
@@ -141,6 +145,7 @@ def get_all_experiments() -> Dict[str, List]:
     # Category E: Comparisons
     from experiments.wildfire.synthetic.exp_E_comparisons import (
         E1_SolverForwardRuntime,
+        E2_AccuracyComparison,
         E3_RegularizationStrategies,
         E4_OptimizationMethods,
         E5_Scalability,
@@ -148,6 +153,7 @@ def get_all_experiments() -> Dict[str, List]:
 
     experiments["E"] = [
         ("E1", E1_SolverForwardRuntime, {}, {"grid_sizes": [20, 30, 40]}),
+        ("E2", E2_AccuracyComparison, {}, {"grid_sizes": [20, 40]}),
         ("E3", E3_RegularizationStrategies, {}, {"N": 30, "n_iter": 100}),
         ("E4", E4_OptimizationMethods, {}, {"N": 30, "n_iter": 100}),
         ("E5", E5_Scalability, {}, {"grid_sizes": [20, 40, 60]}),
@@ -343,6 +349,11 @@ def main():
     parser.add_argument(
         "--quick", "-q", action="store_true", help="Quick mode with smaller grids"
     )
+    parser.add_argument(
+        "--x64",
+        action="store_true",
+        help="Enable float64 (paper-grade gradient-check tolerances, ~2x slower)",
+    )
     parser.add_argument("--no-save", action="store_true", help="Do not save results")
     parser.add_argument("--no-viz", action="store_true", help="Do not generate figures")
     parser.add_argument(
@@ -351,6 +362,12 @@ def main():
     parser.add_argument("--quiet", action="store_true", help="Minimal output")
 
     args = parser.parse_args()
+
+    if args.x64:
+        # Must be set before any JAX computation is traced.
+        import jax
+
+        jax.config.update("jax_enable_x64", True)
 
     if args.list:
         list_experiments()

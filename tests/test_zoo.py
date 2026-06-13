@@ -78,11 +78,12 @@ class TestRanders(unittest.TestCase):
         self.key = jax.random.PRNGKey(0)
 
     def test_randers_analytical_match(self):
-        # h_net returns the metric tensor H directly; Randers uses it as-is.
-        # With H = I, W = [-0.1, 0], v = [1, 0]:
-        #   w_norm_sq = 0.01, lambda = 1 - 0.01 = 0.99
-        #   disc = 0.99 * 1 + 0.01 = 1.0
-        #   cost = (sqrt(1.0) - (-0.1)) / 0.99 = 1.1 / 0.99
+        # Verifies metric_fn evaluates the Zermelo-Randers discriminant form
+        # consistently with the metric's OWN (H, W, lambda).  We read W back from
+        # zermelo_data rather than assuming W == raw w_net output: the causal
+        # squash (smooth max_speed*tanh(|W|)/|W|, applied at all magnitudes since
+        # the W-RAND fix) contracts the raw wind slightly, so the analytical
+        # reference must use the squashed wind to be exact.
         def h_net(x): return jnp.eye(2)
         def w_net(x): return jnp.array([-0.1, 0.0])
         metric = Randers(self.manifold, h_net, w_net)
@@ -91,11 +92,10 @@ class TestRanders(unittest.TestCase):
 
         cost_east = metric.metric_fn(x, v_east)
 
-        h_val = 1.0  # H = I, so v^T H v = 1.0
-        wv_h = -0.1 * h_val   # W^T H v = -0.1
-        lam = 1.0 - 0.01 * h_val  # 1 - w_norm_sq = 0.99
-        # Disc = lam * ||v||_h^2 + <w,v>_h^2 = 0.99 + 0.01 = 1.0 = h_val
-        expected = (jnp.sqrt(h_val) - wv_h) / lam
+        H, W, lam = metric.zermelo_data(x)
+        v_sq_h = float(v_east @ H @ v_east)
+        wv_h = float(W @ H @ v_east)
+        expected = (jnp.sqrt(lam * v_sq_h + wv_h**2) - wv_h) / lam
 
         np.testing.assert_allclose(float(cost_east), float(expected), atol=1e-5)
 
@@ -128,9 +128,14 @@ class TestDiscreteRanders(unittest.TestCase):
         mesh = MockMesh()
         face_winds = jnp.array([[0.1, 0.0], [0.0, 0.0]])
         metric = DiscreteRanders(mesh, face_winds)
-        cost = metric.metric_fn(jnp.zeros(2), jnp.array([1.0, 0.0]))
-        # 0.9 / 0.99 = 0.909090...
-        np.testing.assert_allclose(float(cost), 0.90909090909, atol=1e-5)
+        v = jnp.array([1.0, 0.0])
+        cost = metric.metric_fn(jnp.zeros(2), v)
+        # Reference uses the metric's own squashed wind (smooth causal squash,
+        # W-RAND fix), not the raw face wind: cost = (sqrt(lam + <W,v>^2) - <W,v>)/lam.
+        _, W, lam = metric.zermelo_data(jnp.zeros(2))
+        wv = float(W @ v)
+        expected = (np.sqrt(float(lam) * 1.0 + wv**2) - wv) / float(lam)
+        np.testing.assert_allclose(float(cost), expected, atol=1e-5)
 
     def test_discrete_randers_zero(self):
         mesh = MockMesh()
