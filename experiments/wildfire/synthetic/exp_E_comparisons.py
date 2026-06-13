@@ -26,7 +26,14 @@ from ham.solvers.eikonal import EikonalSolver
 # =============================================================================
 @register_experiment
 class E1_SolverForwardRuntime(Experiment):
-    """Compare Fast Sweeping (Eikonal) vs AVBD forward runtime."""
+    """Compare Fast Sweeping (Eikonal) vs AVBD forward runtime.
+
+    Note these are different workloads: fast sweeping computes the full N x N
+    arrival-time field in one solve, while AVBD solves one geodesic BVP per
+    target (here a batch of 50). The reported "speedup" is therefore
+    workload-dependent — eikonal wins for dense fields, AVBD amortizes when
+    only a few target arrival times (or paths) are needed.
+    """
 
     name = "E1_solver_forward_runtime"
     category = "E_comparisons"
@@ -79,15 +86,9 @@ class E1_SolverForwardRuntime(Experiment):
             # Warmup AVBD (evaluating 1 path)
             _ = solver_avbd.solve(metric, source_coords[0], obs_coords)
 
-            # AVBD solves for specific points. To compare, we compute paths to N points.
-            test_points = jnp.array(
-                [
-                    [i, j]
-                    for i in range(1, N, N // 10 + 1)
-                    for j in range(1, N, N // 10 + 1)
-                ],
-                dtype=jnp.float32,
-            )
+            # AVBD solves for specific points. We compute paths to exactly M=50 points.
+            M_targets = min(50, N*N//2)
+            test_points = jax.random.uniform(jax.random.PRNGKey(N), shape=(M_targets, 2)) * (N - 1)
             vmap_solve = jax.jit(
                 jax.vmap(lambda obs: solver_avbd.solve(metric, source_coords[0], obs))
             )
@@ -98,10 +99,7 @@ class E1_SolverForwardRuntime(Experiment):
             start = time.time()
             paths_avbd = vmap_solve(test_points)
             paths_avbd.xs.block_until_ready()
-            time_avbd = time.time() - start
-
-            # Normalize to estimate full field evaluation time for AVBD
-            time_avbd_est = time_avbd * ((N * N) / len(test_points))
+            time_avbd_est = time.time() - start
 
             results.append(
                 {
@@ -160,6 +158,110 @@ class E1_SolverForwardRuntime(Experiment):
             fig.savefig(save_path, bbox_inches="tight", dpi=150)
         return fig
 
+
+
+# =============================================================================
+# E2: ACCURACY COMPARISON
+# =============================================================================
+@register_experiment
+class E2_AccuracyComparison(Experiment):
+    """Compare numerical accuracy of Eikonal and AVBD against analytical ground truth."""
+
+    name = "E2_accuracy_comparison"
+    category = "E_comparisons"
+    description = "Accuracy comparison: Eikonal vs AVBD on isotropic metric"
+
+    def __init__(self, grid_sizes: List[int] = None):
+        super().__init__()
+        self.grid_sizes = grid_sizes or [20, 40, 60]
+
+    def run(self) -> ExperimentResult:
+        results = []
+
+        for N in self.grid_sizes:
+            L = 1.0
+            h = L / max(1, N - 1)
+
+            G = jnp.zeros((3, N, N))
+            G = G.at[0].set(1.0)
+            G = G.at[2].set(1.0)
+            B = jnp.zeros((2, N, N))
+
+            source_i, source_j = N // 2, N // 2
+            source_x = source_i * h
+            source_y = source_j * h
+            # Pixel coordinates for AVBD (the metric grid lives in pixel space)...
+            source_coords = jnp.array([[source_i, source_j]], dtype=jnp.float32)
+            # ...but *physical* coordinates for the eikonal solver, whose
+            # grid_extent below is (0, L): mixing the two snaps the source to
+            # the wrong node (this exact bug previously inflated eik errors).
+            source_coords_phys = jnp.array([[source_x, source_y]], dtype=jnp.float32)
+
+            H, W = eikonal_to_zermelo(G, B)
+            metric = SyntheticZermeloMetric(H, W)
+
+            # Eikonal
+            solver_eik = EikonalSolver(max_iters=50, tol=1e-8)
+            T_eik, X, Y = solver_eik.solve(metric, source_coords_phys, grid_extent=(0, L, 0, L), grid_shape=(N, N))
+
+            # Pick 50 targets
+            M_targets = 50
+            rng = np.random.default_rng(42)
+            targets_idx = rng.integers(0, N, size=(M_targets, 2))
+            # keep them away from source
+            dists = np.sqrt((targets_idx[:, 0] - source_i)**2 + (targets_idx[:, 1] - source_j)**2)
+            targets_idx = targets_idx[dists > 5].astype(np.float32)
+
+            # AVBD
+            solver_avbd = AVBDSolver(step_size=0.05, iterations=60)
+            
+            err_eik_list = []
+            err_avbd_list = []
+            
+            for target in targets_idx:
+                target_x = target[0] * h
+                target_y = target[1] * h
+                t_exact = float(np.sqrt((target_x - source_x)**2 + (target_y - source_y)**2))
+                
+                t_eik = float(T_eik[int(target[0]), int(target[1])])
+
+                traj = solver_avbd.solve(metric, source_coords[0], target)
+                # AVBD optimizes the path in pixel space; the arrival time is the
+                # Finsler arc length (traj.energy is the action sum(0.5 F^2), not
+                # the length). Multiply by h to convert pixel length -> physical.
+                t_avbd = float(metric.arc_length(traj.xs)) * h
+                
+                if t_exact > 1e-4:
+                    err_eik_list.append(abs(t_eik - t_exact) / t_exact)
+                    err_avbd_list.append(abs(t_avbd - t_exact) / t_exact)
+
+            mre_eik = np.mean(err_eik_list)
+            mre_avbd = np.mean(err_avbd_list)
+            
+            results.append({"N": N, "mre_eik": mre_eik, "mre_avbd": mre_avbd})
+
+        self.results = results
+        return ExperimentResult(
+            name=self.name,
+            category=self.category,
+            success=True,
+            metrics={"final_eik_err": results[-1]["mre_eik"], "final_avbd_err": results[-1]["mre_avbd"]},
+            arrays={"N": np.array([r["N"] for r in results]), "eik": np.array([r["mre_eik"] for r in results]), "avbd": np.array([r["mre_avbd"] for r in results])},
+            metadata={},
+        )
+
+    def visualize(self, save_path: Optional[str] = None) -> plt.Figure:
+        fig, ax = plt.subplots(figsize=(6, 5))
+        N = [r["N"] for r in self.results]
+        eik = [r["mre_eik"] for r in self.results]
+        avbd = [r["mre_avbd"] for r in self.results]
+        ax.plot(N, eik, 'o-', label="Eikonal MRE")
+        ax.plot(N, avbd, 's-', label="AVBD MRE")
+        ax.set_yscale('log')
+        ax.legend()
+        ax.set_title("E2: Accuracy Comparison")
+        if save_path: fig.savefig(save_path)
+        return fig
 
 # =============================================================================
 # E3: REGULARIZATION STRATEGIES
@@ -437,6 +539,7 @@ class E5_Scalability(Experiment):
     def run(self) -> ExperimentResult:
         results_eik = []
         results_avbd = []
+        solver = EikonalSolver(max_iters=50, tol=1e-5)
 
         print("\n  Eikonal Scaling (fixed M=50, varying N):")
         for N in self.grid_sizes:
@@ -452,7 +555,6 @@ class E5_Scalability(Experiment):
 
             H_true, W_true = eikonal_to_zermelo(G_true, B_true)
             metric_true = SyntheticZermeloMetric(H_true, W_true)
-            solver = EikonalSolver(max_iters=50, tol=1e-5)
             T_obs, _, _ = solver.solve(
                 metric_true, source_coords, (0, N - 1, 0, N - 1), (N, N)
             )
@@ -552,6 +654,7 @@ class E5_Scalability(Experiment):
 
 ALL_EXPERIMENTS = [
     E1_SolverForwardRuntime,
+    E2_AccuracyComparison,
     E3_RegularizationStrategies,
     E4_OptimizationMethods,
     E5_Scalability,

@@ -8,7 +8,7 @@ import optax
 from experiments.wildfire.synthetic.experiment_base import SyntheticZermeloMetric
 from ham.solvers.avbd import AVBDSolver
 from ham.solvers.eikonal import EikonalSolver
-from ham.training.losses import ArrivalTimeLoss, DenseArrivalTimeLoss
+from ham.training.losses import ArrivalTimeLoss
 
 
 def compute_tv_regularization(
@@ -147,8 +147,17 @@ class MetricRecoveryModel(eqx.Module):
         else:
             self.W_grid = init_W
 
-    def project(self, constrain_isotropic: bool) -> "MetricRecoveryModel":
-        """Projects H to be SPD and optionally isotropic."""
+    def project(
+        self, constrain_isotropic: bool, constant_W: bool = False
+    ) -> "MetricRecoveryModel":
+        """Projects H to be SPD and optionally isotropic.
+
+        If ``constant_W``, the drift field is projected onto spatially
+        constant fields (its spatial mean). This restores identifiability
+        for single-source recovery: per-pixel drift is only constrained
+        along characteristics, while a constant drift (2 parameters) is
+        fully determined by dense arrival times.
+        """
         H = self.H_grid
 
         # Clip diagonals to avoid blowup or collapse
@@ -168,9 +177,12 @@ class MetricRecoveryModel(eqx.Module):
 
         H_new = jnp.stack([h11, h12, h22], axis=0)
 
+        W = self.W_grid
+        if constant_W:
+            W = jnp.mean(W, axis=(1, 2), keepdims=True) * jnp.ones_like(W)
+
         # Project W for causal bound: ||W||_H < 1
         # This is roughly equivalent to ||B||_G^-1 < 1
-        W = self.W_grid
         W_norm_sq = W[0] * (h11 * W[0] + h12 * W[1]) + W[1] * (h12 * W[0] + h22 * W[1])
 
         mask = W_norm_sq > 0.81  # Max magnitude 0.9
@@ -193,6 +205,7 @@ class MetricRecoveryOptimizer:
         recover_H: bool = True,
         recover_W: bool = False,
         constrain_isotropic: bool = True,
+        constant_W: bool = False,
         lambda_H: float = 0.01,
         lambda_W: float = 0.01,
         reg_type: str = "tv",
@@ -204,6 +217,7 @@ class MetricRecoveryOptimizer:
         self.recover_H = recover_H
         self.recover_W = recover_W
         self.constrain_isotropic = constrain_isotropic
+        self.constant_W = constant_W
         self.lambda_H = lambda_H
         self.lambda_W = lambda_W
         self.reg_type = reg_type
@@ -213,7 +227,9 @@ class MetricRecoveryOptimizer:
 
         if self.solver_type == "eikonal":
             self.solver = EikonalSolver(max_iters=50, tol=1e-5)
-            self.loss_fn = DenseArrivalTimeLoss(weight=1.0)
+            # Data loss is the Gahtan-exact sum-reduced MSE computed inline in
+            # `fit` (0.5 * sum(diff^2)); no separate loss module is needed.
+            self.loss_fn = None
         elif self.solver_type == "avbd":
             self.solver = AVBDSolver(step_size=0.1, iterations=40, parallel=True)
             self.loss_fn = ArrivalTimeLoss(
@@ -235,6 +251,7 @@ class MetricRecoveryOptimizer:
         alpha: float = 0.0,
         patience: int = 20,
         min_delta: float = 1e-4,
+        test_mask: Optional[jax.Array] = None,
     ) -> Dict:
         """Fit parameters to observed arrival times."""
 
@@ -247,7 +264,7 @@ class MetricRecoveryOptimizer:
         if source_coords.ndim == 1:
             source_coords = source_coords[None, :]
 
-        # Setup Optax
+        # Setup Optax: exponentially decaying learning rate (x0.8 every 100 steps)
         schedule = optax.exponential_decay(
             init_value=lr, transition_steps=100, decay_rate=0.8
         )
@@ -256,9 +273,9 @@ class MetricRecoveryOptimizer:
         filter_spec = eqx.tree_at(lambda m: m.H_grid, filter_spec, self.recover_H)
         filter_spec = eqx.tree_at(lambda m: m.W_grid, filter_spec, self.recover_W)
         if self.optimizer_type == "adam":
-            optimizer = optax.adam(lr)
+            optimizer = optax.adam(learning_rate=schedule)
         else:
-            optimizer = optax.sgd(lr)
+            optimizer = optax.sgd(learning_rate=schedule)
 
         opt_state = optimizer.init(eqx.filter(self.model, filter_spec))
 
@@ -279,20 +296,32 @@ class MetricRecoveryOptimizer:
                     grid_shape=(M, N),
                 )
 
-                T_obs_masked = jnp.where(obs_mask, T_obs, jnp.nan)
                 diff = T_pred[obs_mask] - T_obs_values
                 loss_data = 0.5 * jnp.sum(diff**2)
 
-                # Gahtan-exact regularization: sum-reduced TV on G/B parameters
-                G, B = zermelo_to_eikonal(model.H_grid, model.W_grid)
-                loss_reg = compute_tv_regularization_eikonal(
-                    G,
-                    B if self.recover_W else None,
-                    self.lambda_H if self.recover_H else 0.0,
-                    self.lambda_W if self.recover_W else 0.0,
-                )
+                lam_H = self.lambda_H if self.recover_H else 0.0
+                lam_W = self.lambda_W if self.recover_W else 0.0
+                if self.reg_type == "tv":
+                    # Gahtan-exact regularization: sum-reduced TV on G/B params.
+                    G, B = zermelo_to_eikonal(model.H_grid, model.W_grid)
+                    loss_reg = compute_tv_regularization_eikonal(
+                        G, B if self.recover_W else None, lam_H, lam_W
+                    )
+                elif self.reg_type == "tikhonov":
+                    # Sum-reduced Tikhonov (ridge) on the Godunov params, to
+                    # match the TV reduction so lambda is comparable.
+                    G, B = zermelo_to_eikonal(model.H_grid, model.W_grid)
+                    loss_reg = lam_H * jnp.sum(G**2)
+                    if self.recover_W:
+                        loss_reg += lam_W * jnp.sum(B**2)
+                else:
+                    loss_reg = 0.0
             else:
-                src = source_coords[0]
+                # Pass all ignition points: ArrivalTimeLoss takes the min over
+                # per-source arc lengths (multi-ignition union). Using only
+                # source_coords[0] here previously skewed every multi-source
+                # AVBD recovery (e.g. C3/C10) against union-field observations.
+                src = source_coords if source_coords.shape[0] > 1 else source_coords[0]
                 loss_data = self.loss_fn(
                     metric, src, obs_coords, T_obs_values, alpha=current_alpha
                 )
@@ -325,7 +354,7 @@ class MetricRecoveryOptimizer:
             updates, opt_state = optimizer.update(grads, opt_state, diff_model)
             diff_model = eqx.apply_updates(diff_model, updates)
             model = eqx.combine(diff_model, static_model)
-            model = model.project(self.constrain_isotropic)
+            model = model.project(self.constrain_isotropic, self.constant_W)
             return model, opt_state, loss, loss_data, loss_reg
 
         try:
@@ -342,6 +371,7 @@ class MetricRecoveryOptimizer:
 
         best_loss = float("inf")
         no_improvement_count = 0
+        converged = False
 
         # Determine when alpha curriculum finishes so we don't early stop during ramp
         alpha_done_iter = 0
@@ -389,23 +419,56 @@ class MetricRecoveryOptimizer:
                 else:
                     no_improvement_count += 1
 
+                # Relative plateau check
+                if it >= 10:
+                    loss_10_ago = self.history["loss"][-11]
+                    rel_change = abs(loss_val - loss_10_ago) / max(abs(loss_10_ago), 1e-10)
+                    if rel_change < 1e-5:
+                        converged = True
+                        if verbose:
+                            msg = f"  Converged at iteration {it} (relative tolerance)"
+                            if hasattr(pbar, "write"):
+                                pbar.write(msg)
+                            else:
+                                print(msg)
+                        break
+
             if no_improvement_count >= patience:
                 if verbose:
+                    msg = f"  Early stopping at iteration {it} (no improvement in {patience} iters)"
                     if hasattr(pbar, "write"):
-                        pbar.write(
-                            f"  Early stopping at iteration {it} (no improvement in {patience} iters)"
-                        )
+                        pbar.write(msg)
                     else:
-                        print(
-                            f"  Early stopping at iteration {it} (no improvement in {patience} iters)"
-                        )
+                        print(msg)
                 break
 
-        return {
+        results = {
             "final_loss": self.history["loss"][-1],
             "final_data": self.history["loss_data"][-1],
             "final_reg": self.history["loss_reg"][-1],
+            "iterations": len(self.history["loss"]),
+            "converged": converged,
         }
+
+        if test_mask is not None:
+            # Recompute T_pred to evaluate train/test error
+            from experiments.wildfire.synthetic.experiment_base import compute_errors
+            from ham.solvers.eikonal import EikonalSolver
+            
+            metric_final = SyntheticZermeloMetric(self.model.H_grid, self.model.W_grid)
+            eval_solver = EikonalSolver(max_iters=100, tol=1e-4)
+            T_pred, _, _ = eval_solver.solve(
+                metric_final,
+                source_coords,
+                grid_extent=(0, M - 1, 0, N - 1),
+                grid_shape=(M, N),
+            )
+            train_err = compute_errors(T_pred, T_obs, obs_mask)
+            test_err = compute_errors(T_pred, T_obs, test_mask)
+            results["train_mre"] = train_err["mre"]
+            results["test_mre"] = test_err["mre"]
+
+        return results
 
     def get_G_B(self) -> Tuple[jax.Array, jax.Array]:
         """Returns the recovered parameters in Eikonal G/B form."""

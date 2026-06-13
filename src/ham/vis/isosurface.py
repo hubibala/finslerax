@@ -50,10 +50,6 @@ def differentiable_marching_cubes(
     nx, ny, nz = volume.shape
     xmin, xmax, ymin, ymax, zmin, zmax = grid_extent
 
-    (xmax - xmin) / (nx - 1)
-    (ymax - ymin) / (ny - 1)
-    (zmax - zmin) / (nz - 1)
-
     x_coords = jnp.linspace(xmin, xmax, nx)
     y_coords = jnp.linspace(ymin, ymax, ny)
     z_coords = jnp.linspace(zmin, zmax, nz)
@@ -132,10 +128,7 @@ def differentiable_marching_cubes(
     # Replace -1 with 0 so we can safely index (we use valid_mask to filter later)
     safe_indices = jnp.where(tri_indices == -1, 0, tri_indices)
 
-    # Map edge indices to actual edge coordinate arrays
-    # edges[..., safe_indices, :]
-    jnp.expand_dims(safe_indices, axis=-1)
-
+    # Map edge indices to actual edge coordinate arrays via a per-voxel gather.
     def gather_edges(edges_b, indices_b):
         return edges_b[indices_b]
 

@@ -7,12 +7,12 @@ transport built on JAX and Equinox.
 
 Subpackages
 -----------
-geometry : Manifolds, metrics (Euclidean/Riemannian/Randers), transport
-models   : Neural and pullback metric implementations
-solvers  : Geodesic BVP (AVBD) and IVP (ExponentialMap) solvers
+geometry : Manifolds, metrics (Euclidean/Riemannian/Randers), transport, curvature
+models   : Neural and pullback metric implementations (learned, wildfire)
+solvers  : Geodesic BVP (AVBD) and IVP (ExponentialMap); grid/mesh/volumetric eikonal
 training : Multi-phase training pipeline and modular losses
-bio      : Single-cell biology wrappers (GeometricVAE, BioDataset)
-nn       : Neural network building blocks (VectorField, PSDMatrixField)
+nn       : Neural network building blocks (VectorField, PSDMatrixField, EBM, KDE)
+data, sim, utils, vis : Dataset loaders, analytical fields, numerics, visualization
 """
 
 __version__ = "1.1.0"

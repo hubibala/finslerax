@@ -1,16 +1,15 @@
 from typing import Any, Generic, TypeVar
 
-from ..typing import GenerativeModel
-
-ModelType = TypeVar("ModelType")
-
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 
 from ham.geometry.metric import AsymmetricMetric
 from ham.solvers.geodesic import ExponentialMap
+from ham.typing import GenerativeModel
 from ham.utils.math import NORM_EPS, safe_norm
+
+ModelType = TypeVar("ModelType")
 
 
 class LossComponent(eqx.Module, Generic[ModelType]):
@@ -89,17 +88,32 @@ class ZermeloAlignmentLoss(LossComponent[GenerativeModel]):
         else:
             W = jnp.zeros_like(u_lat)
 
-        norm_w = model.manifold._minkowski_norm(W)
-        norm_v = model.manifold._minkowski_norm(u_lat)
+        # Generic tangent inner product / norm (Euclidean ambient by default,
+        # Minkowski on the hyperboloid) -- avoids the hyperboloid-private
+        # ``_minkowski_*`` coupling that raised AttributeError on other
+        # manifolds (review finding W-MK).
+        norm_w = model.manifold.tangent_norm(z_mean, W)
+        norm_v = model.manifold.tangent_norm(z_mean, u_lat)
 
         w_dir = W / jnp.maximum(norm_w, NORM_EPS)[..., None]
         v_dir = u_lat / jnp.maximum(norm_v, NORM_EPS)[..., None]
 
-        return -model.manifold._minkowski_dot(w_dir, v_dir) * self.weight
+        return -model.manifold.tangent_dot(z_mean, w_dir, v_dir) * self.weight
 
 
 class GeodesicSprayLoss(LossComponent[GenerativeModel]):
-    """Penalizes acceleration (spray vector norm) to encourage geodesic trajectories."""
+    """Penalizes the spray (acceleration) norm at observed (z, u+W) states.
+
+    .. warning::
+        This penalizes ``||G(z, u+W)||_g -> 0``, which drives the metric toward
+        *flatness* (zero spray everywhere => straight-line geodesics in the
+        coordinate chart), **not** toward "the observed paths are geodesics".
+        A flat metric trivially minimizes it regardless of the data. Prefer
+        :class:`EulerLagrangeResidualLoss`, which penalizes the Euler-Lagrange
+        residual of the observed trajectory and is therefore zero exactly when
+        the observed path *is* a geodesic of the learned metric (review finding
+        W-GS). This component is retained as an optional flatness regularizer.
+    """
 
     def __init__(self, weight: float = 1.0):
         super().__init__(weight, "Spray")
@@ -173,7 +187,9 @@ class ContrastiveAlignmentLoss(LossComponent[GenerativeModel]):
             W_out = jnp.zeros_like(parent_z)
         v_tan = model.manifold.log_map(parent_z, child_z)
 
-        align_score = -model.manifold._minkowski_dot(W_out, v_tan)
+        # Generic tangent inner product (W-MK): Euclidean by default, Minkowski
+        # on the hyperboloid, without reaching into manifold-private helpers.
+        align_score = -model.manifold.tangent_dot(parent_z, W_out, v_tan)
         return align_score * self.weight
 
 
@@ -290,13 +306,22 @@ class EulerLagrangeResidualLoss(LossComponent[GenerativeModel]):
 
     The residual R measures the degree to which an observed path deviates from the
     extremum of the energy functional. R = d/dt (dL/dv) - dL/dz.
+
+    The Lagrangian differentiated here is the model's own ``metric.energy``
+    (L = 1/2 F^2) via autodiff -- *not* a hand-rolled smoothed Randers surrogate.
+    This guarantees the residual measures geodesy of the exact metric the rest
+    of the pipeline trains (review finding W-EL); for a Randers metric the true
+    energy uses the Zermelo discriminant form with the 1/lambda factor, which a
+    ``sqrt(v^T H v) - <W,v>`` surrogate does not reproduce.
     """
 
     epsilon: float = eqx.field(static=True)
 
     def __init__(self, weight: float = 1.0, epsilon: float = 1e-4):
         super().__init__(weight, "EL_Residual")
-        # smoothing for Finsler non-smoothness at v=0
+        # Retained for backward-compatible construction only. The residual now
+        # differentiates ``metric.energy`` directly, which carries its own v=0
+        # gradient guards, so no extra smoothing constant is applied.
         self.epsilon = epsilon
 
     def __call__(
@@ -323,51 +348,31 @@ class EulerLagrangeResidualLoss(LossComponent[GenerativeModel]):
         def compute_el_residual_sq(z, v, a):
             """Point-wise evaluation of the Euler-Lagrange residual norm squared."""
 
-            # Define smoothed Lagrangian L(z, v) = 1/2 * F_eps(z, v)^2
-            def L_smooth(z_pt, v_pt):
-                # Retrieve Riemannian metric H and Wind W from the Randers metric
-                if isinstance(model.metric, AsymmetricMetric):
-                    H_pt, W_pt, _ = model.metric.zermelo_data(z_pt)
-                else:
-                    # Identity fallback for non-Randers/Base metrics
-                    H_pt = jnp.eye(z_pt.shape[0])
-                    W_pt = jnp.zeros_like(z_pt)
+            # The true Lagrangian the model optimizes: L(z, v) = 1/2 F(z, v)^2.
+            # Differentiating model.metric.energy directly (rather than a
+            # hand-rolled smoothed Randers surrogate) is the rigorous form --
+            # it is exactly the energy whose spray the rest of the geometry
+            # stack derives (review finding W-EL).
+            L = model.metric.energy
 
-                # F_eps = sqrt(v^T H v + eps^2) - <W, v>_H
-                # This formulation ensures smoothness at v=0 while capturing Randers asymmetry
-                v_norm_sq = jnp.dot(v_pt, jnp.dot(H_pt, v_pt))
-                v_norm_eps = jnp.sqrt(jnp.maximum(v_norm_sq, 0.0) + self.epsilon**2)
+            # d/dt(dL/dv) = Hess_v(L) a + d/dz(dL/dv) v   along the path.
+            # Hess_v(L) is the fundamental tensor g_ij(z, v); reuse it for both
+            # the acceleration term and the residual norm below.
+            Hvv = jax.hessian(L, argnums=1)(z, v)
+            hess_v_a = Hvv @ a
+            _, mixed_term = jax.jvp(
+                lambda z_arg: jax.grad(L, argnums=1)(z_arg, v), (z,), (v,)
+            )
+            grad_z = jax.grad(L, argnums=0)(z, v)
 
-                # Wind interaction using the local metric tensor
-                W_dot_v = jnp.dot(W_pt, jnp.dot(H_pt, v_pt))
-
-                F = v_norm_eps - W_dot_v
-                return 0.5 * (F**2)
-
-            # dL/dv gradient function
-            grad_v_fn = jax.grad(L_smooth, argnums=1)
-
-            # Total time derivative components: d/dt(dL/dv) = (d2L/dv2)*a + (d2L/dzdv)*v
-            # We utilize jax.jvp for efficient forward-mode Hessian-vector products
-            _, hess_v_a = jax.jvp(lambda v_arg: grad_v_fn(z, v_arg), (v,), (a,))
-            _, mixed_term = jax.jvp(lambda z_arg: grad_v_fn(z_arg, v), (z,), (v,))
-
-            # Spatial gradient dL/dz
-            grad_z = jax.grad(L_smooth, argnums=0)(z, v)
-
-            # Euler-Lagrange Residual vector: R = d/dt(dL/dv) - dL/dz
+            # Euler-Lagrange residual vector: R = d/dt(dL/dv) - dL/dz.
             residual = hess_v_a + mixed_term - grad_z
 
-            # Evaluate norm using the 'frozen' Riemannian metric tensor H
-            # Evaluation magnitude is geometrically consistent with the manifold's curvature
-            if isinstance(model.metric, AsymmetricMetric):
-                H_frozen, _, _ = model.metric.zermelo_data(z)
-            else:
-                H_frozen = jnp.eye(z.shape[0])
-            H_frozen = jax.lax.stop_gradient(H_frozen)
-
-            # Squared norm under Riemannian metric H
-            return jnp.dot(residual, jnp.dot(H_frozen, residual))
+            # Measure R under the metric's own (frozen) fundamental tensor
+            # g_ij = Hess_v(L), which is positive-definite for any valid Finsler
+            # metric and geometrically consistent across the hierarchy.
+            g_frozen = jax.lax.stop_gradient(Hvv)
+            return jnp.dot(residual, jnp.dot(g_frozen, residual))
 
         # Vectorized evaluation over the entire trajectory time horizon
         # Completely avoids ODE solvers by operating point-wise
@@ -659,7 +664,9 @@ class ArrivalTimeLoss(eqx.Module):
 
         Args:
             metric: FinslerMetric defining the geometry.
-            source: Source point, shape (D,).
+            source: Source point, shape (D,), or multiple ignition points,
+                shape (S, D) — arrival times are then the minimum over
+                per-source geodesic arc lengths (multi-ignition union).
             x_obs: Observation points, shape (K, D).
             t_obs: Observed arrival times, shape (K,).
             alpha: Blend coefficient in [0, 1].  0 = Pearson-r only;
@@ -669,10 +676,8 @@ class ArrivalTimeLoss(eqx.Module):
             Scalar loss value, already multiplied by self.weight.
         """
 
-        def single_arrival_time(x_target):
-            traj = self.solver.solve(
-                metric, source, x_target, n_steps=self.solver_steps
-            )
+        def arrival_from(src, x_target):
+            traj = self.solver.solve(metric, src, x_target, n_steps=self.solver_steps)
             path = traj.xs  # (T+1, D)
             # Discrete arc length using midpoint quadrature:
             # F evaluated at segment midpoints for O(h^2) accuracy
@@ -681,6 +686,19 @@ class ArrivalTimeLoss(eqx.Module):
             midpoints = (path[:-1] + path[1:]) / 2.0  # (T, D)
             step_costs = jax.vmap(metric.metric_fn)(midpoints, segments)
             return jnp.sum(step_costs)
+
+        if source.ndim == 2:
+            # Multiple sources (K, D): the arrival time is the minimum over
+            # per-source geodesic arc lengths — the geodesic analogue of the
+            # multi-ignition (union) eikonal field.
+            def single_arrival_time(x_target):
+                return jnp.min(
+                    jax.vmap(lambda s: arrival_from(s, x_target))(source)
+                )
+        else:
+
+            def single_arrival_time(x_target):
+                return arrival_from(source, x_target)
 
         t_pred = jax.vmap(single_arrival_time)(x_obs)
 

@@ -221,9 +221,30 @@ def _bilinear_interp_point(grid: jax.Array, pt_pixel: jax.Array) -> jax.Array:
 
 
 class SyntheticZermeloMetric(AsymmetricMetric):
-    """
-    A continuous Randers metric defined by grid parameters for H and W.
-    It expects spatial coordinates to be within [0, H-1] x [0, W-1].
+    """A continuous Randers metric defined by bilinear interpolation of grid fields.
+
+    Parametrized by Zermelo-style data ``(H, W, lam)`` on a pixel grid:
+    ``H`` (Riemannian sea, SPD), ``W`` (drift vector), ``lam`` (scalar speed).
+
+    Conventions (important):
+
+    * **Coordinates are pixel coordinates** ``[0, M-1] x [0, N-1]``. When this
+      metric is passed to ``EikonalSolver.solve``, the ``grid_extent`` must be
+      ``(0, M-1, 0, N-1)`` so that the solver samples the metric where it is
+      defined. (Experiments using physical extents, e.g. A1/E2 with
+      ``(0, 1, 0, 1)``, are only valid because their fields are spatially
+      uniform.)
+    * **lam=1 is the Gahtan (G, B) parametrization, not exact Zermelo
+      navigation.** The induced primal Randers cost is
+      ``F(v) = sqrt(v^T G v) + B.v`` with ``G = H + (HW)(HW)^T`` and
+      ``B = -HW``. This coincides with the Bao-Robles-Shen solution of
+      Zermelo's navigation problem only when ``lam = 1 - ||W||_H^2``; with
+      ``lam = 1`` the effective wind deviates from ``W`` at second order,
+      O(||W||^2). All synthetic experiments use lam=1 and treat (G, B) as
+      the primary model parameters, matching Gahtan et al. (arXiv:2603.00035).
+    * **Weak-wind condition:** the construction requires ``||W||_H < 1``
+      (equivalently ``||B||_{G^{-1}} < 1``) for F to define a positive
+      Finsler norm with the fire able to spread in every direction.
     """
 
     H_grid: jax.Array  # Shape: (3, H, W) -> (h11, h12, h22)
@@ -254,25 +275,21 @@ class SyntheticZermeloMetric(AsymmetricMetric):
         return H_mat, w_vals, lam_val[0]
 
     def metric_fn(self, z: jax.Array, v: jax.Array) -> jax.Array:
+        """Primal Randers cost F(z, v) = sqrt(v^T G v) + B.v.
+
+        Derived from the Zermelo data via
+            G = (H + (HW)(HW)^T / lam) / lam,    B = -HW / lam,
+        which for lam = 1 - ||W||_H^2 is exactly the Bao-Robles-Shen Randers
+        metric solving Zermelo's navigation problem, and for lam = 1 is the
+        Gahtan (G, B) parametrization (see class docstring). The associated
+        eikonal equation solved by ``EikonalSolver`` is the dual condition
+        F*(grad T) = 1  <=>  (grad T - B)^T G^{-1} (grad T - B) = 1.
+        """
         H, W, lam = self.zermelo_data(z)
 
-        # Zermelo/Randers energy functional
-        # F(z, v) = sqrt( (lam*v + W)^T H (lam*v + W) ) / lam - W^T H v
-        # Wait, the standard Zermelo navigation with speed lambda:
-        # F = sqrt( v^T H v / lambda + (W^T H v)^2 / lambda^2 ) - W^T H v / lambda
-        # Let's align with the AVBD solver which expects standard Riemannian + drift if Asymmetric.
-        # Following HAM's `spec/MATH_SPEC.md` or typical Randers formulation:
-        v_h_v = jnp.dot(v, jnp.dot(H, v))
-        W_h_W = jnp.dot(W, jnp.dot(H, W))
-        W_h_v = jnp.dot(W, jnp.dot(H, v))
-
         lam_safe = jnp.maximum(lam, 1e-4)
-        alpha_sq = v_h_v / lam_safe
-
-        # To make it equivalent to Gahtan's G and B:
-        # F(v) = sqrt( v^T G v ) + B^T v
-        B = -jnp.dot(H, W) / lam_safe
         HW = jnp.dot(H, W)
+        B = -HW / lam_safe
         G = (H + jnp.outer(HW, HW) / lam_safe) / lam_safe
 
         v_G_v = jnp.dot(v, jnp.dot(G, v))
@@ -301,16 +318,20 @@ def anisotropic_distance_field(
     lambda2: float,
     theta: float = 0.0,
 ) -> jax.Array:
-    """Compute exact distance for anisotropic metric."""
-    Y, X = jnp.meshgrid(
+    """Exact distance sqrt(d^T G d) for the constant metric G = R diag(λ1, λ2) R^T.
+
+    Axis convention matches the solver and ``create_metric_from_eigenvalues``:
+    at θ=0, λ1 couples to **axis 0** (the i index, g11) and λ2 to axis 1 (g22).
+    """
+    D0, D1 = jnp.meshgrid(
         jnp.arange(M) - source_i, jnp.arange(N) - source_j, indexing="ij"
     )
 
     c, s = jnp.cos(theta), jnp.sin(theta)
-    X_rot = c * X + s * Y
-    Y_rot = -s * X + c * Y
+    U = c * D0 + s * D1  # rotated axis-0 coordinate (eigenvalue λ1)
+    V = -s * D0 + c * D1  # rotated axis-1 coordinate (eigenvalue λ2)
 
-    return jnp.sqrt(lambda1 * X_rot**2 + lambda2 * Y_rot**2)
+    return jnp.sqrt(lambda1 * U**2 + lambda2 * V**2)
 
 
 def create_metric_from_eigenvalues(
@@ -354,12 +375,17 @@ def compute_errors(
         T_scale = jnp.max(jnp.abs(T_ex), where=valid, initial=1e-10)
         rel_l2 = l2 / T_scale
         rel_linf = linf / T_scale
+        
+        # Mean Relative Error (MRE)
+        mre = jnp.mean(jnp.abs(diff) / jnp.maximum(jnp.abs(T_ex), 1e-10), where=valid)
+        
         return {
             "l1": float(l1),
             "l2": float(l2),
             "linf": float(linf),
             "rel_l2": float(rel_l2),
             "rel_linf": float(rel_linf),
+            "mre": float(mre),
         }
 
     def nan_errors():
@@ -369,6 +395,7 @@ def compute_errors(
             "linf": float("nan"),
             "rel_l2": float("nan"),
             "rel_linf": float("nan"),
+            "mre": float("nan"),
         }
 
     if bool(jnp.sum(valid) > 0):
@@ -412,7 +439,7 @@ def plot_arrival_time(
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 6))
 
-    T_np = np.asarray(T)
+    T_np = np.asarray(T).T  # Transpose so physical X is horizontal
     T_np = np.where(np.isinf(T_np), np.nan, T_np)
 
     im = ax.imshow(T_np, origin="upper", cmap=cmap)
@@ -439,7 +466,7 @@ def plot_error_map(
     if ax is None:
         fig, ax = plt.subplots(figsize=(8, 6))
 
-    err_np = np.asarray(error)
+    err_np = np.asarray(error).T  # Transpose so physical X is horizontal
     vmax = np.nanmax(np.abs(err_np)) if symmetric else np.nanmax(err_np)
     vmin = -vmax if symmetric else np.nanmin(err_np)
 
@@ -460,6 +487,7 @@ def plot_metric_ellipses(
         return
     M, N = G_np.shape[1], G_np.shape[2]
 
+    # Note: x is horizontal (dim 0 of G), y is vertical (dim 1 of G)
     for i in range(step // 2, M, step):
         for j in range(step // 2, N, step):
             g = G_np[:, i, j]
@@ -470,9 +498,10 @@ def plot_metric_ellipses(
                 r = np.sqrt(np.maximum(vals, 1e-10))
                 rx, ry = scale * r[1], scale * r[0]
                 major_vec = vecs[:, 1] if r[1] >= r[0] else vecs[:, 0]
+                # major_vec[0] corresponds to physical X, major_vec[1] to physical Y
                 angle = np.degrees(np.arctan2(major_vec[1], major_vec[0]))
                 ellipse = Ellipse(
-                    (j, i),
+                    (i, j),  # i is physical x (horizontal), j is physical y (vertical)
                     width=2 * rx,
                     height=2 * ry,
                     angle=angle,
@@ -482,8 +511,8 @@ def plot_metric_ellipses(
                     alpha=0.6,
                 )
                 ax.add_patch(ellipse)
-            except:
-                pass
+            except np.linalg.LinAlgError:
+                pass  # singular metric cell — skip its ellipse
 
 
 def plot_drift_field(
@@ -492,15 +521,18 @@ def plot_drift_field(
     """Overlay drift vectors (W_grid)."""
     W_np = np.asarray(W)
     M, N = W_np.shape[1], W_np.shape[2]
-    X, Y = np.meshgrid(np.arange(N), np.arange(M))
+    # In transposed plot, X physical is horizontal (axis 0 of W)
+    X, Y = np.meshgrid(np.arange(M), np.arange(N), indexing="ij")
     ax.quiver(
-        X[::step, ::step],
-        Y[::step, ::step],
-        W_np[1, ::step, ::step],
-        W_np[0, ::step, ::step],
+        X[::step, ::step].T,
+        Y[::step, ::step].T,
+        W_np[0, ::step, ::step].T,
+        W_np[1, ::step, ::step].T,
         color=color,
         alpha=0.7,
         scale=scale,
+        angles='xy',
+        scale_units='xy'
     )
 
 
@@ -564,6 +596,18 @@ def create_sparse_observation_mask(
 
     obs_mask = interior & (valid_scores > threshold)
     return obs_mask
+
+
+def split_observation_mask(
+    obs_mask: jax.Array, train_frac: float = 0.8, seed: int = 42
+) -> Tuple[jax.Array, jax.Array]:
+    """Split an observation mask into train and test masks."""
+    key = jax.random.PRNGKey(seed)
+    probs = jax.random.uniform(key, shape=obs_mask.shape)
+    
+    train_mask = obs_mask & (probs < train_frac)
+    test_mask = obs_mask & (probs >= train_frac)
+    return train_mask, test_mask
 
 
 # =============================================================================

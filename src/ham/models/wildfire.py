@@ -652,21 +652,33 @@ class CovariateConditionedRanders(AsymmetricMetric):
             x: (2,) world-coordinate position.
 
         Returns:
-            H:      (2, 2) contravariant SPD metric tensor (the Riemannian sea).
-            W:      (2,) contravariant drift vector (the wind).
-            lambda: Causality scalar ``1 - ||W||^2_{H^{-1}}``.
+            H:      (2, 2) SPD Zermelo *sea* metric -- the SAME tensor ``G`` that
+                    ``metric_fn`` uses under ``sqrt(v^T G v)``.
+            W:      (2,) Zermelo wind *vector* ``W = G^{-1} b`` (``b`` is the
+                    drift one-form).
+            lambda: Causality scalar ``1 - ||W||^2_H = 1 - b^T G^{-1} b``.
+
+        Note:
+            The sea metric returned here is ``G`` itself, **not** ``G^{-1}``.
+            ``zoo.Randers`` and the (mesh/grid) eikonal solvers consume the
+            triple via ``F = (sqrt(lam v^T H v + (v^T H W)^2) - v^T H W)/lam``;
+            this reproduces ``metric_fn``'s primal ``(G, b)`` form exactly iff
+            ``H = G`` and ``W = G^{-1} b`` (verified in
+            ``tests/test_src_deep_review.py``).  An earlier version returned
+            ``H = G^{-1}``, which silently made the eikonal-solved metric
+            disagree with ``metric_fn``/AVBD by a large factor (review finding
+            MATH-ZD1).
         """
         G, b = self._get_params(x)
         det_G = jnp.maximum(G[0, 0] * G[1, 1] - G[0, 1] ** 2, 1e-8)
 
-        # Ginv is the inverse of the covariant G. In Zermelo formulation, H = G^{-1}.
+        # Inverse of the primal sea, used only for the wind VECTOR W = G^{-1} b
+        # and the causality scalar lambda = 1 - b^T G^{-1} b.
         Ginv11 = G[1, 1] / det_G
         Ginv22 = G[0, 0] / det_G
         Ginv12 = -G[0, 1] / det_G
 
-        H = jnp.stack([jnp.stack([Ginv11, Ginv12]), jnp.stack([Ginv12, Ginv22])])
-
-        # W = G^{-1} * b = H * b
+        # W = G^{-1} b (the Zermelo wind vector).
         W1 = Ginv11 * b[0] + Ginv12 * b[1]
         W2 = Ginv12 * b[0] + Ginv22 * b[1]
         W = jnp.array([W1, W2])
@@ -674,7 +686,8 @@ class CovariateConditionedRanders(AsymmetricMetric):
         b_Ginv_b = b[0] * W1 + b[1] * W2
         lam = jnp.maximum(1.0 - b_Ginv_b, 1e-6)
 
-        return H, W, lam
+        # The Zermelo sea metric H is the primal G, not its inverse.
+        return G, W, lam
 
     def metric_fn(self, x: jax.Array, v: jax.Array) -> jax.Array:
         """Randers-Zermelo cost F(x, v).

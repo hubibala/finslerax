@@ -51,6 +51,22 @@ class Hyperboloid(Manifold):
         """Minkowski self-norm using safe primitive."""
         return _safe_minkowski_self_norm(u)
 
+    def tangent_dot(self, x: jax.Array, u: jax.Array, v: jax.Array) -> jax.Array:
+        """Tangent inner product on the hyperboloid (Minkowski signature).
+
+        Overrides the Euclidean :meth:`Manifold.tangent_dot` default: the
+        hyperboloid is embedded in Minkowski space, so the induced metric on
+        each tangent space is the Lorentzian product ``<u, v>_L`` (which is
+        positive-definite when restricted to T_x M).  Lets generic consumers
+        (losses, VAE) obtain the correct inner product without reaching for the
+        private ``_minkowski_dot`` (review finding W-MK).
+        """
+        return self._minkowski_dot(u, v)
+
+    def tangent_norm(self, x: jax.Array, v: jax.Array) -> jax.Array:
+        """Minkowski tangent norm; see :meth:`tangent_dot`."""
+        return self._minkowski_norm(v)
+
     def project(self, x: jax.Array) -> jax.Array:
         """Projects ambient point onto the hyperboloid upper sheet."""
         sq_norm = self._minkowski_dot(x, x)

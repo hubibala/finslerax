@@ -1,3 +1,18 @@
+﻿"""Category B: gradient verification for the differentiable eikonal solver.
+
+Compares implicit (adjoint fixed-point) gradients against central finite
+differences. Protocol mirrors Gahtan et al. (arXiv:2603.00035), Sec. "Gradient
+Verification": FD at randomly sampled interior points, plus global random
+directions and stability under metric perturbations.
+
+Precision note: the paper uses eps=1e-5 in float64 and reports agreement
+below 1e-6 away from stencil boundaries. This suite runs in JAX's default
+float32, where the optimal central-difference step is eps ~ (machine eps)^(1/3)
+~ 5e-3 for O(1) parameters; smaller steps measure rounding noise rather than
+gradient error. Hence the default FD_EPS below and the 10%-agreement
+thresholds. Run `run_experiments.py --x64` to reproduce paper-grade tolerances.
+"""
+
 import functools
 from typing import Optional
 
@@ -5,6 +20,9 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
+
+# Central-difference step balanced for float32 (see module docstring).
+FD_EPS = 5e-3
 
 from experiments.wildfire.synthetic.experiment_base import (
     Experiment,
@@ -141,7 +159,7 @@ class B1_FD_Isotropic(Experiment):
     category = "B_gradient_verification"
     description = "Verify backward pass gradients against FD (isotropic)"
 
-    def __init__(self, N: int = 50, n_test_points: int = 20, eps: float = 1e-4):
+    def __init__(self, N: int = 50, n_test_points: int = 20, eps: float = FD_EPS):
         super().__init__()
         self.N, self.n_test_points, self.eps = N, n_test_points, eps
 
@@ -252,7 +270,7 @@ class B1_FD_Isotropic(Experiment):
             plt.colorbar(im, ax=ax)
             ax.plot(self.target[1], self.target[0], "c*", markersize=15)
             ax.plot(self.N // 2, self.N // 2, "g*", markersize=15)
-            ax.set_title(f"|∇_{name} L|")
+            ax.set_title(f"|âˆ‡_{name} L|")
 
         fig.suptitle("B1: Gradient Verification (Isotropic)", fontsize=14)
         plt.tight_layout()
@@ -272,7 +290,7 @@ class B2_FD_Anisotropic(Experiment):
     category = "B_gradient_verification"
     description = "Verify gradients for anisotropic metric"
 
-    def __init__(self, N: int = 50, n_test_points: int = 15, eps: float = 1e-4):
+    def __init__(self, N: int = 50, n_test_points: int = 15, eps: float = FD_EPS):
         super().__init__()
         self.N, self.n_test_points, self.eps = N, n_test_points, eps
 
@@ -353,7 +371,7 @@ class B2_FD_Anisotropic(Experiment):
 
     def visualize(self, save_path: Optional[str] = None) -> plt.Figure:
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-        for ax, (c, name) in zip(axes, [(0, "g₁₁"), (1, "g₁₂"), (2, "g₂₂")]):
+        for ax, (c, name) in zip(axes, [(0, "gâ‚â‚"), (1, "gâ‚â‚‚"), (2, "gâ‚‚â‚‚")]):
             fd = np.array([r["fd"] for r in self.results[c]])
             impl = np.array([r["impl"] for r in self.results[c]])
             ax.scatter(fd, impl, alpha=0.6, s=50)
@@ -382,7 +400,7 @@ class B3_FD_Drift(Experiment):
     category = "B_gradient_verification"
     description = "Verify drift gradients"
 
-    def __init__(self, N: int = 50, n_test_points: int = 15, eps: float = 1e-4):
+    def __init__(self, N: int = 50, n_test_points: int = 15, eps: float = FD_EPS):
         super().__init__()
         self.N, self.n_test_points, self.eps = N, n_test_points, eps
 
@@ -464,7 +482,7 @@ class B3_FD_Drift(Experiment):
 
     def visualize(self, save_path: Optional[str] = None) -> plt.Figure:
         fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-        for ax, (c, name) in zip(axes, [(0, "b₁"), (1, "b₂")]):
+        for ax, (c, name) in zip(axes, [(0, "bâ‚"), (1, "bâ‚‚")]):
             fd = np.array([r["fd"] for r in self.results[c]])
             impl = np.array([r["impl"] for r in self.results[c]])
             ax.scatter(fd, impl, alpha=0.6, s=50)
@@ -546,11 +564,11 @@ class B4_RingLoss(Experiment):
 
         im = axes[2].imshow(np.array(self.G_mag), origin="upper", cmap="hot")
         plt.colorbar(im, ax=axes[2])
-        axes[2].set_title("|∇_G L|")
+        axes[2].set_title("|âˆ‡_G L|")
 
         im = axes[3].imshow(np.array(self.B_mag), origin="upper", cmap="hot")
         plt.colorbar(im, ax=axes[3])
-        axes[3].set_title("|∇_B L|")
+        axes[3].set_title("|âˆ‡_B L|")
 
         fig.suptitle("B4: Ring Loss Adjoint Pattern", fontsize=14)
         plt.tight_layout()
@@ -622,11 +640,11 @@ class B5_GradientDecay(Experiment):
 
         im = axes[0].imshow(self.G_mag, origin="upper", cmap="hot")
         plt.colorbar(im, ax=axes[0])
-        axes[0].set_title("|∇_G L|")
+        axes[0].set_title("|âˆ‡_G L|")
 
         axes[1].semilogy(self.distances, self.magnitudes, "o-")
         axes[1].set_xlabel("Distance from target")
-        axes[1].set_ylabel("Mean |∇_G L|")
+        axes[1].set_ylabel("Mean |âˆ‡_G L|")
         axes[1].set_title("Gradient Decay")
         axes[1].grid(True, alpha=0.3)
 
@@ -667,7 +685,7 @@ class B8_RandomDirections(Experiment):
 
         _, dL_dB = backward_pass(G, B, source_mask, dL_dT)
 
-        eps = 1e-4
+        eps = FD_EPS
         np.random.seed(45)
 
         errors = []
@@ -703,6 +721,10 @@ class B8_RandomDirections(Experiment):
         return ExperimentResult(
             name=self.name,
             category=self.category,
+            # Global random directions deliberately cross stencil boundaries
+            # where the solver is non-differentiable (measure-zero set);
+            # Gahtan et al. report only ~20% of such directions agree within
+            # 10%, so a low pass rate here is expected behavior, not a defect.
             success=pct_good > 10,
             metrics={"pct_good": pct_good, "median_err": float(np.median(errors))},
             arrays={"errors": errors},
@@ -769,8 +791,8 @@ class B9_GradientStability(Experiment):
 
         for _ in range(self.n_perturbations):
             G_pert = G + 0.01 * jnp.array(np.random.randn(3, N, N))
-            G_pert = G_pert.at[0].set(jnp.clip(G_pert[0], a_min=0.5))
-            G_pert = G_pert.at[2].set(jnp.clip(G_pert[2], a_min=0.5))
+            G_pert = G_pert.at[0].set(jnp.maximum(G_pert[0], 0.5))
+            G_pert = G_pert.at[2].set(jnp.maximum(G_pert[2], 0.5))
 
             dL_dG_pert, _ = backward_pass(G_pert, B, source_mask, dL_dT)
 
@@ -785,7 +807,9 @@ class B9_GradientStability(Experiment):
         return ExperimentResult(
             name=self.name,
             category=self.category,
-            success=np.mean(variations) < 0.5,
+            # Gahtan et al. report ~0.5% mean gradient variation under 1%
+            # metric noise; 10% is a generous float32 bound (was 50%).
+            success=np.mean(variations) < 0.10,
             metrics={
                 "mean_variation": float(np.mean(variations)),
                 "max_variation": float(np.max(variations)),
@@ -841,7 +865,7 @@ def run_all(save=True, visualize=True):
     print("CATEGORY B SUMMARY")
     print("=" * 60)
     for name, r in results.items():
-        print(f"  {name}: {'✓ PASS' if r.success else '✗ FAIL'}")
+        print(f"  {name}: {'âœ“ PASS' if r.success else 'âœ— FAIL'}")
     return results
 
 

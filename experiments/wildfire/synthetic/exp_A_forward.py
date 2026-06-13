@@ -23,6 +23,7 @@ from experiments.wildfire.synthetic.experiment_base import (
 )
 from experiments.wildfire.synthetic.metric_recovery import eikonal_to_zermelo
 from ham.solvers.eikonal import EikonalSolver
+from ham.solvers.avbd import AVBDSolver
 
 
 def get_solver():
@@ -34,11 +35,19 @@ def get_solver():
 # =============================================================================
 @register_experiment
 class A1_IsotropicConvergence(Experiment):
-    """Verify O(h) convergence on isotropic problem."""
+    """Verify near-first-order convergence on an isotropic point-source problem.
+
+    Without source factorization, the rarefaction fan at the point source
+    pollutes first-order upwind schemes: the expected empirical rate is
+    ~0.7-1.0 rather than clean O(h) (Gahtan et al., arXiv:2603.00035, report
+    rate 0.69 for this exact setup). Clean first order requires a factored
+    eikonal formulation (Fomel/Luo/Zhao 2009; Luo & Qian, J. Sci. Comput.
+    2012) — a known future improvement for the HAM solver.
+    """
 
     name = "A1_isotropic_convergence"
     category = "A_forward_solver"
-    description = "Verify O(h) convergence rate for isotropic eikonal equation"
+    description = "Verify near-O(h) convergence (source singularity limits rate to ~0.7-1)"
 
     def __init__(self, grid_sizes: List[int] = None):
         super().__init__()
@@ -110,7 +119,9 @@ class A1_IsotropicConvergence(Experiment):
         return ExperimentResult(
             name=self.name,
             category=self.category,
-            success=(0.65 <= rate_l2 <= 1.5),
+            # Window covers the singularity-limited regime (~0.7) up to clean
+            # first order; rates outside indicate a solver defect.
+            success=(0.6 <= rate_l2 <= 1.3),
             metrics={
                 "rate_l2": rate_l2,
                 "rate_linf": rate_linf,
@@ -353,21 +364,49 @@ class A4_ConstantDrift(Experiment):
             metric, source_coords, grid_extent=(0, N - 1, 0, N - 1), grid_shape=(N, N)
         )
 
-        # Check asymmetry along the drift axis (j index, which corresponds to B[0])
-        T_left = float(T[source_i, source_j - 30])
-        T_right = float(T[source_i, source_j + 30])
-        asymmetry = (T_left - T_right) / (T_left + T_right)
+        # Drift convention: B is the Randers one-form, so the primal cost is
+        # F(v) = sqrt(v^T G v) + B.v — motion *along* +B is penalized and the
+        # effective Zermelo wind is W = -H^{-1}B. B[0] = b acts on axis 0 (i).
+        # Analytic arrival times at +/- d along axis 0 (G = I + BB^T):
+        #     T(+d e_x) = d (sqrt(1+b^2) + b),  T(-d e_x) = d (sqrt(1+b^2) - b)
+        d = 30
+        T_upwind = float(T[source_i + d, source_j])  # slow direction (+B)
+        T_downwind = float(T[source_i - d, source_j])  # fast direction (-B)
+        asymmetry = (T_upwind - T_downwind) / (T_upwind + T_downwind)
 
-        print(f"  T at x=-30: {T_left:.4f}, T at x=+30: {T_right:.4f}")
-        print(f"  Asymmetry: {asymmetry:.4f}")
+        # Cross-axis (perpendicular) asymmetry must vanish.
+        T_perp_plus = float(T[source_i, source_j + d])
+        T_perp_minus = float(T[source_i, source_j - d])
+        cross_asymmetry = abs(T_perp_plus - T_perp_minus) / (T_perp_plus + T_perp_minus)
+
+        T_up_exact = d * (np.sqrt(1 + b**2) + b)
+        T_down_exact = d * (np.sqrt(1 + b**2) - b)
+        asym_exact = b / np.sqrt(1 + b**2)
+        rel_err_up = abs(T_upwind - T_up_exact) / T_up_exact
+        rel_err_down = abs(T_downwind - T_down_exact) / T_down_exact
+
+        print(f"  T upwind (+x): {T_upwind:.4f} (exact {T_up_exact:.4f})")
+        print(f"  T downwind (-x): {T_downwind:.4f} (exact {T_down_exact:.4f})")
+        print(f"  Asymmetry: {asymmetry:.4f} (exact {asym_exact:.4f}), cross-axis: {cross_asymmetry:.4f}")
 
         self.T, self.B = T, B
 
         return ExperimentResult(
             name=self.name,
             category=self.category,
-            success=asymmetry > 0.1,
-            metrics={"T_left": T_left, "T_right": T_right, "asymmetry": asymmetry},
+            success=(asymmetry > 0.1)
+            and (cross_asymmetry < 0.02)
+            and (rel_err_up < 0.1)
+            and (rel_err_down < 0.1),
+            metrics={
+                "T_upwind": T_upwind,
+                "T_downwind": T_downwind,
+                "T_upwind_exact": T_up_exact,
+                "T_downwind_exact": T_down_exact,
+                "asymmetry": asymmetry,
+                "asymmetry_exact": asym_exact,
+                "cross_asymmetry": cross_asymmetry,
+            },
             arrays={"T": np.array(T)},
             metadata={"drift_magnitude": b},
         )
@@ -375,16 +414,25 @@ class A4_ConstantDrift(Experiment):
     def visualize(self, save_path: Optional[str] = None) -> plt.Figure:
         fig, axes = plt.subplots(1, 2, figsize=(12, 5))
         plot_arrival_time(self.T, ax=axes[0], title="Arrival Time with Drift")
-        plot_drift_field(np.array(self.B), axes[0], step=15, scale=20)
+        # Plot the *effective wind* -B (fast direction), not the Randers form B.
+        plot_drift_field(-np.array(self.B), axes[0], step=15, scale=20)
 
         N = self.N
+        b = self.drift_magnitude
         profile = np.array(self.T[:, N // 2])
         x = np.arange(N) - N // 2
-        axes[1].plot(x, profile)
+        T_exact = np.where(
+            x >= 0,
+            x * (np.sqrt(1 + b**2) + b),
+            -x * (np.sqrt(1 + b**2) - b),
+        )
+        axes[1].plot(x, profile, label="Computed")
+        axes[1].plot(x, T_exact, "k--", alpha=0.6, label="Exact Randers")
         axes[1].axvline(0, color="r", linestyle="--", alpha=0.5)
-        axes[1].set_xlabel("x offset")
+        axes[1].set_xlabel("x offset (axis 0)")
         axes[1].set_ylabel("Arrival time")
-        axes[1].set_title(f"Profile (b={self.drift_magnitude})")
+        axes[1].set_title(f"Profile along drift axis (b={b})")
+        axes[1].legend()
         axes[1].grid(True, alpha=0.3)
 
         fig.suptitle("A4: Constant Drift Field", fontsize=14)
@@ -751,11 +799,18 @@ class A8_MultiSource(Experiment):
 # =============================================================================
 @register_experiment
 class A9_IterationComplexity(Experiment):
-    """Verify O(1) iterations, O(N²) total work."""
+    """Verify near-O(N²) wall-clock scaling of the fast sweeping solver.
+
+    Fast sweeping converges in a grid-independent number of sweeps for
+    smooth metrics (2-3 in Gahtan et al.), so total work should scale with
+    the number of grid points, O(N²). The solver does not currently expose
+    its iteration count, so this experiment measures wall-clock scaling as
+    a proxy; the fitted log-log exponent should be ~2.
+    """
 
     name = "A9_iteration_complexity"
     category = "A_forward_solver"
-    description = "Verify iteration count is O(1)"
+    description = "Verify near-O(N^2) runtime scaling (constant sweep count proxy)"
 
     def __init__(self, grid_sizes: List[int] = None):
         super().__init__()
@@ -843,6 +898,79 @@ class A9_IterationComplexity(Experiment):
 
 
 # =============================================================================
+# A10: EIKONAL VS AVBD CROSS-VALIDATION
+# =============================================================================
+@register_experiment
+class A10_EikonalVsAVBD(Experiment):
+    """Cross-validate Eikonal and AVBD solvers on a complex metric."""
+
+    name = "A10_eikonal_vs_avbd"
+    category = "A_forward_solver"
+    description = "Verify Eikonal and AVBD solvers agree on path length < 5% error"
+
+    def __init__(self, N: int = 150, n_targets: int = 50):
+        super().__init__()
+        self.N = N
+        self.n_targets = n_targets
+
+    def run(self) -> ExperimentResult:
+        N = self.N
+        
+        I, J = jnp.meshgrid(jnp.arange(N), jnp.arange(N), indexing="ij")
+        
+        G = jnp.zeros((3, N, N))
+        G = G.at[0].set(1.0 + 0.5 * jnp.sin(I / 10.0))
+        G = G.at[2].set(1.0 + 0.5 * jnp.cos(J / 10.0))
+        
+        B = jnp.zeros((2, N, N))
+        B = B.at[0].set(0.3)
+        B = B.at[1].set(0.3)
+
+        source_coords = jnp.array([[N // 2, N // 2]], dtype=jnp.float32)
+
+        H, W = eikonal_to_zermelo(G, B)
+        metric = SyntheticZermeloMetric(H, W)
+
+        # Run Eikonal
+        eikonal = EikonalSolver(max_iters=100, tol=1e-5)
+        T_eikonal, _, _ = eikonal.solve(metric, source_coords, (0, N - 1, 0, N - 1), (N, N))
+        
+        # Pick random targets far from source
+        key = jax.random.PRNGKey(42)
+        dist = jnp.sqrt((I - N//2)**2 + (J - N//2)**2)
+        valid_targets = jnp.argwhere(dist > N//4)
+        indices = jax.random.choice(key, len(valid_targets), shape=(self.n_targets,), replace=False)
+        targets = valid_targets[indices].astype(jnp.float32)
+        
+        # Run AVBD
+        avbd = AVBDSolver(step_size=0.1, iterations=100)
+
+        errors = []
+        for target in targets:
+            traj = avbd.solve(metric, source_coords[0], target, n_steps=20)
+            # Arrival time = Finsler arc length of the geodesic. NOTE:
+            # traj.energy is the discrete action sum(0.5 F^2), NOT the length.
+            t_avbd = metric.arc_length(traj.xs)
+            t_eikonal = T_eikonal[int(target[0]), int(target[1])]
+            
+            rel_err = float(jnp.abs(t_avbd - t_eikonal) / jnp.maximum(t_eikonal, 1e-8))
+            errors.append(rel_err)
+            
+        mre = np.mean(errors)
+        max_err = np.max(errors)
+        
+        return ExperimentResult(
+            name=self.name,
+            category=self.category,
+            success=(mre < 0.05),
+            metrics={"mre": mre, "max_err": max_err},
+            metadata={"N": N, "n_targets": self.n_targets},
+        )
+
+    def visualize(self, save_path: Optional[str] = None) -> plt.Figure:
+        return None
+
+# =============================================================================
 # RUN ALL
 # =============================================================================
 
@@ -856,6 +984,7 @@ ALL_EXPERIMENTS = [
     A7_SpatiallyVaryingMetric,
     A8_MultiSource,
     A9_IterationComplexity,
+    A10_EikonalVsAVBD,
 ]
 
 

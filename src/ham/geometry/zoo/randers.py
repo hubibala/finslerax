@@ -55,10 +55,17 @@ class Randers(AsymmetricMetric):
         w_norm_sq = jnp.dot(W_raw, jnp.dot(H, W_raw))
         w_norm = jnp.sqrt(jnp.maximum(w_norm_sq, GRAD_EPS))
 
+        # Smooth causal squash applied for ALL wind magnitudes.  The previous
+        # ``jnp.where(w_norm < 0.5, 1.0, ...)`` gate introduced a C0 JUMP at the
+        # boundary: the squashed magnitude dropped from 0.5 (scale=1) to
+        # max_speed*tanh(0.5) ~= 0.462 (scale<1), so the wind field -- and hence
+        # F and its gradients -- was discontinuous, violating Finsler regularity
+        # (review finding W-RAND).  Applying ``max_speed * tanh(w_norm)/w_norm``
+        # everywhere keeps F in C^1 and still guarantees the Zermelo weak-wind
+        # bound ||W_safe||_H = max_speed*tanh(w_norm) < max_speed < 1 (strong
+        # convexity).  Reference: spec/MATH_SPEC.md section 5.
         max_speed = 1.0 - self.epsilon
-        scale = jnp.where(
-            w_norm < 0.5, 1.0, (max_speed * jnp.tanh(w_norm)) / (w_norm + GRAD_EPS)
-        )
+        scale = (max_speed * jnp.tanh(w_norm)) / (w_norm + GRAD_EPS)
         W_safe = W_raw * scale
 
         safe_w_norm_sq = jnp.dot(W_safe, jnp.dot(H, W_safe))

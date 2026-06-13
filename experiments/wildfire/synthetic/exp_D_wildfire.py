@@ -21,6 +21,7 @@ from experiments.wildfire.synthetic.metric_recovery import (
 )
 from ham.solvers.avbd import AVBDSolver
 from ham.solvers.eikonal import EikonalSolver
+from experiments.wildfire.synthetic.metric_recovery import zermelo_to_eikonal
 
 
 # =============================================================================
@@ -28,7 +29,14 @@ from ham.solvers.eikonal import EikonalSolver
 # =============================================================================
 @register_experiment
 class D1_TerrainDriven(Experiment):
-    """Fire spread influenced by terrain slope."""
+    """Fire spread influenced by terrain slope.
+
+    Slope is modeled as a Randers drift pointing uphill (fire accelerates
+    upslope), the first-order device of Dehkordi (2022) "Applications of
+    Randers geodesics for wildfire spread modelling"; cf. the full
+    wind-and-slope Finsler model of Javaloyes, Pendas-Recondo & Sanchez
+    (SIAM J. Appl. Algebra Geometry, 2023).
+    """
 
     name = "D1_terrain_driven"
     category = "D_synthetic_wildfire"
@@ -55,17 +63,27 @@ class D1_TerrainDriven(Experiment):
         grad_j = grad_j.at[:, 1:-1].set((elevation[:, 2:] - elevation[:, :-2]) / 2)
 
         slope_mag = jnp.sqrt(grad_i**2 + grad_j**2)
-        speed_factor = 1.0 / (1.0 + 0.5 * slope_mag)
 
-        G = jnp.zeros((3, N, N))
-        G = G.at[0].set(1.0 / speed_factor**2)
-        G = G.at[2].set(1.0 / speed_factor**2)
+        H = jnp.zeros((3, N, N))
+        H = H.at[0].set(1.0)
+        H = H.at[2].set(1.0)
 
-        B = jnp.zeros((2, N, N))
+        # Fire travels uphill fastest, so the effective drift W points uphill
+        # (along the elevation gradient). This is the slope-as-drift device of
+        # Dehkordi (2022), "Applications of Randers geodesics for wildfire
+        # spread modelling". The Randers/Zermelo construction requires the
+        # weak-wind condition ||W||_H < 1, so the slope drift is clamped.
+        W = jnp.stack([grad_i, grad_j]) * 0.5
+        W_norm = jnp.sqrt(W[0] ** 2 + W[1] ** 2)
+        W_cap = 0.8
+        scale = jnp.where(W_norm > W_cap, W_cap / jnp.maximum(W_norm, 1e-8), 1.0)
+        W = W * scale
 
+        G, B = zermelo_to_eikonal(H, W)
+
+        # Ignite in the lower-left quadrant so the front crosses the hill.
         source_coords = jnp.array([[N // 4, N // 4]], dtype=jnp.float32)
 
-        H, W = eikonal_to_zermelo(G, B)
         metric = SyntheticZermeloMetric(H, W)
 
         solver = EikonalSolver(max_iters=100, tol=1e-4)
@@ -129,7 +147,13 @@ class D1_TerrainDriven(Experiment):
 # =============================================================================
 @register_experiment
 class D2_WindDriven(Experiment):
-    """Fire spread influenced by wind (drift field)."""
+    """Fire spread influenced by wind (drift field).
+
+    Wind enters as Zermelo drift, producing the elliptical head/flank/backing
+    fire shapes assumed by operational models (Richards 1990/95 Huygens
+    wavelet equations, as used in FARSITE/Prometheus) — an ellipse offset
+    from its focus is exactly a Randers indicatrix.
+    """
 
     name = "D2_wind_driven"
     category = "D_synthetic_wildfire"
@@ -146,21 +170,20 @@ class D2_WindDriven(Experiment):
     def run(self) -> ExperimentResult:
         N = self.N
 
-        G = jnp.zeros((3, N, N))
-        G = G.at[0].set(1.0)
-        G = G.at[2].set(1.0)
+        H = jnp.zeros((3, N, N))
+        H = H.at[0].set(1.0)
+        H = H.at[2].set(1.0)
 
-        B = jnp.zeros((2, N, N))
-        B = B.at[0].set(self.wind_speed * np.cos(self.wind_dir))
-        B = B.at[1].set(self.wind_speed * np.sin(self.wind_dir))
+        W = jnp.zeros((2, N, N))
+        W = W.at[0].set(self.wind_speed * np.cos(self.wind_dir))
+        W = W.at[1].set(self.wind_speed * np.sin(self.wind_dir))
 
         source_coords = jnp.array([[N // 2, N // 2]], dtype=jnp.float32)
 
-        H, W = eikonal_to_zermelo(G, B)
+        G, B = zermelo_to_eikonal(H, W)
         metric_wind = SyntheticZermeloMetric(H, W)
 
-        H_nowind, W_nowind = eikonal_to_zermelo(G, jnp.zeros_like(B))
-        metric_nowind = SyntheticZermeloMetric(H_nowind, W_nowind)
+        metric_nowind = SyntheticZermeloMetric(H, jnp.zeros_like(W))
 
         solver = EikonalSolver(max_iters=100, tol=1e-4)
         T, _, _ = solver.solve(metric_wind, source_coords, (0, N - 1, 0, N - 1), (N, N))
@@ -185,7 +208,7 @@ class D2_WindDriven(Experiment):
             traj = avbd.solve(metric_wind, source_coords[0], obs)
             paths.append(np.array(traj.xs))
 
-        self.T, self.T_nowind, self.B = T, T_nowind, B
+        self.T, self.T_nowind, self.W = T, T_nowind, W
         self.paths = paths
 
         return ExperimentResult(
@@ -206,7 +229,7 @@ class D2_WindDriven(Experiment):
         plot_arrival_time(self.T_nowind, ax=axes[0], title="No Wind")
 
         plot_arrival_time(self.T, ax=axes[1], title="With Wind")
-        plot_drift_field(self.B, axes[1], step=15, scale=15, color="white")
+        plot_drift_field(self.W, axes[1], step=15, scale=15, color="white")
 
         # Overlay AVBD paths
         paths_np = np.array(self.paths)
@@ -231,7 +254,13 @@ class D2_WindDriven(Experiment):
 # =============================================================================
 @register_experiment
 class D3_FuelHeterogeneity(Experiment):
-    """Varying fuel loads create speed variations."""
+    """Varying fuel loads create speed variations.
+
+    Toy model: isotropic rate of spread proportional to fuel load
+    (G ~ 1/speed^2). Real RoS comes from Rothermel's (1972) fuel-model
+    equations; this experiment only demonstrates that the solver resolves
+    heterogeneous speed fields, not fuel physics.
+    """
 
     name = "D3_fuel_heterogeneity"
     category = "D_synthetic_wildfire"
@@ -350,25 +379,33 @@ class D4_CombinedScenario(Experiment):
             fuel_np[dist < radius] = intensity
 
         fuel = jnp.array(fuel_np)
-        speed = fuel / (1.0 + 0.3 * slope_mag)
 
-        G = jnp.zeros((3, N, N))
-        G = G.at[0].set(1.0 / (speed**2 + 0.1))
-        G = G.at[2].set(G[0])
+        H = jnp.zeros((3, N, N))
+        H = H.at[0].set(1.0 / (fuel**2 + 0.1))
+        H = H.at[2].set(H[0])
 
-        B = jnp.zeros((2, N, N))
-        B = B.at[0].set(0.15)
-        B = B.at[1].set(0.1)
+        W_slope = jnp.stack([grad_i, grad_j]) * 0.2
+        W_wind = jnp.zeros((2, N, N))
+        W_wind = W_wind.at[0].set(0.15)
+        W_wind = W_wind.at[1].set(0.1)
+        W = W_slope + W_wind
+
+        # Enforce the Zermelo weak-wind condition ||W||_H < 1 (H = isotropic
+        # fuel metric here, so the bound is on the H-norm, not the Euclidean one).
+        W_norm_H = jnp.sqrt(H[0] * W[0] ** 2 + H[2] * W[1] ** 2)
+        W_cap = 0.8
+        scale = jnp.where(W_norm_H > W_cap, W_cap / jnp.maximum(W_norm_H, 1e-8), 1.0)
+        W = W * scale
 
         source_coords = jnp.array([[N // 4, N // 4]], dtype=jnp.float32)
 
-        H, W = eikonal_to_zermelo(G, B)
+        G, B = zermelo_to_eikonal(H, W)
         metric = SyntheticZermeloMetric(H, W)
 
         solver = EikonalSolver(max_iters=100, tol=1e-4)
         T, _, _ = solver.solve(metric, source_coords, (0, N - 1, 0, N - 1), (N, N))
 
-        self.T, self.G, self.B = T, G, B
+        self.T, self.G, self.W = T, G, W
         self.elevation, self.fuel = elevation, fuel
 
         return ExperimentResult(
@@ -396,7 +433,7 @@ class D4_CombinedScenario(Experiment):
         axes[0, 1].set_title("Fuel")
 
         plot_arrival_time(self.T, ax=axes[1, 0], title="Arrival Time")
-        plot_drift_field(self.B, axes[1, 0], step=20, scale=20, color="white")
+        plot_drift_field(self.W, axes[1, 0], step=20, scale=20, color="white")
 
         im = axes[1, 1].imshow(self.G[0], origin="upper", cmap="hot")
         plt.colorbar(im, ax=axes[1, 1], label="g₁₁")

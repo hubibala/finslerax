@@ -468,9 +468,19 @@ class CovariateMeshRanders(AsymmetricMetric):
             x: (3,) position on (or near) the mesh surface.
 
         Returns:
-            H_3d:   (3, 3) isotropic metric tensor g_iso * I_3.
-            W_3d:   (3,) wind vector lifted to face tangent plane.
-            lambda: Causality scalar ``1 - ||W||²_{H^{-1}}``.
+            H_3d:   (3, 3) isotropic Zermelo sea metric ``g_iso * I_3`` (the
+                    same tensor ``metric_fn`` uses under ``sqrt(v^T G v)``).
+            W_3d:   (3,) Zermelo wind *vector* ``W = H^{-1} b = b / g_iso``,
+                    lifted to the face tangent plane.
+            lambda: Causality scalar ``1 - ||W||^2_H = 1 - ||b||^2 / g_iso``.
+
+        Note:
+            The wind returned is the Zermelo wind *vector* ``b / g_iso``, not
+            the drift one-form ``b`` itself.  The eikonal/zoo reconstruction
+            ``F = (sqrt(lam v^T H v + (v^T H W)^2) - v^T H W)/lam`` reproduces
+            ``metric_fn`` exactly only with ``W = H^{-1} b``; returning the raw
+            ``b`` made the eikonal-solved metric disagree with ``metric_fn``
+            (review finding MATH-ZD1).
         """
         weights = self.manifold.get_face_weights(x)
         face_idx = jnp.argmax(weights)
@@ -486,11 +496,13 @@ class CovariateMeshRanders(AsymmetricMetric):
         u2 = e2_orth / norm_e2
 
         G_f, b_f = self._get_face_params(face_idx)
-        g_iso = 0.5 * (G_f[0, 0] + G_f[1, 1])
+        g_iso = jnp.maximum(0.5 * (G_f[0, 0] + G_f[1, 1]), 1e-8)
         b_3d = b_f[0] * u1 + b_f[1] * u2
 
         H_3d = g_iso * jnp.eye(3, dtype=G_f.dtype)
+        # Zermelo wind vector W = H^{-1} b = b / g_iso (sea is isotropic g_iso*I).
+        W_3d = b_3d / g_iso
         b_norm_sq = jnp.sum(b_3d**2)
-        b_Ginv_b = b_norm_sq / jnp.maximum(g_iso, 1e-8)
+        b_Ginv_b = b_norm_sq / g_iso
         lam = jnp.maximum(1.0 - b_Ginv_b, 1e-6)
-        return H_3d, b_3d, lam
+        return H_3d, W_3d, lam
