@@ -31,5 +31,7 @@ jobs:
         uv sync --all-extras
         
     - name: Run tests with pytest
+      env:
+        JAX_PLATFORMS: cpu
       run: |
         uv run pytest tests/ -v

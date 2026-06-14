@@ -6,6 +6,7 @@ Provides dataset loaders, normalizers, and spatial/temporal preprocessing method
 the Sim2Real-Fire dataset (Gahtan et al., 2026).
 """
 
+from __future__ import annotations
 from typing import Optional
 
 import numpy as np
