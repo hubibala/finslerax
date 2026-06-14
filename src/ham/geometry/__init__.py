@@ -9,7 +9,13 @@ from .manifolds import EuclideanSpace, Hyperboloid, Paraboloid, Sphere, Torus
 from .mesh import TriangularMesh
 from .metric import FinslerMetric
 from .transport import BerwaldConnection
-from .zoo import DiscreteRanders, Euclidean, Randers, Riemannian
+from .zoo import (
+    DiscreteRanders,
+    Euclidean,
+    Randers,
+    Riemannian,
+    SegmentQuadratureMetric,
+)
 
 __all__ = [
     "BerwaldConnection",
@@ -22,6 +28,7 @@ __all__ = [
     "Paraboloid",
     "Randers",
     "Riemannian",
+    "SegmentQuadratureMetric",
     "Sphere",
     "Torus",
     "TriangularMesh",

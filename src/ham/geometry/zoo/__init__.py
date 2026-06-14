@@ -2,6 +2,7 @@
 
 from .discrete import DiscreteRanders
 from .euclidean import Euclidean
+from .quadrature import SegmentQuadratureMetric
 from .randers import Randers
 from .riemannian import Riemannian
 
@@ -10,4 +11,5 @@ __all__ = [
     "Euclidean",
     "Randers",
     "Riemannian",
+    "SegmentQuadratureMetric",
 ]

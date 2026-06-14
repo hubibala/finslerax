@@ -29,7 +29,7 @@ import jax.numpy as jnp
 
 from ham.solvers.avbd import Trajectory
 
-__all__ = ["resample_path", "solve_continuation"]
+__all__ = ["resample_path", "reparametrize_arclength", "solve_continuation"]
 
 
 def resample_path(path: jax.Array, n_steps: int, project=None) -> jax.Array:
@@ -57,6 +57,39 @@ def resample_path(path: jax.Array, n_steps: int, project=None) -> jax.Array:
     if project is not None:
         out = jax.vmap(project)(out)
     return out
+
+
+def reparametrize_arclength(path: jax.Array, n_steps: Optional[int] = None) -> jax.Array:
+    """Resample a path to uniform **arc length** (vs uniform parameter index).
+
+    Energy-minimising geodesics are constant-*Finsler*-speed, so their vertices
+    are sparser where the metric is cheap and denser where it is expensive — this
+    looks like bunching and limits how well a fixed vertex budget resolves a
+    curved valley.  Reparametrising to uniform Euclidean arc length redistributes
+    the vertices evenly along the *same* curve (it changes only the
+    parametrisation, not the path image), which is what you usually want for
+    display and for downstream uniform sampling.
+
+    Args:
+        path: Source path, shape ``(M + 1, D)``.
+        n_steps: Target number of segments; output has ``n_steps + 1`` vertices.
+            Defaults to keeping the input vertex count.
+
+    Returns:
+        Arc-length-uniform path, shape ``(n_steps + 1, D)`` with exact endpoints.
+    """
+    if n_steps is None:
+        n_steps = path.shape[0] - 1
+    seg = jnp.linalg.norm(path[1:] - path[:-1], axis=1)
+    s = jnp.concatenate([jnp.zeros(1), jnp.cumsum(seg)])
+    total = s[-1]
+    # Guard a degenerate (zero-length) path: fall back to index parametrisation.
+    src_t = jnp.where(total > 0, s / jnp.where(total > 0, total, 1.0),
+                      jnp.linspace(0.0, 1.0, path.shape[0]))
+    dst_t = jnp.linspace(0.0, 1.0, n_steps + 1)
+    return jax.vmap(lambda col: jnp.interp(dst_t, src_t, col), in_axes=1, out_axes=1)(
+        path
+    )
 
 
 def solve_continuation(
