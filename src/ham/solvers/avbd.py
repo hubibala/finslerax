@@ -428,6 +428,7 @@ class AVBDSolver(eqx.Module):
         constraints: Optional[list[Callable[[jax.Array], jax.Array]]] = None,
         train_mode: bool = True,
         key: Optional[jax.Array] = None,
+        init_path: Optional[jax.Array] = None,
     ) -> Trajectory:
         """Finds the energy-minimizing geodesic between two points.
 
@@ -442,6 +443,14 @@ class AVBDSolver(eqx.Module):
                 If False, uses jax.lax.while_loop (supports early stopping).
             key: PRNG key for stochastic vertex permutation. If None,
                 a deterministic key is derived from p_start and p_end.
+            init_path: Optional warm-start path of shape ``(n_steps + 1, D)``.
+                When provided, the solver initializes from this path (projected
+                onto the manifold) instead of the default projected straight
+                line. The boundary vertices are always overwritten by
+                ``p_start`` / ``p_end``. This enables numerical continuation
+                (e.g. annealing a stiff metric by warm-starting each solve from
+                the previous solution) to escape poor local minima. Honoured by
+                the default solve path; ignored when ``implicit_diff=True``.
 
         Returns:
             A Trajectory containing the optimized path and statistics.
@@ -451,7 +460,7 @@ class AVBDSolver(eqx.Module):
                 metric, p_start, p_end, n_steps, constraints, train_mode, key
             )
         return self._solve_core(
-            metric, p_start, p_end, n_steps, constraints, train_mode, key
+            metric, p_start, p_end, n_steps, constraints, train_mode, key, init_path
         )
 
     def _solve_implicit(
@@ -496,6 +505,7 @@ class AVBDSolver(eqx.Module):
         constraints: Optional[list[Callable[[jax.Array], jax.Array]]] = None,
         train_mode: bool = True,
         key: Optional[jax.Array] = None,
+        init_path: Optional[jax.Array] = None,
     ) -> Trajectory:
         """Core iterative AVBD solver (unrolled backprop).
 
@@ -524,13 +534,21 @@ class AVBDSolver(eqx.Module):
         actual_constraints = constraints if constraints is not None else []
         num_constraints = len(actual_constraints)
 
-        # Linear initialization in ambient space, then projected
-        t = jnp.linspace(0, 1, n_steps + 1)[:, None]
-        linear_path = (1 - t) * p_start + t * p_end
+        # Initialization in ambient space, then projected. By default a
+        # straight line between the boundary points; a caller-supplied
+        # ``init_path`` overrides it (boundary vertices are forced to the true
+        # endpoints) to support warm-started numerical continuation.
+        if init_path is None:
+            t = jnp.linspace(0, 1, n_steps + 1)[:, None]
+            base_path = (1 - t) * p_start + t * p_end
+        else:
+            base_path = jnp.concatenate(
+                [p_start[None], init_path[1:-1], p_end[None]], axis=0
+            )
 
         # Perturb slightly to avoid zero-velocity singularities at initialization
-        noise = jax.random.normal(k_init, shape=linear_path.shape) * 1e-4
-        path_guess = jax.vmap(metric.manifold.project)(linear_path + noise)
+        noise = jax.random.normal(k_init, shape=base_path.shape) * 1e-4
+        path_guess = jax.vmap(metric.manifold.project)(base_path + noise)
         init_inner = path_guess[1:-1]
 
         # Initialize ALM variables

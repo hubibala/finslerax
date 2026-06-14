@@ -1,5 +1,23 @@
 from .hyperbolic import plot_poincare_disk
 from .isosurface import compute_analytical_normals, differentiable_marching_cubes
+from .style import (
+    CYCLE,
+    PALETTE,
+    axes3d,
+    draw_path,
+    draw_sphere,
+    draw_surface,
+    palette_colorscale,
+    plotly_cones,
+    plotly_layout,
+    plotly_mesh,
+    plotly_path,
+    plotly_sphere,
+    plotly_surface,
+    style_axes3d,
+    tangent_arrows,
+    use_ham_style,
+)
 from .vis import (
     generate_icosphere,
     plot_indicatrices,
@@ -10,13 +28,29 @@ from .vis import (
 )
 
 __all__ = [
+    "CYCLE",
+    "PALETTE",
+    "axes3d",
     "compute_analytical_normals",
     "differentiable_marching_cubes",
+    "draw_path",
+    "draw_sphere",
+    "draw_surface",
     "generate_icosphere",
     "plot_indicatrices",
     "plot_poincare_disk",
     "plot_sphere",
     "plot_trajectory",
     "plot_vector_field",
+    "palette_colorscale",
+    "plotly_cones",
+    "plotly_layout",
+    "plotly_mesh",
+    "plotly_path",
+    "plotly_sphere",
+    "plotly_surface",
     "setup_3d_plot",
+    "style_axes3d",
+    "tangent_arrows",
+    "use_ham_style",
 ]
