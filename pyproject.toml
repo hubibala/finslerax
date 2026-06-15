@@ -58,15 +58,7 @@ Bug_Tracker = "https://github.com/hubibala/ham/issues"
 [tool.pytest.ini_options]
 minversion = "6.0"
 addopts = "-ra -q"
-testpaths = [
-    "tests",
-    "research/weinreb/tests",
-    "research/wildfire/tests"
-]
-pythonpath = [
-    "research/weinreb",
-    "research/wildfire"
-]
+testpaths = ["tests"]
 filterwarnings = [
     "ignore:Module already imported so cannot be rewritten. (fast_array_utils|jaxtyping|zarr):pytest.PytestAssertRewriteWarning",
 ]

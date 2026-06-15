@@ -16,15 +16,21 @@ from .constraints import (
     glide_angle_limit,
     seafloor_clearance,
 )
+from .forecast import DecayingForecast, PerfectForecast, PersistenceForecast
 from .medium import FrozenMedium, OceanMedium, build_snapshot_metric, randers_cost
+from .mpc import MPCResult, run_mpc
 from .planners import StationaryPlanner, TimeLiftedPlanner
 from .vehicle import Glider
 
 __all__ = [
     "Constraint",
+    "DecayingForecast",
     "FrozenMedium",
     "Glider",
+    "MPCResult",
     "OceanMedium",
+    "PerfectForecast",
+    "PersistenceForecast",
     "StationaryPlanner",
     "TimeLiftedPlanner",
     "build_snapshot_metric",
@@ -32,5 +38,6 @@ __all__ = [
     "depth_envelope",
     "glide_angle_limit",
     "randers_cost",
+    "run_mpc",
     "seafloor_clearance",
 ]

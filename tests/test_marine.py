@@ -15,6 +15,7 @@ import sys
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
@@ -205,6 +206,86 @@ def test_constraint_layer_enforced():
     _, times = thread_clock(res.path, medium, glider, 0.0)
     viol = float(max_violation(res.path, times, cons))
     assert viol < 0.05, viol
+
+
+# ---------------------------------------------------------------------------
+def test_forecast_consistency():
+    """Belief models are exact at issue time; persistence is constant in time."""
+    from experiments.marine import (
+        DecayingForecast,
+        OceanMedium,
+        PersistenceForecast,
+    )
+
+    medium = OceanMedium()
+    x = jnp.array([4.0, 5.0, 0.3])
+    t_now = 4.0
+
+    # Decaying forecast equals the true current at the issue time (lead 0)...
+    dec = DecayingForecast(skill=2.5).issue(medium, t_now)
+    w_now = dec.physical_current(x, jnp.asarray(t_now))
+    w_true = medium.physical_current(x, jnp.asarray(t_now))
+    assert jnp.allclose(w_now, w_true, atol=1e-5), (w_now, w_true)
+
+    # ...and reverts toward persistence at long lead (error shrinks vs the truth).
+    far = jnp.asarray(t_now + 20.0)
+    persist = medium.physical_current(x, jnp.asarray(t_now))
+    assert jnp.linalg.norm(dec.physical_current(x, far) - persist) < 1e-2
+
+    # Persistence forecast ignores time entirely.
+    per = PersistenceForecast().issue(medium, t_now)
+    assert jnp.allclose(
+        per.physical_current(x, jnp.asarray(t_now)),
+        per.physical_current(x, jnp.asarray(t_now + 7.3)),
+        atol=1e-6,
+    )
+
+
+# ---------------------------------------------------------------------------
+def test_mpc_between_perfect_and_persistence():
+    """Closed-loop replanning with a decaying forecast lands between the bounds.
+
+    A perfect forecast is the best attainable (lower bound on time); persistence
+    is the worst. Closed-loop MPC with an imperfect (decaying) forecast must not
+    beat perfect foreknowledge, nor do worse than the no-forecast plan.
+    """
+    from experiments.marine import (
+        DecayingForecast,
+        FrozenMedium,
+        OceanMedium,
+        run_mpc,
+    )
+    from experiments.marine.evaluate import executed_arrival_time
+
+    medium = OceanMedium()
+    glider = Glider(glide_angle_max_deg=None)
+    start = jnp.array([1.0, 5.0, 0.05])
+    end = jnp.array([9.0, 5.0, 0.05])
+    t0 = 4.0
+
+    def dive(c, a=0.8):
+        b = np.linspace(np.array(start), np.array(end), 25)
+        s = np.linspace(0, 1, 25)
+        b[:, 2] = np.clip(b[:, 2] + a * np.exp(-((s - c) ** 2) / (2 * 0.18**2)), 0, 1)
+        return jnp.asarray(b)
+
+    tl = TimeLiftedPlanner(n_iters=200, lr=0.03, penalty_weight=80.0)
+    perfect = tl.plan(medium, glider, start, end, t0=t0, n_steps=24,
+                      init_path=dive(0.7), n_restarts=1)
+    frozen = tl.plan(FrozenMedium(medium, t0), glider, start, end, t0=t0,
+                     n_steps=24, init_path=dive(0.5))
+    perf = float(perfect.arrival_time)
+    persistence = float(executed_arrival_time(frozen.path, medium, glider, t0))
+
+    mpc_tl = TimeLiftedPlanner(n_iters=150, lr=0.03, penalty_weight=80.0)
+    cl = run_mpc(medium, glider, DecayingForecast(skill=2.5), mpc_tl, start, end,
+                 t0=t0, control_horizon=2.0, n_steps=16, max_replans=10, n_restarts=1)
+
+    # Reaches the destination.
+    assert np.linalg.norm(cl.flown_path[-1][:2] - np.array(end)[:2]) < 0.5
+    # Bracketed by the two open-loop bounds (with slack for discretization).
+    assert cl.arrival_time >= perf - 0.10 * perf, (cl.arrival_time, perf)
+    assert cl.arrival_time <= persistence + 0.10 * persistence, (cl.arrival_time, persistence)
 
 
 if __name__ == "__main__":

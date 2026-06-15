@@ -50,9 +50,11 @@ The plan:
 4. **Time** — the current evolving, with a Play button.
 5. **Time-dependent planning** — the contribution: a route that accounts for the
    evolving current, animated as the glider flies it.
-6. **Reconstruction** — recovering the current from drifters, with an honest look at
+6. **Closing the loop** — replanning as new data arrives (model-predictive control),
+   because in practice we do not know the future.
+7. **Reconstruction** — recovering the current from drifters, with an honest look at
    what is and isn't identifiable.
-7. **Validation and caveats.**
+8. **Validation and caveats.**
 
 Nothing here is a black box: every number comes from the same small package, and the
 claims are checked against independent solutions.
@@ -540,7 +542,135 @@ fig.show()
 
 # ---------------------------------------------------------------------------
 md(r"""
-## 7. Reconstructing the current from drifters
+## 7. Closing the loop: replanning as data arrives
+
+There is an assumption hiding in §6 worth making explicit: the time-aware planner knew
+the *entire future* of the current before departure. That is the right model when you
+trust a forecast over the whole crossing — but a glider is out for days, and a forecast
+is accurate now and degrades with lead time.
+
+The honest operating mode is **closed-loop**. The glider surfaces periodically, takes in
+new data (its position, a refreshed forecast, maybe a local current measurement),
+re-plans the *remainder* of the route, flies a short interval, and repeats. This is
+model-predictive control, and it is exactly how gliders are run in practice. It is also
+the answer to forecast uncertainty: you no longer need a good long-horizon forecast, only
+a decent short-horizon one, corrected as you go.
+
+The cleanest comparison holds the *controller* fixed and varies only the forecast — both
+closed-loop, identical machinery, so the difference is purely the value of forecast skill:
+
+- a **decaying** (realistic) forecast — exact now, reverting to persistence over a skill horizon;
+- a **persistence** forecast — a control, with no skill at all.
+
+We also carry the §6 **perfect-foreknowledge** plan as the unattainable open-loop *ideal*
+(a lower bound on time). We deliberately do *not* lean on an open-loop persistence "worst
+case": because the planner is non-convex, that plan is a fragile local optimum (it sometimes
+discovers a good dive on its own), so it is not a stable baseline. The closed-loop pair is.
+""")
+
+co(r"""
+from experiments.marine import DecayingForecast, PersistenceForecast, run_mpc
+
+perfect_ideal = aware_executed   # §6 perfect-foreknowledge plan: the open-loop ideal
+
+mpc_planner = TimeLiftedPlanner(n_iters=300, lr=0.03, penalty_weight=80.0)
+cl_decaying = run_mpc(medium, glider, DecayingForecast(skill=2.5), mpc_planner,
+                      START, END, t0=T0, control_horizon=1.5, n_steps=20, n_restarts=1)
+cl_persist = run_mpc(medium, glider, PersistenceForecast(), mpc_planner,
+                     START, END, t0=T0, control_horizon=1.5, n_steps=20, n_restarts=1)
+
+skill_gain = time_saved(cl_persist.arrival_time, cl_decaying.arrival_time)
+print(f"open-loop perfect (unattainable ideal) : {perfect_ideal:.2f}")
+print(f"closed-loop, decaying forecast         : {cl_decaying.arrival_time:.2f}"
+      f"   ({len(cl_decaying.plans)} replans)")
+print(f"closed-loop, persistence forecast      : {cl_persist.arrival_time:.2f}")
+print(f"\nvalue of forecast skill (same controller): "
+      f"decaying vs persistence = {100 * skill_gain:+.1f}% faster")
+""")
+
+co(r"""
+# The unattainable ideal, and the closed-loop pair that isolates forecast skill.
+labels = ["open-loop perfect<br>(unattainable ideal)", "closed-loop<br>decaying forecast",
+          "closed-loop<br>persistence forecast"]
+vals = [perfect_ideal, cl_decaying.arrival_time, cl_persist.arrival_time]
+colors = [PALETTE["green"], PALETTE["accent"], PALETTE["muted"]]
+fig = go.Figure(go.Bar(x=vals, y=labels, orientation="h",
+                       marker_color=colors, text=[f"{v:.2f}" for v in vals],
+                       textposition="outside"))
+fig.update_layout(
+    title=f"Within closed-loop control, forecast skill saves {100 * skill_gain:.0f}%",
+    xaxis_title="elapsed travel time", height=320, width=640,
+    paper_bgcolor="white", plot_bgcolor="white",
+    yaxis=dict(autorange="reversed"), margin=dict(l=10, r=10, t=44, b=10))
+fig.show()
+""")
+
+md(r"""
+Two honest readings. Under the identical controller, the realistic decaying forecast reaches
+the destination several percent faster than a no-skill persistence forecast — that margin *is*
+the value of forecast skill, and it is stable across runs. But closed-loop control does not
+reach the perfect-foreknowledge ideal: committing to short intervals and re-optimizing locally
+carries an overhead. That gap is the honest price of not knowing the future — and the reason a
+real glider both forecasts *and* replans.
+
+The animation below makes the mechanism concrete. Each frame is one **replan**: the glider
+(orange dot) advances, the path already flown is drawn solid, and the freshly computed plan
+for the remaining route is shown. Watch the plan change as the glider learns that the deep
+window is opening. Press **Play**.
+""")
+
+co(r"""
+plans = cl_decaying.plans
+flown = np.array(cl_decaying.flown_path)
+issue_t = cl_decaying.issue_times
+
+frames = []
+for i, plan in enumerate(plans):
+    p = np.array(plan)
+    fl = flown[: i + 1]
+    frames.append(go.Frame(name=f"{issue_t[i]:.1f}", data=[
+        go.Scatter3d(x=p[:, 0], y=p[:, 1], z=p[:, 2], mode="lines",
+                     line=dict(color=PALETTE["accent"], width=5)),
+        go.Scatter3d(x=[flown[i, 0]], y=[flown[i, 1]], z=[flown[i, 2]], mode="markers",
+                     marker=dict(size=8, color=PALETTE["accent"])),
+        go.Scatter3d(x=fl[:, 0], y=fl[:, 1], z=fl[:, 2], mode="lines",
+                     line=dict(color=PALETTE["ink"], width=4)),
+    ]))
+
+gx = np.linspace(0.6, 9.4, 2)
+GXm, GYm = np.meshgrid(gx, gx)
+static = [
+    go.Surface(x=GXm, y=GYm, z=np.full_like(GXm, medium.z_thermocline),
+               colorscale=[[0, PALETTE["surface"]], [1, PALETTE["surface"]]],
+               opacity=0.18, showscale=False, hoverinfo="skip"),
+    go.Scatter3d(x=[float(START[0])], y=[float(START[1])], z=[float(START[2])],
+                 mode="markers", marker=dict(size=5, color=PALETTE["ink"], symbol="circle"),
+                 name="start"),
+    go.Scatter3d(x=[float(END[0])], y=[float(END[1])], z=[float(END[2])],
+                 mode="markers", marker=dict(size=5, color=PALETTE["ink"], symbol="diamond"),
+                 name="end"),
+]
+fig = go.Figure(data=[frames[0].data[0], frames[0].data[1], frames[0].data[2], *static],
+                frames=frames)
+play = dict(label="▶ Play", method="animate",
+            args=[None, {"frame": {"duration": 600, "redraw": True}, "fromcurrent": True}])
+pause = dict(label="⏸ Pause", method="animate",
+             args=[[None], {"frame": {"duration": 0, "redraw": False}, "mode": "immediate"}])
+steps = [dict(method="animate", label=f.name,
+              args=[[f.name], {"frame": {"duration": 0, "redraw": True}, "mode": "immediate"}])
+         for f in frames]
+ocean_layout(fig, "Closed-loop replanning: the plan updates as data arrives", height=600)
+fig.update_layout(
+    updatemenus=[dict(type="buttons", showactive=False, x=0.02, y=0.05,
+                      xanchor="left", yanchor="bottom", buttons=[play, pause])],
+    sliders=[dict(active=0, x=0.18, len=0.78, y=0.02, yanchor="bottom",
+                  currentvalue=dict(prefix="replan at t = ", font=dict(size=13)), steps=steps)])
+fig.show()
+""")
+
+# ---------------------------------------------------------------------------
+md(r"""
+## 8. Reconstructing the current from drifters
 
 So far the current was known. In practice it is measured — often by **drifters**, buoys that
 float passively with the flow. A drifter's track is an integral curve of $W$, so a drifter
@@ -620,7 +750,7 @@ fig.show()
 
 # ---------------------------------------------------------------------------
 md(r"""
-## 8. Validation
+## 9. Validation
 
 The claims rest on independent checks, all in `tests/test_marine.py`:
 
@@ -664,14 +794,18 @@ print(f"relative difference    : {abs(float(res.arrival_time) - t_star) / t_star
 
 # ---------------------------------------------------------------------------
 md(r"""
-## 9. What this is, and what it isn't
+## 10. What this is, and what it isn't
 
 **What it is.** A demonstration that time-optimal navigation through an ocean current is a
-Randers-geometry problem HAM solves directly, including the time-dependent case via a
-clock-threaded path solver — with results cross-checked against independent solutions.
+Randers-geometry problem HAM solves directly — stationary, time-dependent (a clock-threaded
+path solver), and closed-loop (receding-horizon replanning when the future is uncertain),
+with results cross-checked against independent solutions.
 
 **Honest limits.**
 
+- The open-loop "perfect foreknowledge" numbers are an upper bound on the benefit; closed-loop
+  replanning realizes most but not all of it (§7), and only because the forecast has
+  short-horizon skill — replanning alone, without skill, buys nothing.
 - The time-lifted planner solves a non-convex boundary-value problem; the routes are *local*
   optima, warm-started and multi-started. Reported numbers are reproducible but not certified
   global.

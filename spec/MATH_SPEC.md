@@ -1,7 +1,7 @@
-# MATH_SPEC.md: Mathematical Foundations of the HAMTools Library (Berwald Edition)
+# MATH_SPEC.md: Mathematical Foundations of the HAM Library (Berwald Edition)
 
-**Version:** 1.1.0 (Berwald Revision)
-**Date:** December 2, 2025
+**Version:** 1.2.0 (Berwald Revision + Eikonal Duality)
+**Date:** June 2026
 **Project:** Holonomic Association Model (HAM)
 
 ## Abstract
@@ -91,14 +91,14 @@ When the metric is defined in ambient coordinates as $g(x) = I_n$ (the identity)
 
 $$X_{k+1} = \Pi_{T_{\gamma_{k+1}}\mathcal{M}} \left( X_k - \Gamma^i_{jk} \dot\gamma^j X^k \Delta t \right) = \Pi_{T_{\gamma_{k+1}}\mathcal{M}}(X_k)$$
 
-This is a valid approximation of the Levi-Civita connection via the Gauss equation ($\nabla^M_X Y = \Pi_{TM}(\bar\nabla_X Y)$), but it produces a holonomy angle that is the complement of the standard solid-angle formula:
+This is a valid approximation of the Levi-Civita connection via the Gauss equation ($\nabla^M_X Y = \Pi_{TM}(\bar\nabla_X Y)$), but it produces a holonomy angle that is the complement of the standard solid-angle formula. Here $\theta$ is the **colatitude** (polar angle measured from the north pole), so the transport circle is at constant $\theta$ and the enclosed spherical cap subtends solid angle $\Omega = 2\pi(1-\cos\theta)$:
 
-| Mechanism | Holonomy angle for latitude $\theta$ on $S^2$ |
+| Mechanism | Holonomy angle for colatitude $\theta$ on $S^2$ |
 |---|---|
 | Projection-based ($\Gamma = 0$, ambient coords) | $2\pi\cos\theta$ |
 | Intrinsic Levi-Civita ($\Gamma \neq 0$, chart coords) | $2\pi(1 - \cos\theta)$ |
 
-Both are equivalent modulo $2\pi$ (since $\cos(2\pi\cos\theta) = \cos(2\pi(1-\cos\theta))$). The implementation uses the projection-based approach when the metric is position-independent in ambient coordinates.
+The intrinsic row is the textbook result: parallel transport around a circle of colatitude $\theta$ rotates a vector by the enclosed solid angle $2\pi(1-\cos\theta)$. (In terms of *latitude* $\varphi = \tfrac{\pi}{2}-\theta$ this reads $2\pi(1-\sin\varphi)$.) Both rows are equivalent modulo $2\pi$ as elements of $SO(2)$ — since $\cos(2\pi\cos\theta) = \cos\!\big(2\pi(1-\cos\theta)\big)$ — so they describe the same physical rotation. The implementation uses the projection-based approach when the metric is position-independent in ambient coordinates.
 
 For metrics defined in intrinsic coordinates where $g(x)$ is position-dependent (e.g., the Poincaré half-plane $ds^2 = (dx^2+dy^2)/y^2$), the Berwald connection is non-trivially non-zero and the ODE integration genuinely drives the transport.
 
@@ -143,11 +143,19 @@ where $\lambda = 1 - \|W\|_h^2$.
 ## 6. Numerical Stability
 
 ### 6.1. Epsilon Regularization
-The Berwald connection involves 3rd derivatives of the Energy (2nd derivatives of Spray). This is highly sensitive to the singularity at $v=0$.
+The spray and Berwald connection involve high-order derivatives of the energy that are sensitive to the singularity at $v = 0$ and to near-degenerate directions (e.g. the Randers boundary, where the fundamental tensor's smallest eigenvalue $\to 0$). Two complementary safeguards are used:
+
+**Norm smoothing.** Where a raw norm would be non-differentiable at the origin, we evaluate a smoothed surrogate
 $$
-F_\epsilon(x, v) = \sqrt{F^2(x, v) + \epsilon^2}
+F_\epsilon(x, v) = \sqrt{F^2(x, v) + \epsilon^2},
 $$
-We perform all derivations on $F_\epsilon$ during training.
+and the `Randers.metric_fn` additionally clamps the discriminant and substitutes a shifted velocity for $\|v\| \approx 0$ so that $F$ and $\nabla F$ stay finite.
+
+**Trace-scaled Tikhonov on the spray solve.** Rather than inverting the bare velocity-Hessian $H = \mathrm{Hess}_v(E)$, the spray solves
+$$
+\big(H + \epsilon\,\tfrac{\mathrm{tr}\,H}{D}\,I\big)\,(-2G) = \nabla_x E - \mathrm{Jac}_x(\nabla_v E)\,v .
+$$
+Scaling the regularizer by the mean eigenvalue $\mathrm{tr}\,H / D$ keeps the *relative* perturbation constant across metrics of different magnitude — avoiding over-regularizing small metrics and under-regularizing large ones.
 
 ### 6.2. Homogeneity Enforcement
 Neural Networks approximating $F(x, v)$ may violate positive homogeneity ($F(\lambda v) \neq \lambda F(v)$).
@@ -163,3 +171,37 @@ $$
 \log_x(y) \approx \frac{\|y - x\|}{\|\Pi_{T_xM}(y - x)\|} \cdot \Pi_{T_xM}(y - x)
 $$
 This preserves the direction but scales the magnitude correctly to avoid optimizer exploitation of the manifold's interior.
+
+---
+
+## 7. The Eikonal Dual: Arrival Times
+
+Sections 2–4 describe the **primal** picture: a path $\gamma$ and its cost $\int F(\gamma, \dot\gamma)\,dt$. For *one-source-to-everywhere* problems it is far cheaper to solve the **dual** problem directly — the field of minimal arrival times $T(x)$ from a source set — without ever enumerating paths. This is the Finsler **eikonal equation**, and HAM's eikonal solvers implement it.
+
+### 7.1. Hamilton–Jacobi Form
+
+The minimal-cost (Finsler distance) field $T(x)$ from a source obeys the static Hamilton–Jacobi equation that the **dual norm** of its gradient is unit:
+$$
+F^*\!\big(x,\, \nabla T(x)\big) = 1, \qquad T\big|_{\text{source}} = 0,
+$$
+where $F^*$ is the polar (Legendre) dual of the Finsler norm $F$. Intuitively, $T$ rises at unit rate per unit Finsler cost, so its gradient lies exactly on the dual indicatrix.
+
+### 7.2. Randers Duality
+
+For a Randers norm written in the affine form $F(x, v) = \sqrt{v^\top G(x)\, v} + B(x)^\top v$, the unit ball $\{F = 1\}$ is an ellipsoid shifted by the drift $B$. Its polar dual is again a shifted ellipsoid, so $F^*(\nabla T) = 1$ becomes a concrete anisotropic eikonal PDE:
+$$
+\big(\nabla T - B\big)^\top G^{-1} \big(\nabla T - B\big) = 1 .
+$$
+The pair $(G, B)$ is an algebraic function of the Zermelo navigation data $(H, W, \lambda)$ of § 5. In the 3-D solver the equivalent **dual** operators are formed directly,
+$$
+Q = \lambda\,\big(H^{-1} - W W^\top\big), \qquad B_{\text{dual}} = -\,\frac{H W}{\lambda},
+$$
+giving $(\nabla T - B_{\text{dual}})^\top Q\,(\nabla T - B_{\text{dual}}) = 1$ — the same PDE, since $Q = G^{-1}$ and $B_{\text{dual}} = B$ (one can verify $\sqrt{v^\top G v} + B^\top v$ reproduces the Zermelo formula of § 5 exactly). The drift term $B$ is exactly what makes the metric **asymmetric**: it shifts the dual indicatrix off-center, so arrival time grows faster against the wind than with it.
+
+### 7.3. Numerical Scheme
+
+The PDE is discretized with an upwind **Godunov Hamiltonian** and solved by the **Fast Sweeping Method**: alternating Gauss–Seidel sweeps in every diagonal direction ($2^d$ orderings in $d$ dimensions) propagate causal information along characteristics until $T$ reaches a fixed point. Because the drift $B$ and off-diagonal couplings of $G^{-1}$ break axis-alignment, the stencil must enumerate all signed upwind donor configurations per axis — omitting them produces causality violations for non-zero wind.
+
+### 7.4. Differentiability
+
+The solvers expose O(1)-memory gradients $\partial T / \partial (G, B)$ via `jax.custom_vjp`. Rather than differentiating through every sweep, the backward pass runs an **adjoint fixed-point iteration** at the converged solution (implicit-function theorem on the discrete steady-state operator). This lets an entire eikonal solve sit inside a training loss — e.g. matching observed arrival times to a learned metric (`ArrivalTimeLoss`) — at constant memory cost regardless of sweep count.
