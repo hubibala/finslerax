@@ -138,6 +138,39 @@ where $\lambda = 1 - \|W\|_h^2$.
 
 **Note:** We use the minus sign convention for $\beta$ here to align with "Headwind increases cost."
 
+### 5.1. Enforcing the Causal Bound $\|W\|_h < 1$
+
+The strong-convexity (weak-wind) condition $\|W\|_h < 1$ keeps $\lambda > 0$ and the
+fundamental tensor positive-definite. A learned $W(x)$ is unconstrained, so it must
+be projected into the causal ball. We require the projection to (i) preserve
+*physically-valid* winds without distortion, (ii) be $C^\infty$ so the spray and
+Berwald connection remain smooth, and (iii) guarantee $\|W\|_h < 1-\varepsilon$
+strictly. Writing $r = \|W\|_h$ and $c = 1-\varepsilon$, we scale $W \mapsto sW$ with
+$s = \varphi(r)/r$, where $\varphi$ is the temperature-controlled smooth minimum
+
+$$
+\varphi(r) \;=\; r \;-\; \tfrac{1}{\kappa}\,\mathrm{softplus}\!\big(\kappa\,(r-c)\big),
+\qquad
+\varphi'(r) = 1 - \sigma\!\big(\kappa(r-c)\big) \in (0,1),
+\qquad
+\sup_r \varphi(r) = c .
+$$
+
+$\varphi$ is the identity to within $\sim e^{-\kappa(c-r)}/\kappa$ for $r < c$, so a
+requested wind of, say, $r=0.5$ is returned as $0.5$ (to $\sim 10^{-6}$), and bending
+is confined to a shell of width $\sim 1/\kappa$ around the causal boundary, where it
+is unavoidable. The stiffness $\kappa$ defaults to `ham.utils.WIND_STIFFNESS`.
+
+> **Historical note.** Earlier versions used $s = (1-\varepsilon)\tanh(r)/r$. Because
+> $\tanh$ has slope $<1$ at the origin, that map bent *every* wind — e.g.
+> $0.5 \mapsto 0.46$ — silently distorting valid currents. The smooth-min above
+> removes this distortion while retaining $C^\infty$ regularity and the strict bound.
+
+For **trusted, prescribed** fields (e.g. a known ocean current already satisfying
+$\|W\|_h < 1$), `Randers(..., wind_mode="raw")` bypasses the clamp entirely and passes
+$W$ through bit-exact, flooring only $\lambda$ as a NaN guard. The default
+`wind_mode="soft"` applies $\varphi$ and is the correct choice for learned winds.
+
 ---
 
 ## 6. Numerical Stability

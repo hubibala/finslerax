@@ -81,6 +81,11 @@ Optional extras:
 | `dev` | pytest, ruff, mypy, matplotlib, jupyter, plotly | development & examples |
 | `gpu` | `jax[cuda12]` | NVIDIA GPU acceleration |
 | `wildfire` | Pillow, rasterio | the wildfire terrain application |
+| `bio` | anndata, scanpy, scvelo, pandas | single-cell / RNA-velocity data loaders (`ham.utils.download_*`) |
+
+> The core install carries only the geometry/solver stack (JAX, Equinox, Optax,
+> NumPy, SciPy). The single-cell data loaders are gated behind `[bio]`; calling
+> them without it raises a clear install hint.
 
 > **Requires JAX ≥ 0.4.** For GPU/TPU builds, follow the
 > [JAX installation guide](https://jax.readthedocs.io/en/latest/installation.html);
