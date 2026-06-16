@@ -25,9 +25,7 @@ dependencies = [
     "equinox>=0.10.0",
     "optax>=0.1.0",
     "numpy",
-    "anndata",
-    "scanpy",
-    "scvelo",
+    "scipy",
 ]
 
 [project.optional-dependencies]
@@ -39,6 +37,14 @@ dev = [
     "plotly",
     "mypy",
     "ruff",
+]
+# Single-cell / RNA-velocity data loaders (ham.utils.download_*). Not required
+# for the core geometry, solvers, or the synthetic experiments shipped in v1.
+bio = [
+    "anndata",
+    "scanpy",
+    "scvelo",
+    "pandas",
 ]
 wildfire = [
     "Pillow>=9.0",
