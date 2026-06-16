@@ -36,7 +36,7 @@ import jax.numpy as jnp
 
 from ham.geometry.manifolds import EuclideanSpace
 from ham.geometry.zoo import Randers
-from ham.utils import GRAD_EPS
+from ham.utils import GRAD_EPS, WIND_STIFFNESS, causal_wind_scale
 
 
 # =============================================================================
@@ -48,12 +48,16 @@ def randers_cost(
     v: jax.Array,
     epsilon: float = 1e-5,
     eps: float = GRAD_EPS,
+    wind_stiffness: float = WIND_STIFFNESS,
 ) -> jax.Array:
     """Zermelo time to traverse displacement ``v`` through current ``W_raw``.
 
-    Mirrors :meth:`ham.geometry.zoo.Randers.zermelo_data` (causal ``tanh`` squash
-    enforcing ``‖W‖_H < 1``) and :meth:`Randers.metric_fn` exactly, for a flat
-    (Euclidean) manifold where ``to_tangent`` is the identity.
+    Mirrors :meth:`ham.geometry.zoo.Randers.zermelo_data` (the smooth,
+    identity-preserving causal clamp enforcing ``‖W‖_H < 1`` via
+    :func:`ham.utils.causal_wind_scale`) and :meth:`Randers.metric_fn` exactly,
+    for a flat (Euclidean) manifold where ``to_tangent`` is the identity. This
+    therefore matches ``Randers(..., wind_mode="soft")``; a trusted current can
+    be passed verbatim by constructing the metric with ``wind_mode="raw"``.
 
     Args:
         H: Riemannian sea tensor at the segment midpoint, shape ``(D, D)``.
@@ -61,6 +65,7 @@ def randers_cost(
         v: Displacement (segment) vector, shape ``(D,)``.
         epsilon: Causality margin (``max_speed = 1 - epsilon``).
         eps: Numerical floor.
+        wind_stiffness: Sharpness of the causal clamp; must match the metric.
 
     Returns:
         Scalar travel time ``F(midpoint, v) >= 0``.
@@ -70,7 +75,7 @@ def randers_cost(
     w_norm_sq = jnp.dot(W_raw, jnp.dot(H, W_raw))
     w_norm = jnp.sqrt(jnp.maximum(w_norm_sq, eps))
     max_speed = 1.0 - epsilon
-    scale = (max_speed * jnp.tanh(w_norm)) / (w_norm + eps)
+    scale = causal_wind_scale(w_norm, max_speed, wind_stiffness)
     W = W_raw * scale
 
     safe_w_norm_sq = jnp.dot(W, jnp.dot(H, W))

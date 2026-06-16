@@ -28,7 +28,7 @@ import jax.numpy as jnp
 from ham.geometry.manifold import Manifold
 from ham.geometry.metric import AsymmetricMetric
 from ham.utils.config import DEFAULT_JNP_DTYPE
-from ham.utils.math import GRAD_EPS, NORM_EPS
+from ham.utils.math import GRAD_EPS, WIND_STIFFNESS, causal_wind_scale
 
 __all__ = [
     "CovariateConditionedRanders",
@@ -86,16 +86,28 @@ def project_spd(mat: jax.Array, eps_min: float, eps_max: float) -> jax.Array:
     return jnp.stack([jnp.stack([g11_new, g12_new]), jnp.stack([g12_new, g22_new])])
 
 
-def project_b_norm(b: jax.Array, G_mat: jax.Array, max_norm: float = 0.9) -> jax.Array:
+def project_b_norm(
+    b: jax.Array,
+    G_mat: jax.Array,
+    max_norm: float = 0.9,
+    stiffness: float = WIND_STIFFNESS,
+) -> jax.Array:
     """Project a drift vector so ``||b||_{G^{-1}} < max_norm``.
 
     The G^{-1}-norm is computed analytically for 2×2 ``G`` without matrix
-    inversion, keeping the operation differentiable everywhere.
+    inversion, keeping the operation differentiable everywhere. Scaling uses the
+    smooth, identity-preserving causal clamp :func:`ham.utils.causal_wind_scale`:
+    a drift already within bound passes through essentially unchanged, while one
+    exceeding the bound is smoothly (``C^infinity``) pulled below ``max_norm``.
+    This replaces the earlier hard ``min(1, max_norm/||b||)`` clamp, which had a
+    ``C^1`` kink at the boundary.
 
     Args:
-        b:        (2,) drift vector.
-        G_mat:    (2, 2) SPD matrix.
-        max_norm: Target supremum for the G^{-1}-norm. Default: 0.9.
+        b:         (2,) drift vector.
+        G_mat:     (2, 2) SPD matrix.
+        max_norm:  Target supremum for the G^{-1}-norm. Default: 0.9.
+        stiffness: Sharpness of the smooth clamp. Defaults to
+            :const:`ham.utils.WIND_STIFFNESS`.
 
     Returns:
         (2,) scaled drift vector satisfying the causality constraint.
@@ -114,7 +126,7 @@ def project_b_norm(b: jax.Array, G_mat: jax.Array, max_norm: float = 0.9) -> jax
     norm_sq = (b[0] ** 2 * g22 - 2.0 * b[0] * b[1] * g12 + b[1] ** 2 * g11) / det_G
     norm = jnp.sqrt(jnp.maximum(norm_sq, GRAD_EPS))
 
-    scale = jnp.minimum(1.0, max_norm / (norm + NORM_EPS))
+    scale = causal_wind_scale(norm, max_norm, stiffness)
     return b * scale
 
 

@@ -13,6 +13,8 @@ __all__ = [
     "NORM_EPS",
     "PSD_EPS",
     "TAYLOR_EPS",
+    "WIND_STIFFNESS",
+    "causal_wind_scale",
     "safe_norm",
     "safe_norm_additive",
 ]
@@ -51,6 +53,15 @@ implementations should switch to a Taylor series to avoid catastrophic
 cancellation.
 """
 
+WIND_STIFFNESS = 30.0
+"""Default sharpness of the Zermelo causal wind clamp.
+
+Sets the width (``~1/WIND_STIFFNESS``) of the transition shell in which
+:func:`causal_wind_scale` bends a wind toward the causal boundary. Larger
+values approach the hard clamp ``min(||W||, max_speed)``; smaller values smear
+the transition over a wider band. Ref: ``spec/MATH_SPEC.md § 5``.
+"""
+
 # ---------------------------------------------------------------------------
 # Numerical Primitives
 # ---------------------------------------------------------------------------
@@ -78,6 +89,52 @@ def safe_norm(x, axis=-1, keepdims=False, eps=GRAD_EPS):
     """
     sq = jnp.sum(x**2, axis=axis, keepdims=keepdims)
     return jnp.sqrt(jnp.maximum(sq, eps))
+
+
+def causal_wind_scale(norm, max_speed, stiffness=WIND_STIFFNESS):
+    r"""Smooth, identity-preserving causal clamp factor for Zermelo winds.
+
+    Returns a multiplicative scale ``s`` such that ``s * norm`` is a
+    :math:`C^\infty` smooth under-approximation of ``min(norm, max_speed)``,
+    guaranteeing ``s * norm < max_speed`` *strictly*. This enforces the Zermelo
+    strong-convexity bound ``||W||_H < 1`` (with ``max_speed = 1 - epsilon``;
+    see ``spec/MATH_SPEC.md § 5``) without distorting physically-valid winds.
+
+    Construction — the temperature-controlled smooth minimum::
+
+        phi(r) = r - softplus(stiffness * (r - max_speed)) / stiffness
+
+    which is monotone (``phi'(r) = 1 - sigmoid(stiffness*(r - max_speed))`` lies
+    in ``(0, 1)``) and satisfies ``sup_r phi(r) = max_speed``, approached from
+    below. The returned scale is ``phi(norm) / norm``.
+
+    Why not ``max_speed * tanh(norm) / norm`` (the historical squash)?
+        ``tanh`` has slope ``max_speed < 1`` at the origin, so it bends *every*
+        wind — e.g. a requested ``||W|| = 0.5`` silently becomes ``~0.46``.
+        This clamp is instead the identity to within
+        ``~exp(-stiffness * (max_speed - norm)) / stiffness`` whenever
+        ``norm < max_speed``; bending is confined to a thin shell of width
+        ``~1/stiffness`` around the causal boundary, where it is unavoidable.
+
+    Args:
+        norm: Non-negative wind magnitude ``||W||_H``. Use a gradient-safe norm
+            (e.g. :func:`safe_norm`) so the backward pass is finite at zero.
+        max_speed: Causal supremum, typically ``1 - epsilon``.
+        stiffness: Transition sharpness. Larger → thinner shell, closer to the
+            hard clamp. Defaults to :const:`WIND_STIFFNESS`.
+
+    Returns:
+        Scale ``s`` (same shape as ``norm``) with ``s * norm < max_speed``.
+    """
+    # softplus(z) = log(1 + e^z), evaluated stably via logaddexp.
+    phi = norm - jnp.logaddexp(0.0, stiffness * (norm - max_speed)) / stiffness
+    # Guard the ~exp(-stiffness * max_speed) undershoot of phi at norm -> 0
+    # (would otherwise flip the wind sign by a negligible amount).
+    phi = jnp.maximum(phi, 0.0)
+    # Floor the divisor with ``maximum`` (not ``+ eps``): an additive guard would
+    # bias the scale by ~eps/norm even for valid winds, breaking exact identity;
+    # ``maximum`` only engages at norm ~ 0 (where phi ~ 0, so the ratio -> 0).
+    return phi / jnp.maximum(norm, GRAD_EPS)
 
 
 def safe_norm_additive(x, axis=-1, keepdims=False, eps=GRAD_EPS):

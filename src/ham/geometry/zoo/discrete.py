@@ -7,38 +7,58 @@ import jax.numpy as jnp
 
 from ham.geometry.mesh import TriangularMesh
 from ham.geometry.metric import AsymmetricMetric
-from ham.utils.math import GRAD_EPS, safe_norm
+from ham.utils.math import GRAD_EPS, WIND_STIFFNESS, causal_wind_scale, safe_norm
 
 
 class DiscreteRanders(AsymmetricMetric):
-    """Randers metric on a triangular mesh with per-face wind vectors."""
+    """Randers metric on a triangular mesh with per-face wind vectors.
+
+    The Zermelo bound ``||W|| < 1 - epsilon`` is enforced via the smooth,
+    identity-preserving causal clamp (``wind_mode="soft"``, the default) or
+    bypassed for trusted fields (``wind_mode="raw"``); see
+    :class:`ham.geometry.zoo.Randers` and :func:`ham.utils.causal_wind_scale`.
+    """
 
     face_winds: jnp.ndarray
     epsilon: float = eqx.field(static=True)
+    wind_stiffness: float = eqx.field(static=True)
+    wind_mode: str = eqx.field(static=True)
 
     def __init__(
-        self, mesh: TriangularMesh, face_winds: jnp.ndarray, epsilon: float = 1e-5
+        self,
+        mesh: TriangularMesh,
+        face_winds: jnp.ndarray,
+        epsilon: float = 1e-5,
+        wind_mode: str = "soft",
+        wind_stiffness: float = WIND_STIFFNESS,
     ):
         """Initializes the Discrete Randers metric."""
         super().__init__(manifold=mesh)
         self.face_winds = face_winds
         self.epsilon = epsilon
+        self.wind_mode = str(wind_mode)
+        self.wind_stiffness = float(wind_stiffness)
+        if self.wind_mode not in ("soft", "raw"):
+            raise ValueError(
+                f"wind_mode must be 'soft' or 'raw', got {self.wind_mode!r}"
+            )
 
     def zermelo_data(self, x: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array]:
         """Returns the Zermelo navigation triple (H, W, lambda)."""
         weights = self.manifold.get_face_weights(x)
         W_raw = jnp.dot(weights, self.face_winds)
         w_norm = safe_norm(W_raw)
-
-        # Smooth causal squash applied for ALL wind magnitudes -- see the W-RAND
-        # note in ham.geometry.zoo.randers.Randers.zermelo_data.  The previous
-        # ``jnp.where(w_norm < 0.5, ...)`` gate left a C0 jump at the boundary;
-        # applying ``max_speed * tanh(w_norm)/w_norm`` everywhere keeps F in C^1
-        # and guarantees ||W||_H = max_speed*tanh(w_norm) < 1.
         max_speed = 1.0 - self.epsilon
-        scale = (max_speed * jnp.tanh(w_norm)) / (w_norm + GRAD_EPS)
-        W = W_raw * scale
-        lam = 1.0 - (w_norm * scale) ** 2
+
+        # Identity sea (H = I), so ||W|| is the Euclidean norm.  See
+        # ham.geometry.zoo.Randers.zermelo_data for the soft/raw rationale.
+        if self.wind_mode == "raw":
+            W = W_raw
+            lam = jnp.maximum(1.0 - w_norm**2, GRAD_EPS)
+        else:
+            scale = causal_wind_scale(w_norm, max_speed, self.wind_stiffness)
+            W = W_raw * scale
+            lam = 1.0 - (w_norm * scale) ** 2
 
         dim = self.manifold.ambient_dim
         H = jnp.eye(dim)
