@@ -3,6 +3,7 @@ import jax.numpy as jnp
 
 from ham.geometry.manifolds import EuclideanSpace
 from ham.geometry.metric import AsymmetricMetric
+from ham.geometry.zoo import Randers
 from ham.solvers.eikonal import EikonalSolver, _fast_sweeping_solve
 
 
@@ -161,3 +162,50 @@ def test_eikonal_diagonal_anisotropy():
     assert abs(T[ic - off, ic] - 2 * d) < 0.05
     assert abs(T[ic, ic + off] - d) < 0.03
     assert abs(T[ic, ic - off] - d) < 0.03
+
+
+# ---------------------------------------------------------------------------
+# Production-path regression: the *real* Randers.zermelo_data (soft causal
+# clamp) must reproduce the analytic Zermelo times for the *requested* wind.
+# The old ``tanh`` squash silently mapped 0.5 -> 0.46, so downwind/upwind times
+# would have matched d/(1±0.46) instead of d/(1±0.5); this test pins the fix.
+# ---------------------------------------------------------------------------
+
+
+def test_eikonal_real_randers_faithful_to_requested_wind():
+    """Soft-clamped Randers reproduces analytic Zermelo for the requested wind.
+
+    A strong wind (0.8) is used so the discrimination is unambiguous: the old
+    ``tanh`` squash mapped 0.8 -> ~0.66, shifting downwind time from d/1.8 to
+    d/1.66 -- a gap far larger than the first-order FSM error.
+    """
+    w, d = 0.8, 0.5
+    metric = Randers(
+        EuclideanSpace(2),
+        lambda x: jnp.eye(2),
+        lambda x: jnp.array([w, 0.0]),  # constant, physically valid wind
+    )
+    T, ic, off = _solve_probe(metric, n=81, d=d)
+
+    downwind = float(T[ic + off, ic])
+    # Faithful to the *requested* 0.8.
+    assert abs(downwind - d / (1 + w)) < 0.02, downwind
+    # And clearly NOT the old squashed value d/(1 + tanh(0.8)).
+    w_old = float(jnp.tanh(w))  # ~0.664
+    assert abs(downwind - d / (1 + w_old)) > abs(downwind - d / (1 + w)), downwind
+
+
+def test_eikonal_refinement_convergence():
+    """First-order FSM error must shrink as the grid is refined (consistency)."""
+    metric = ConstWindMetric(wx=0.4)
+    d = 0.5
+    w = 0.4
+    target_down = d / (1 + w)
+
+    errs = []
+    for n in (41, 81):
+        T, ic, off = _solve_probe(metric, n=n, d=d)
+        errs.append(abs(float(T[ic + off, ic]) - target_down))
+
+    # Refining the grid must not increase the error (monotone consistency).
+    assert errs[1] <= errs[0] + 1e-4, f"error grew under refinement: {errs}"

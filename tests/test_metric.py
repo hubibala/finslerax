@@ -296,5 +296,63 @@ class TestRandersMetric(unittest.TestCase):
         self.assertTrue(jnp.all(jnp.isfinite(spray)))
 
 
+class TestCausalWindClamp(unittest.TestCase):
+    """Behaviour of the Zermelo causal wind constraint in ``Randers.zermelo_data``.
+
+    These exercise the *production* path (the real ``zermelo_data``), not a test
+    double, and pin down the fix that replaced the ``tanh`` squash -- which bent
+    every wind (0.5 -> 0.46) -- with the identity-preserving soft clamp.
+    """
+
+    def setUp(self):
+        self.plane = EuclideanSpace(dim=2)
+        self.H = lambda x: jnp.eye(2)
+
+    def _zd(self, wind, **kw):
+        metric = Randers(self.plane, self.H, lambda x, w=wind: jnp.asarray(w), **kw)
+        return metric.zermelo_data(jnp.zeros(2))
+
+    def test_soft_clamp_is_identity_for_valid_wind(self):
+        """A physically-valid wind passes through essentially unchanged."""
+        for w in (0.1, 0.3, 0.5, 0.7):
+            _, W, lam = self._zd([w, 0.0])
+            # Identity to ~1e-4 deep inside the causal region (no tanh bending).
+            np.testing.assert_allclose(np.array(W), [w, 0.0], atol=1e-4)
+            self.assertAlmostEqual(float(lam), 1.0 - w * w, places=4)
+
+    def test_soft_clamp_enforces_strict_causal_bound(self):
+        """A wind at/over the causal limit is pulled strictly below max_speed."""
+        for w in (0.99, 1.5, 5.0):
+            _, W, lam = self._zd([w, 0.0])
+            self.assertLess(float(jnp.linalg.norm(W)), 1.0)  # strong convexity
+            self.assertGreater(float(lam), 0.0)  # lambda = 1 - ||W||^2 > 0
+            self.assertFalse(bool(jnp.any(jnp.isnan(W))))
+
+    def test_soft_clamp_monotone_and_continuous(self):
+        """Clamped magnitude is monotone in raw magnitude with no jump (C^0/C^1)."""
+        ws = jnp.linspace(0.0, 3.0, 400)
+        mags = jnp.array(
+            [float(jnp.linalg.norm(self._zd([float(w), 0.0])[1])) for w in ws]
+        )
+        diffs = jnp.diff(mags)
+        self.assertTrue(bool(jnp.all(diffs >= -1e-6)), "must be non-decreasing")
+        # No C0 jump: consecutive steps stay small (the old gate jumped ~0.04).
+        self.assertLess(float(jnp.max(jnp.abs(diffs))), 0.02)
+
+    def test_raw_mode_passes_trusted_wind_through_exactly(self):
+        """wind_mode='raw' returns the wind bit-exact (max precision)."""
+        _, W, lam = self._zd([0.5, 0.0], wind_mode="raw")
+        np.testing.assert_array_equal(np.array(W), [0.5, 0.0])
+        self.assertAlmostEqual(float(lam), 1.0 - 0.25, places=7)
+
+    def test_invalid_wind_mode_raises(self):
+        with self.assertRaises(ValueError):
+            Randers(self.plane, self.H, self.w_net_dummy(), wind_mode="bogus")
+
+    @staticmethod
+    def w_net_dummy():
+        return lambda x: jnp.array([0.1, 0.0])
+
+
 if __name__ == '__main__':
     unittest.main()

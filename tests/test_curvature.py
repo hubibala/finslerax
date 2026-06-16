@@ -134,24 +134,42 @@ class TestSectionalCurvature(unittest.TestCase):
     # 3. Curved space test
     # -----------------------------------------------------------------------
 
-    def test_sectional_curvature_sphere_is_positive(self):
-        """
-        A metric with positive curvature should give non-zero K.
-        """
-        # Use g = diag(1, 1 + x[0]^2) and verify curvature is non-trivial
-        def curved_g(x):
-            return jnp.diag(jnp.array([1.0, 1.0 + x[0]**2]))
+    def test_sectional_curvature_stereographic_sphere_is_plus_one(self):
+        """Round sphere in stereographic coords has constant K = +1.
 
-        metric = Riemannian(self.plane, curved_g)
-        x = jnp.array([0.5, 0.0])  # non-trivial position
+        ``g = 4/(1+|x|^2)^2 I`` is the unit 2-sphere pulled back through
+        stereographic projection; its Gaussian curvature is +1 everywhere.
+        Asserts magnitude AND sign (the old test only checked ``abs(K)>1e-4``).
+        """
+        def sphere_g(x):
+            return (4.0 / (1.0 + jnp.sum(x**2)) ** 2) * jnp.eye(2)
+
+        metric = Riemannian(self.plane, sphere_g)
         v1 = jnp.array([1.0, 0.0])
         v2 = jnp.array([0.0, 1.0])
+        for xv in (0.0, 0.3, 0.7):
+            x = jnp.array([xv, 0.0])
+            K = float(sectional_curvature(metric, x, v1, v2))
+            self.assertAlmostEqual(K, 1.0, places=2, msg=f"K={K} at x={xv}")
 
-        K = sectional_curvature(metric, x, v1, v2)
-        self.assertFalse(jnp.isnan(K))
-        self.assertTrue(jnp.isfinite(K))
-        # Curvature is non-trivially non-zero for this metric
-        self.assertGreater(abs(float(K)), 1e-4)
+    def test_sectional_curvature_surface_of_revolution(self):
+        """``g = diag(1, 1+x^2)`` has analytic K = -1/(1+x^2)^2 (negative).
+
+        Surface of revolution ``ds^2 = dx^2 + f(x)^2 dy^2`` with
+        ``f = sqrt(1+x^2)`` gives ``K = -f''/f = -1/(1+x^2)^2``. Pins both
+        magnitude and (negative) sign against the closed form.
+        """
+        def curved_g(x):
+            return jnp.diag(jnp.array([1.0, 1.0 + x[0] ** 2]))
+
+        metric = Riemannian(self.plane, curved_g)
+        v1 = jnp.array([1.0, 0.0])
+        v2 = jnp.array([0.0, 1.0])
+        for xv in (0.0, 0.5, 1.0):
+            x = jnp.array([xv, 0.0])
+            K = float(sectional_curvature(metric, x, v1, v2))
+            analytic = -1.0 / (1.0 + xv**2) ** 2
+            self.assertAlmostEqual(K, analytic, places=3, msg=f"K={K} at x={xv}")
 
     def test_sectional_curvature_flat_riemannian_is_zero(self):
         """A flat Riemannian metric (constant g) gives K = 0 everywhere."""
