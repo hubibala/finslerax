@@ -8,6 +8,9 @@ than re-defining magic numbers in downstream modules.
 
 import jax.numpy as jnp
 
+from ham.utils.config import EpsKind as _EpsKind
+from ham.utils.config import eps as _eps
+
 __all__ = [
     "GRAD_EPS",
     "NORM_EPS",
@@ -23,34 +26,41 @@ __all__ = [
 # Canonical numerical constants (P2: consolidate magic numbers)
 # ---------------------------------------------------------------------------
 
-GRAD_EPS = 1e-6
+# These floors scale with the working precision (see ham.utils.config.eps):
+# the float32 values below are the legacy defaults; under HAM_X64 they
+# tighten to float64-appropriate values. They are module-level constants because
+# precision is fixed at import time.
+
+GRAD_EPS = _eps(_EpsKind.GRAD)
 """Guard for ``jnp.sqrt`` backward pass at zero.
 
 Used inside :func:`safe_norm`. Ref: ``spec/MATH_SPEC.md § 6.1``.
-Chosen for float64 safety; for float32 consider larger eps if squared-sum
-underflows.
+Precision-scaled: ``1e-6`` (float32) / ``1e-13`` (float64). For float32,
+consider a larger eps if a squared-sum underflows.
 """
 
-NORM_EPS = 1e-8
+NORM_EPS = _eps(_EpsKind.NORM)
 """Threshold for deciding whether a vector is numerically zero.
 
 Used in forward-pass branching (e.g., ``norm < NORM_EPS``), NOT in
-backward-pass guards.
+backward-pass guards. Precision-scaled: ``1e-8`` (float32) / ``1e-12`` (float64).
 """
 
-PSD_EPS = 1e-4
+PSD_EPS = _eps(_EpsKind.PSD)
 """Canonical positive-definite regularisation floor.
 
 All modules that regularise metric matrices (G -> G + eps*I) should import
-this constant rather than hardcoding magic numbers.
+this constant rather than hardcoding magic numbers. Precision-scaled:
+``1e-4`` (float32) / ``1e-10`` (float64).
 """
 
-TAYLOR_EPS = 1e-4
+TAYLOR_EPS = _eps(_EpsKind.TAYLOR)
 """Threshold for switching to Taylor expansions.
 
 When a quantity (e.g. sin(theta)/theta) is below this threshold,
 implementations should switch to a Taylor series to avoid catastrophic
-cancellation.
+cancellation. Precision-scaled: ``1e-4`` (float32) / ``1e-8`` (float64,
+``~ sqrt(finfo(float64).eps)``).
 """
 
 WIND_STIFFNESS = 30.0

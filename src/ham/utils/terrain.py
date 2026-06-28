@@ -17,6 +17,7 @@ import jax.numpy as jnp
 from ham.geometry.mesh import TriangularMesh
 from ham.geometry.metric import AsymmetricMetric
 from ham.models.wildfire import project_b_norm, project_spd
+from ham.utils.config import DEFAULT_JNP_DTYPE
 from ham.utils.math import GRAD_EPS, safe_norm
 
 __all__ = [
@@ -87,7 +88,7 @@ def dem_to_mesh(
     tri_hi = jnp.stack([k11, k01, k10], axis=-1)  # upper-right
     faces = jnp.concatenate([tri_lo, tri_hi], axis=0).astype(jnp.int32)
 
-    return TriangularMesh(vertices.astype(jnp.float32), faces)
+    return TriangularMesh(vertices.astype(DEFAULT_JNP_DTYPE), faces)
 
 
 # ---------------------------------------------------------------------------
@@ -316,11 +317,11 @@ class CovariateMeshRanders(AsymmetricMetric):
             activation=jax.nn.tanh,
             key=k2,
         )
-        self.fuel_embedding = jnp.zeros((13, fuel_emb_dim), dtype=jnp.float32)
+        self.fuel_embedding = jnp.zeros((13, fuel_emb_dim), dtype=DEFAULT_JNP_DTYPE)
 
         # Placeholder scene data — replaced by bind_scene before use
-        self.face_covariates = jnp.zeros((1, 5 + fuel_emb_dim), dtype=jnp.float32)
-        self.weather_vec = jnp.zeros((4,), dtype=jnp.float32)
+        self.face_covariates = jnp.zeros((1, 5 + fuel_emb_dim), dtype=DEFAULT_JNP_DTYPE)
+        self.weather_vec = jnp.zeros((4,), dtype=DEFAULT_JNP_DTYPE)
 
     def bind_scene(
         self,
@@ -341,8 +342,8 @@ class CovariateMeshRanders(AsymmetricMetric):
             lambda m: (m.face_covariates, m.weather_vec),
             self,
             (
-                jnp.asarray(face_cov_array, dtype=jnp.float32),
-                jnp.asarray(weather_vec_array, dtype=jnp.float32),
+                jnp.asarray(face_cov_array, dtype=DEFAULT_JNP_DTYPE),
+                jnp.asarray(weather_vec_array, dtype=DEFAULT_JNP_DTYPE),
             ),
         )
 

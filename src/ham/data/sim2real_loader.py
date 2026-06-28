@@ -38,6 +38,8 @@ from typing import Optional
 import numpy as np
 from PIL import Image
 
+from ham.utils.config import DEFAULT_NP_DTYPE
+
 try:
     import rasterio
 
@@ -160,10 +162,10 @@ class Sim2RealFireLoader:
     def _load_tif(self, filepath: str) -> np.ndarray:
         if HAS_RASTERIO:
             with rasterio.open(filepath) as src:
-                return src.read(1).astype(np.float32)
+                return src.read(1).astype(DEFAULT_NP_DTYPE)
         # Fallback to PIL (works for simple single-band TIFs)
         img = Image.open(filepath)
-        return np.array(img, dtype=np.float32)
+        return np.array(img, dtype=DEFAULT_NP_DTYPE)
 
     def _load_mask_sequence(self, mask_dir: str) -> tuple:
         """Load sequence of fire masks.
@@ -222,7 +224,7 @@ class Sim2RealFireLoader:
                             np.cos(wind_dir_rad),
                         ]
                     )
-        return np.array(data, dtype=np.float32)
+        return np.array(data, dtype=DEFAULT_NP_DTYPE)
 
 
 def extract_arrival_times(masks: np.ndarray, timestamps: list) -> np.ndarray:
@@ -237,7 +239,7 @@ def extract_arrival_times(masks: np.ndarray, timestamps: list) -> np.ndarray:
         burned; ``inf`` for pixels that never burned.
     """
     _T, H, W = masks.shape
-    arrival = np.full((H, W), np.inf, dtype=np.float32)
+    arrival = np.full((H, W), np.inf, dtype=DEFAULT_NP_DTYPE)
     for t_idx, t in enumerate(timestamps):
         newly_assigned = masks[t_idx] & np.isinf(arrival)
         arrival[newly_assigned] = float(t)

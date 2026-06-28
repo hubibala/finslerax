@@ -7,6 +7,7 @@ import jax.numpy as jnp
 from ham.geometry.metric import AsymmetricMetric
 from ham.solvers.geodesic import ExponentialMap
 from ham.typing import GenerativeModel
+from ham.utils.config import DEFAULT_JNP_DTYPE
 from ham.utils.math import NORM_EPS, safe_norm
 
 ModelType = TypeVar("ModelType")
@@ -209,7 +210,7 @@ class MetricAnchorLoss(LossComponent[GenerativeModel]):
             H_out = model.metric.g_net(parent_z)
             H_out = 0.5 * (H_out + H_out.T)
         else:
-            return jnp.float32(0.0)
+            return jnp.asarray(0.0, dtype=DEFAULT_JNP_DTYPE)
 
         dim = H_out.shape[-1]
         I = jnp.eye(dim)
@@ -426,7 +427,7 @@ class WindThermodynamicLoss(LossComponent[GenerativeModel]):
             H_matrix, W, _ = model.metric.zermelo_data(z)
             wind_cost = jnp.dot(W, jnp.dot(H_matrix, W))
         else:
-            wind_cost = jnp.float32(0.0)
+            wind_cost = jnp.asarray(0.0, dtype=DEFAULT_JNP_DTYPE)
         return wind_cost * self.weight
 
 
@@ -557,7 +558,7 @@ class FinslerianFlowMatchingLoss(LossComponent[GenerativeModel]):
     ) -> jnp.ndarray:
         # batch[2] is Traj_long: (T, D_data)
         if len(batch) < 3 or batch[2] is None:
-            return jnp.float32(0.0)
+            return jnp.asarray(0.0, dtype=DEFAULT_JNP_DTYPE)
 
         traj_obs = batch[2]
         T = traj_obs.shape[0]
