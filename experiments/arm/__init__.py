@@ -10,7 +10,14 @@ The whole experiment depends only on the four protocols in ``interfaces.py``
 the synthetic study here becomes a real-robot study by swapping providers.
 """
 
+from .constraints import (
+    constraint_penalty,
+    max_constraint_violation,
+    upright_constraint,
+    waypoint_constraint,
+)
 from .interfaces import DemoSource, DistanceField, Robot, Scene
+from .medium import ArmMetric, angle_manifold, build_arm_metric
 from .providers import (
     AnalyticDistance,
     CircleScene,
@@ -20,6 +27,7 @@ from .providers import (
 
 __all__ = [
     "AnalyticDistance",
+    "ArmMetric",
     "CircleScene",
     "DemoSource",
     "DistanceField",
@@ -27,4 +35,10 @@ __all__ = [
     "PlanarArm",
     "Robot",
     "Scene",
+    "angle_manifold",
+    "build_arm_metric",
+    "constraint_penalty",
+    "max_constraint_violation",
+    "upright_constraint",
+    "waypoint_constraint",
 ]

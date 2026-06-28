@@ -29,8 +29,14 @@ from experiments.arm import (
     GroundTruthDemos,
     PlanarArm,
 )
+from experiments.arm.constraints import (
+    max_constraint_violation,
+    upright_constraint,
+)
 from experiments.arm.interfaces import DemoSource, DistanceField, Robot, Scene
-from ham.geometry.manifolds import FlatTorus
+from experiments.arm.medium import angle_manifold, build_arm_metric
+from ham.geometry.manifolds import EuclideanSpace, FlatTorus
+from ham.geometry.zoo import Randers
 
 jax.config.update("jax_platform_name", "cpu")
 
@@ -126,6 +132,130 @@ def test_l1_distance_field_sign_and_grad():
     assert float(dist(jnp.array([jnp.pi / 2, 0.0, 0.0]))) > 0.0  # folded up, clear
     grad = jax.grad(dist)(jnp.array([0.1, 0.1, 0.1]))
     assert grad.shape == (3,) and bool(jnp.all(jnp.isfinite(grad)))
+
+
+# ===========================================================================
+# Metric correctness anchors — the layered cost matches HAM's Randers, and the
+# Clifford and intrinsic-angle representations agree.
+# ===========================================================================
+def test_metric_matches_randers():
+    """ArmMetric (angle rep, no barrier) equals HAM's Randers for the same (H, W)."""
+    atol, rtol = tol(atol32=1e-5, atol64=1e-9)
+    arm = PlanarArm(2)
+    ang = angle_manifold(arm)
+    metric = build_arm_metric(arm, manifold=ang, gravity_strength=0.1)
+    q = jnp.array([0.4, -0.6])
+    v = jnp.array([0.7, 0.3])
+    H = arm.inertia(q)
+    W = -0.1 * arm.gravity(q)
+    ref = Randers(
+        EuclideanSpace(2), lambda z, H=H: H, lambda z, W=W: W, wind_mode="soft"
+    )
+    np.testing.assert_allclose(
+        metric.metric_fn(q, v), ref.metric_fn(q, v), atol=atol, rtol=rtol
+    )
+
+
+def test_clifford_and_angle_representations_agree():
+    """The lifted Clifford metric equals the intrinsic-angle metric on lifted velocities."""
+    atol, rtol = tol(atol32=1e-5, atol64=1e-9)
+    arm = PlanarArm(3)
+    ang = angle_manifold(arm)
+    # gs=0.03 keeps the 3-link comfortably in the mild-wind regime (λ≈0.4); a
+    # larger gs sits near the causal boundary where float32 amplifies round-off.
+    m_ang = build_arm_metric(arm, manifold=ang, gravity_strength=0.03)
+    m_cliff = build_arm_metric(arm, gravity_strength=0.03)  # default: FlatTorus
+    T = arm.manifold
+    q = jnp.array([0.4, -0.6, 0.9])
+    v = jnp.array([0.5, 0.2, -0.3])
+    x = T.embed_angles(q)
+    v_amb = T.tangent_frame(x) @ v
+    np.testing.assert_allclose(
+        m_cliff.metric_fn(x, v_amb), m_ang.metric_fn(q, v), atol=atol, rtol=rtol
+    )
+
+
+# ===========================================================================
+# L5 — gravity asymmetry (the headline novelty); mild-wind cap; drift sign.
+# ===========================================================================
+def test_l5_drift_sign_and_mild_wind():
+    """Lifting costs more than descending, the cap holds (0 < λ ≤ 1), gs=0 is symmetric."""
+    arm = PlanarArm(2)
+    ang = angle_manifold(arm)
+    metric = build_arm_metric(arm, manifold=ang, gravity_strength=0.1)
+    key = jax.random.PRNGKey(0)
+    for _ in range(6):
+        key, sk = jax.random.split(key)
+        q = jax.random.uniform(sk, (2,), minval=-jnp.pi, maxval=jnp.pi)
+        grad = arm.gravity(q)
+        if float(jnp.linalg.norm(grad)) < 1e-3:
+            continue
+        up = grad / jnp.linalg.norm(grad)  # uphill direction
+        assert float(metric.metric_fn(q, up)) > float(metric.metric_fn(q, -up))
+        _, _, lam = metric.zermelo_data(q)
+        assert 0.0 < float(lam) <= 1.0 + 1e-9
+
+    # Removing gravity makes the metric symmetric.
+    sym = build_arm_metric(arm, manifold=ang, gravity_strength=0.0)
+    q = jnp.array([0.5, -0.7])
+    up = arm.gravity(q) / jnp.linalg.norm(arm.gravity(q))
+    np.testing.assert_allclose(
+        sym.metric_fn(q, up), sym.metric_fn(q, -up), atol=1e-6
+    )
+
+
+def test_l5_path_cost_asymmetric():
+    """A→B (lifting) integrates to a higher cost than B→A (descending)."""
+    arm = PlanarArm(2, g=1.0)
+    ang = angle_manifold(arm)
+    metric = build_arm_metric(arm, manifold=ang, gravity_strength=0.12)
+    low = jnp.array([-jnp.pi / 2, 0.0])  # arm hanging down (low potential)
+    high = jnp.array([jnp.pi / 2, 0.0])  # arm raised (high potential)
+    assert float(arm.potential(high)) > float(arm.potential(low))
+    path = jnp.linspace(low, high, 40)
+    up_cost = float(metric.arc_length(path))
+    down_cost = float(metric.arc_length(path[::-1]))
+    assert up_cost > down_cost, (up_cost, down_cost)
+
+
+def test_upright_constraint_residual():
+    """The upright constraint is zero at the target orientation, nonzero off it, wrap-safe."""
+    arm = PlanarArm(3)
+    T = arm.manifold
+    q = jnp.array([0.3, 0.4, -0.2])  # ee orientation φ = 0.5
+    phi = float(arm.ee_orientation(q))
+    c = upright_constraint(arm, T, target_angle=phi)
+    assert abs(float(c(T.embed_angles(q)))) < 1e-6
+    off = q.at[2].add(0.3)
+    assert abs(float(c(T.embed_angles(off)))) > 1e-2
+    assert bool(jnp.all(jnp.isfinite(jax.grad(c)(T.embed_angles(off)))))
+    # Adding 2π to a joint is the same physical config -> same residual (seam-safe).
+    wrapped = q.at[0].add(2 * jnp.pi)
+    np.testing.assert_allclose(
+        c(T.embed_angles(wrapped)), c(T.embed_angles(q)), atol=1e-6
+    )
+    viol = max_constraint_violation(jnp.stack([T.embed_angles(q)] * 3), [c])
+    assert float(viol) < 1e-6
+
+
+def test_l5_barrier_inflates_near_obstacles():
+    """The conformal barrier raises cost near obstacles and blows up in collision."""
+    arm = PlanarArm(2)
+    ang = angle_manifold(arm)
+    scene = CircleScene([[1.0, 0.5, 0.3]])
+    dist = AnalyticDistance(arm, scene)
+    base = build_arm_metric(arm, manifold=ang, gravity_strength=0.1)
+    warped = build_arm_metric(
+        arm, dist, manifold=ang, gravity_strength=0.1, alpha=0.05, delta=0.05
+    )
+    v = jnp.array([0.5, 0.3])
+    q_collide = jnp.array([0.5, 0.2])  # arm intersects the circle
+    q_free = jnp.array([-1.2, -1.0])
+    assert float(dist(q_collide)) < 0.0
+    infl_collide = float(warped.metric_fn(q_collide, v) / base.metric_fn(q_collide, v))
+    infl_free = float(warped.metric_fn(q_free, v) / base.metric_fn(q_free, v))
+    assert infl_collide > 100.0  # barrier wall
+    assert 1.0 < infl_free < infl_collide  # mild, monotone in clearance
 
 
 # ===========================================================================
