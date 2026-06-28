@@ -25,6 +25,8 @@ from typing import NamedTuple
 import jax.numpy as jnp
 import numpy as np
 
+from ham.utils.config import DEFAULT_JNP_DTYPE, DEFAULT_NP_DTYPE
+
 from .planners import thread_clock
 
 
@@ -44,7 +46,7 @@ def _advance(path, true_medium, glider, t_start, horizon):
     traversed within ``horizon``, the glider reaches the destination and ``new_t``
     is the true arrival time; otherwise it stops at the interpolated position.
     """
-    path = jnp.asarray(path, dtype=jnp.float32)
+    path = jnp.asarray(path, dtype=DEFAULT_JNP_DTYPE)
     _, times = thread_clock(path, true_medium, glider, t_start)
     times = np.asarray(times)
     path_np = np.asarray(path)
@@ -110,8 +112,8 @@ def run_mpc(
             the refreshed belief reveals the favorable window).
     """
     constraints = constraints if constraints is not None else glider.constraints()
-    end_np = np.asarray(end, dtype=np.float32)
-    pos = np.asarray(start, dtype=np.float32)
+    end_np = np.asarray(end, dtype=DEFAULT_NP_DTYPE)
+    pos = np.asarray(start, dtype=DEFAULT_NP_DTYPE)
     t = float(t0)
 
     flown = [pos.copy()]

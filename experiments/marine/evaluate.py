@@ -11,12 +11,14 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
+from ham.utils.config import DEFAULT_JNP_DTYPE
+
 from .planners import thread_clock
 
 
 def executed_arrival_time(path, medium, glider, t0=0.0):
     """True time to traverse a geometric ``path`` under the evolving current."""
-    T_total, _ = thread_clock(jnp.asarray(path, dtype=jnp.float32), medium, glider, t0)
+    T_total, _ = thread_clock(jnp.asarray(path, dtype=DEFAULT_JNP_DTYPE), medium, glider, t0)
     return T_total
 
 
@@ -48,8 +50,8 @@ def uniform_shooting_time(
         t_hi: upper bracket for T.
         iters: bisection iterations.
     """
-    start = jnp.asarray(start, dtype=jnp.float32)
-    end = jnp.asarray(end, dtype=jnp.float32)
+    start = jnp.asarray(start, dtype=DEFAULT_JNP_DTYPE)
+    end = jnp.asarray(end, dtype=DEFAULT_JNP_DTYPE)
     D = end - start
 
     def integral_W(T, n=200):
@@ -91,7 +93,7 @@ def recovery_metrics(pred_current_fn, true_current_fn, points):
         dict with ``cosine`` (mean cosine similarity of the horizontal current)
         and ``rmse``.
     """
-    points = jnp.asarray(points, dtype=jnp.float32)
+    points = jnp.asarray(points, dtype=DEFAULT_JNP_DTYPE)
     Wp = jax.vmap(pred_current_fn)(points)
     Wt = jax.vmap(true_current_fn)(points)
     # Compare horizontal components (the geostrophic/observable part).
@@ -112,7 +114,7 @@ def navigability_map(medium, glider, points, t=0.0):
     vehicle's top speed) — the regime the ``tanh`` squash caps and the reason a
     slow glider must route *with* the current.
     """
-    points = jnp.asarray(points, dtype=jnp.float32)
+    points = jnp.asarray(points, dtype=DEFAULT_JNP_DTYPE)
     t = jnp.asarray(float(t))
 
     def lam(x):

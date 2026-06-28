@@ -3,7 +3,6 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 
-# config.update("jax_enable_x64", True)
 from ham.geometry import Randers, Sphere
 from ham.solvers import AVBDSolver
 from ham.vis import (

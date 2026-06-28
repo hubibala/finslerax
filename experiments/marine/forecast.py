@@ -28,6 +28,8 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from ham.utils.config import DEFAULT_JNP_DTYPE
+
 from .medium import FrozenMedium, OceanMedium
 
 
@@ -88,7 +90,7 @@ def forecast_error(true_medium, belief, points, lead_times, t_now):
     Returns an array aligned with ``lead_times`` of the mean ``‖W_belief - W_true‖``
     over ``points`` at ``t = t_now + lead``.
     """
-    points = jnp.asarray(points, dtype=jnp.float32)
+    points = jnp.asarray(points, dtype=DEFAULT_JNP_DTYPE)
     out = []
     for lead in lead_times:
         t = jnp.asarray(float(t_now) + float(lead))

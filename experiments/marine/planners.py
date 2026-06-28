@@ -27,6 +27,7 @@ import jax.numpy as jnp
 import optax
 
 from ham.solvers import AVBDSolver, EikonalSolver, VolumetricEikonalSolver
+from ham.utils.config import DEFAULT_JNP_DTYPE
 
 from .constraints import avbd_equality_constraints, constraint_penalty, max_violation
 from .medium import randers_cost
@@ -148,13 +149,13 @@ class TimeLiftedPlanner(eqx.Module):
             n_restarts: extra randomly-perturbed starts; the best feasible plan
                 is returned (mitigates the local-minimum nature of the BVP).
         """
-        start = jnp.asarray(start, dtype=jnp.float32)
-        end = jnp.asarray(end, dtype=jnp.float32)
+        start = jnp.asarray(start, dtype=DEFAULT_JNP_DTYPE)
+        end = jnp.asarray(end, dtype=DEFAULT_JNP_DTYPE)
         constraints = constraints if constraints is not None else glider.constraints()
 
         if init_path is None:
             init_path = jnp.linspace(start, end, n_steps + 1)
-        interior0 = jnp.asarray(init_path, dtype=jnp.float32)[1:-1]
+        interior0 = jnp.asarray(init_path, dtype=DEFAULT_JNP_DTYPE)[1:-1]
 
         # Penalty-continuation schedule: the weight grows geometrically from
         # ``penalty_weight`` to ``penalty_weight · penalty_ramp`` across the run,

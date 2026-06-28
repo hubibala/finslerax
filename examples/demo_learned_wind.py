@@ -4,11 +4,10 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax
-from ham.sim.fields import rossby_haurwitz
 
-# config.update("jax_enable_x64", True)
 from ham.geometry import Sphere
 from ham.models.learned import NeuralRanders
+from ham.sim.fields import rossby_haurwitz
 from ham.vis import generate_icosphere, plot_sphere, plot_vector_field, setup_3d_plot
 
 
