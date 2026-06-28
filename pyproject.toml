@@ -7,7 +7,7 @@ name = "hamtools"
 version = "1.1.0"
 description = "A differentiable library for learnable Finsler Geometry and Holonomic Association Models."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [
   { name = "HAM Research Team" },
@@ -32,6 +32,7 @@ dependencies = [
 dev = [
     "pytest",
     "pytest-cov",
+    "pytest-timeout",
     "matplotlib",
     "jupyter",
     "plotly",
@@ -80,6 +81,9 @@ exclude = [
 
 [tool.ruff]
 line-length = 88
+# Kept at py39 deliberately: bumping to py310 triggers a large unrelated
+# pyupgrade sweep (Optional[X] -> X | None, collections.abc imports). Modernise
+# in a dedicated pass. (Package support is float-tested at >=3.10; see CI.)
 target-version = "py39"
 
 [tool.ruff.lint]

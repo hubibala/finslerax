@@ -93,6 +93,56 @@ Optional extras:
 
 ---
 
+## Numerical precision (float32 / float64)
+
+HAM follows the **JAX-native** precision convention: precision is governed by
+JAX's own `jax_enable_x64` flag, and HAM simply reads it. **The default is
+`float32`** (best GPU/TPU throughput).
+
+To run everything in **`float64`** (double precision), set JAX's standard
+environment variable *before* Python starts — JAX reads it during `import jax`,
+before any array exists, so there are **no import-ordering pitfalls**:
+
+```bash
+JAX_ENABLE_X64=1 python your_script.py      # float64 everywhere
+# or, e.g. for a notebook kernel / CI job:
+export JAX_ENABLE_X64=1
+```
+
+Equivalently, programmatically at startup *before the first array is created*:
+
+```python
+import jax
+jax.config.update("jax_enable_x64", True)
+import ham   # now float64
+```
+
+That single switch flips the whole stack — core geometry, solvers, experiments,
+and examples — because precision is decided at the data-construction boundary and
+the solvers are dtype-following. Query or use it via `ham.utils.config`:
+
+```python
+from ham.utils.config import x64_enabled, default_dtype, default_np_dtype
+x64_enabled()        # False by default, True under JAX_ENABLE_X64=1
+default_dtype()      # jnp float32 / float64 for the active precision
+default_np_dtype()   # numpy float32 / float64
+```
+
+Precision-sensitive stability floors (`GRAD_EPS`, `PSD_EPS`, `TAYLOR_EPS`, …)
+scale automatically — the historical float32 values in `float32`, tightened
+values in `float64`.
+
+**When to reach for `float64`:** stiff / ill-conditioned solves — long AVBD
+geodesics, fine eikonal grids, curvature/transport cancellation, tight gradient
+(VJP) checks. **Caveat:** consumer NVIDIA GPUs throttle FP64 to ~1/32–1/64 of
+FP32 throughput, so keep `float32` as the default and opt into `float64`
+deliberately.
+
+> The test suite is **dual-mode**: it passes under both `JAX_ENABLE_X64=0` and
+> `=1`, and CI runs it both ways so float64 support cannot silently regress.
+
+---
+
 ## ⚡ Quickstart
 
 ### 1. Shoot a geodesic on a sphere
@@ -313,9 +363,15 @@ reproduction commands, and limitations.
 ## 🧪 Tests
 
 ```bash
-python -m pytest tests/ -q          # full suite (333 tests)
+python -m pytest tests/ -q                       # full suite (float32, default)
+JAX_ENABLE_X64=1 python -m pytest tests/ -q      # same suite in float64
 python -m pytest tests/test_metric.py tests/test_geodesic.py -v
 ```
+
+The suite is **dual-mode**: every test passes under both precisions, and
+precision-sensitive tolerances/dtype checks adapt via `tests/_precision.py`
+(`tol()`, `assert_default_dtype`). The active precision is printed in the pytest
+header. CI runs the full matrix (`JAX_ENABLE_X64` ∈ {0, 1} × Python 3.10/3.11).
 
 | Module | Covers |
 | :--- | :--- |

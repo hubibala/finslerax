@@ -69,6 +69,7 @@ the rest of the example suite. Plotly renders the interactive 3-D scenes.
 """)
 
 co(r"""
+import os
 import pathlib
 import sys
 
@@ -78,12 +79,18 @@ while not (_p / "experiments").exists() and _p != _p.parent:
     _p = _p.parent
 sys.path.insert(0, str(_p))
 
+# Precision knob: float32 by default. For float64, set JAX_ENABLE_X64=1 before
+# the kernel imports JAX (e.g. in the launching env, or this cell before
+# `import jax`). See ham.utils.config.
+os.environ.setdefault("JAX_ENABLE_X64", "0")
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 import plotly.graph_objects as go
 import plotly.io as pio
 
+from ham.utils.config import DEFAULT_NP_DTYPE
 from ham.vis.style import PALETTE, plotly_cones, use_ham_style
 
 from experiments.marine import FrozenMedium, Glider, OceanMedium, build_snapshot_metric
@@ -100,7 +107,6 @@ from experiments.marine.planners import StationaryPlanner, TimeLiftedPlanner, th
 
 pio.renderers.default = "plotly_mimetype"
 use_ham_style()
-jax.config.update("jax_enable_x64", False)
 
 # Coordinates: x = east, y = north, z = depth (downward, 0 = surface). All
 # quantities are non-dimensional — speeds are normalized so the glider's
@@ -160,7 +166,7 @@ def ocean_layout(fig, title, height=560, z_aspect=0.45, eye=(1.6, 1.5, 1.1)):
 def current_grid(medium, t, depth, n=11, lo=0.6, hi=9.4):
     xs = np.linspace(lo, hi, n)
     ys = np.linspace(lo, hi, n)
-    base = np.array([[x, y, depth] for x in xs for y in ys], dtype=np.float32)
+    base = np.array([[x, y, depth] for x in xs for y in ys], dtype=DEFAULT_NP_DTYPE)
     W = np.array(jax.vmap(lambda p: medium.physical_current(p, jnp.asarray(float(t))))(
         jnp.asarray(base)))
     return base, W
