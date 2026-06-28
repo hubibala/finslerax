@@ -5,7 +5,14 @@ from .curvature import (
     sectional_curvature,
 )
 from .manifold import Manifold
-from .manifolds import EuclideanSpace, Hyperboloid, Paraboloid, Sphere, Torus
+from .manifolds import (
+    EuclideanSpace,
+    FlatTorus,
+    Hyperboloid,
+    Paraboloid,
+    Sphere,
+    Torus,
+)
 from .mesh import TriangularMesh
 from .metric import FinslerMetric
 from .transport import BerwaldConnection
@@ -23,6 +30,7 @@ __all__ = [
     "Euclidean",
     "EuclideanSpace",
     "FinslerMetric",
+    "FlatTorus",
     "Hyperboloid",
     "Manifold",
     "Paraboloid",
