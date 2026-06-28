@@ -12,7 +12,6 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
-# config.update("jax_enable_x64", True)
 from ham.geometry.manifolds import EuclideanSpace
 from ham.geometry.zoo import Riemannian
 from ham.models.learned import NeuralRanders

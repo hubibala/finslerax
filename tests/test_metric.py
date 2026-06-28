@@ -14,8 +14,6 @@ import jax.numpy as jnp
 import numpy as np
 
 from ham.geometry import EuclideanSpace
-
-# config.update("jax_enable_x64", True)
 from ham.geometry.manifold import Manifold
 from ham.geometry.metric import FinslerMetric
 from ham.geometry.zoo import Randers

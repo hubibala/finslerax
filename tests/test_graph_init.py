@@ -2,7 +2,6 @@
 
 import unittest
 
-import jax
 import jax.numpy as jnp
 import numpy as np
 
@@ -11,8 +10,6 @@ from ham.solvers import (
     geodesic_graph_init,
     reparametrize_arclength,
 )
-
-jax.config.update("jax_enable_x64", False)
 
 
 def ring_cloud(n=64):

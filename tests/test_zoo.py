@@ -7,7 +7,6 @@ import numpy as np
 from ham.geometry import DiscreteRanders, Euclidean, Randers, Riemannian
 
 # Ensure 64-bit precision for rigorous geometric testing
-# config.update("jax_enable_x64", True)
 from ham.geometry.manifold import Manifold
 from ham.utils.math import PSD_EPS
 

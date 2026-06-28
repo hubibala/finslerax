@@ -10,8 +10,6 @@ from ham.geometry import EuclideanSpace, Riemannian, SegmentQuadratureMetric
 from ham.geometry.zoo import Euclidean
 from ham.solvers import AVBDSolver
 
-jax.config.update("jax_enable_x64", False)
-
 
 def bump_metric(D, height=50.0, width=0.05):
     """Conformal metric with a tall, narrow cost bump at the origin (a 'void')."""

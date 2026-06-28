@@ -1,5 +1,6 @@
 import equinox as eqx
 import jax.numpy as jnp
+from _precision import tol
 
 from ham.geometry.manifolds import EuclideanSpace
 from ham.geometry.metric import AsymmetricMetric
@@ -68,7 +69,14 @@ def test_fast_sweeping_gradients_anisotropic():
     def fwd(g_tensor, b_tensor):
         return _fast_sweeping_solve(g_tensor, b_tensor, source_mask, hx, hy, 100, 1e-6)
 
-    check_grads(fwd, (G, B), order=1, modes=['rev'], eps=1e-3)
+    # Precision-scaled tolerance. The fast-sweeping solve is an iterative
+    # fixed-point (100 sweeps, 1e-6 convergence), so the implicit-diff VJP vs the
+    # finite-difference reference is solver-limited, not machine-precision: the
+    # gap is ~3e-3 in float32 and ~1e-4 in float64. check_grads' dtype-default
+    # tolerances are too tight at both ends (it fails f64 at rtol=1e-5), so we
+    # set explicit floors above each precision's measured gap.
+    atol, rtol = tol(atol32=5e-3, rtol32=5e-3, atol64=1e-3, rtol64=1e-3)
+    check_grads(fwd, (G, B), order=1, modes=['rev'], eps=1e-3, atol=atol, rtol=rtol)
 
 
 # ---------------------------------------------------------------------------

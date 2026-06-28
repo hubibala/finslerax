@@ -8,7 +8,6 @@ from ham.geometry import Sphere
 from ham.geometry.zoo import Euclidean, Randers
 
 # Use Double Precision
-# config.update("jax_enable_x64", True)
 from ham.solvers.avbd import AVBDSolver
 
 

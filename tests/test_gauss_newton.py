@@ -14,7 +14,6 @@ from ham.solvers import (
     solve_continuation,
 )
 
-jax.config.update("jax_enable_x64", False)
 R = 1.0
 
 

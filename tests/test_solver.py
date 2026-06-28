@@ -15,7 +15,6 @@ from ham.geometry.manifolds.euclidean_space import EuclideanSpace
 from ham.geometry.zoo import Euclidean, Randers
 
 # Enforce High Precision
-# config.update("jax_enable_x64", True)
 from ham.solvers.avbd import AVBDSolver
 from ham.utils.math import safe_norm
 

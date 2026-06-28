@@ -4,7 +4,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-# config.update("jax_enable_x64", True)
 from ham.geometry.mesh import TriangularMesh
 from ham.geometry.zoo import DiscreteRanders, Euclidean
 from ham.solvers.avbd import AVBDSolver

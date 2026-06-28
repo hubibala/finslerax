@@ -10,7 +10,6 @@ import numpy as np
 import pytest
 
 # Enforce High Precision
-# config.update("jax_enable_x64", True)
 from ham.geometry import Sphere
 from ham.geometry.manifold import Manifold
 from ham.geometry.zoo import Euclidean, Randers

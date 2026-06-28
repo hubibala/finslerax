@@ -21,7 +21,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-# config.update("jax_enable_x64", True)
 from ham.geometry import Euclidean, EuclideanSpace, Randers, Riemannian, Sphere
 from ham.geometry.curvature import (
     flag_curvature_sample,

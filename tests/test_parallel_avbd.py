@@ -7,8 +7,6 @@ import numpy as np
 from ham.geometry import Sphere
 from ham.geometry.zoo import Euclidean, Randers
 from ham.solvers.avbd import AVBDSolver
-
-# config.update("jax_enable_x64", True)
 from ham.solvers.coloring import chain_coloring, greedy_coloring, mesh_vertex_coloring
 
 

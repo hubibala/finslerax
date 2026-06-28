@@ -5,7 +5,6 @@ import jax.numpy as jnp
 import numpy as np
 
 # Use 64-bit precision for geometric checks
-# config.update("jax_enable_x64", True)
 from ham.geometry import EuclideanSpace, Hyperboloid, Paraboloid, Sphere, Torus
 
 

@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from _precision import assert_default_dtype
 
 from ham.data.wildfire import (
     SceneNormalizer,
@@ -86,7 +87,7 @@ class TestExtractArrivalTimes:
     def test_dtype(self):
         masks = np.ones((2, 3, 3), dtype=np.uint8)
         arr = extract_arrival_times(masks)
-        assert arr.dtype == np.float32
+        assert_default_dtype(arr)
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +105,7 @@ class TestFindIgnitionPoint:
         pt = find_ignition_point(masks)
 
         assert pt.shape == (2,)
-        assert pt.dtype == np.float32
+        assert_default_dtype(pt)
         np.testing.assert_allclose(pt, [3.0, 3.0])
 
     def test_fallback_to_frames_0_2(self):
@@ -321,4 +322,4 @@ class TestSceneNormalizer:
         norm = SceneNormalizer.fit([_make_synthetic_raw(0)])
         w = norm.normalize_weather(np.array([75.0, 50.0, 0.5, 0.866], dtype=np.float32))
         assert w.shape == (4,)
-        assert w.dtype == np.float32
+        assert_default_dtype(w)

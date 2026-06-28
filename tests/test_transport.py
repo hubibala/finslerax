@@ -13,7 +13,6 @@ import jax.numpy as jnp
 import numpy as np
 
 # Ensure precision for geometric drift checks
-# config.update("jax_enable_x64", True)
 from ham.geometry import EuclideanSpace, Sphere
 from ham.geometry.transport import BerwaldConnection
 from ham.geometry.zoo import Euclidean, Randers, Riemannian

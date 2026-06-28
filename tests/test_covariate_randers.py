@@ -12,8 +12,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+from _precision import assert_default_dtype
 
-# config.update("jax_enable_x64", True)
 from ham.geometry.manifolds import EuclideanSpace
 from ham.models.wildfire import (
     CovariateConditionedRanders,
@@ -344,7 +344,7 @@ class TestLocalTerrainCNN:
         fuel = jnp.ones((4, 10, 10))
         weather = jnp.zeros(4)
         out = cnn(raster, fuel, weather)
-        assert out.dtype == jnp.float32, f"Expected float32, got {out.dtype}"
+        assert_default_dtype(out)
 
     def test_output_finite(self):
         cnn = self._make_cnn()
@@ -387,7 +387,7 @@ class TestPrecomputeMetricField:
         model = _make_model()
         scene = _make_scene()
         bound = model.bind_scene(**scene).precompute_metric_field()
-        assert bound.metric_field.dtype == jnp.float32
+        assert_default_dtype(bound.metric_field)
 
     def test_field_finite(self):
         model = _make_model()
