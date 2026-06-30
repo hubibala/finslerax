@@ -16,8 +16,11 @@ from .constraints import (
     upright_constraint,
     waypoint_constraint,
 )
+from .evaluate import path_metrics, spray_geodesic
+from .fields import MLPDistance, ScaledDistance
 from .interfaces import DemoSource, DistanceField, Robot, Scene
 from .medium import ArmMetric, angle_manifold, build_arm_metric
+from .planners import AVBDPlanner, EikonalPlanner
 from .providers import (
     AnalyticDistance,
     CircleScene,
@@ -26,19 +29,25 @@ from .providers import (
 )
 
 __all__ = [
+    "AVBDPlanner",
     "AnalyticDistance",
     "ArmMetric",
     "CircleScene",
     "DemoSource",
     "DistanceField",
+    "EikonalPlanner",
     "GroundTruthDemos",
+    "MLPDistance",
     "PlanarArm",
     "Robot",
+    "ScaledDistance",
     "Scene",
     "angle_manifold",
     "build_arm_metric",
     "constraint_penalty",
     "max_constraint_violation",
+    "path_metrics",
+    "spray_geodesic",
     "upright_constraint",
     "waypoint_constraint",
 ]

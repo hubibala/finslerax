@@ -6,14 +6,22 @@ Run: ``JAX_PLATFORMS=cpu pytest tests/test_arm.py`` (and again with
 stages run on a proven machine. This file grows a rung per chunk.
 
 Rungs covered so far:
-    L1 — Robot sanity: FK vs known poses, M(q) symmetric-PD, Jacobian vs
-         finite-difference, gravity vs finite-difference of the potential.
+    L1  — Robot sanity: FK, M(q) symmetric-PD, Jacobian/gravity vs finite-diff.
+    L2  — Implicit-adjoint gradcheck (the Stage-D gate): AVBD block-tridiag
+          adjoint vs finite differences through the metric.
+    L3  — Eikonal cross-check: AVBD geodesic length vs the grid arrival field.
+    L3b — Spray oracle: AVBD ≈ ExponentialMap shooting ≈ Gauss-Newton on the
+          smooth metric (four independent geodesic derivations agree).
+    L4  — Continuation: a stiff barrier annealed with warm-starts converges
+          collision-free where a cold single-shot diverges.
+    L5  — Gravity asymmetry, mild-wind cap, drift sign.
     Provider seam: the synthetic providers structurally satisfy the protocols.
 """
 
 import pathlib
 import sys
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -33,10 +41,14 @@ from experiments.arm.constraints import (
     max_constraint_violation,
     upright_constraint,
 )
+from experiments.arm.evaluate import kinetic_cost, min_clearance, spray_geodesic
+from experiments.arm.fields import MLPDistance, ScaledDistance
 from experiments.arm.interfaces import DemoSource, DistanceField, Robot, Scene
 from experiments.arm.medium import angle_manifold, build_arm_metric
+from experiments.arm.planners import AVBDPlanner, EikonalPlanner
 from ham.geometry.manifolds import EuclideanSpace, FlatTorus
 from ham.geometry.zoo import Randers
+from ham.solvers import AVBDSolver, GaussNewtonGeodesic
 
 jax.config.update("jax_platform_name", "cpu")
 
@@ -256,6 +268,160 @@ def test_l5_barrier_inflates_near_obstacles():
     infl_free = float(warped.metric_fn(q_free, v) / base.metric_fn(q_free, v))
     assert infl_collide > 100.0  # barrier wall
     assert 1.0 < infl_free < infl_collide  # mild, monotone in clearance
+
+
+# ===========================================================================
+# L2 — implicit-adjoint gradcheck (THE Stage-D gate: a wrong adjoint silently
+# poisons inverse learning).
+# ===========================================================================
+class _SmoothEEDist(eqx.Module):
+    """Smooth end-effector-to-circle clearance (no min-over-segments kinks).
+
+    A clean, differentiable field so the finite-difference gradcheck isn't
+    confounded by the subgradient kinks of the realistic min-based field.
+    """
+
+    arm: PlanarArm
+    cx: float = eqx.field(static=True)
+    cy: float = eqx.field(static=True)
+    r: float = eqx.field(static=True)
+
+    def __call__(self, q):
+        ee = self.arm.fk(q)
+        return jnp.sqrt((ee[0] - self.cx) ** 2 + (ee[1] - self.cy) ** 2) - self.r
+
+
+def test_l2_implicit_adjoint_gradcheck():
+    """The block-tridiagonal adjoint matches finite differences through the metric."""
+    arm = PlanarArm(2)
+    ang = angle_manifold(arm)
+    q0, q1 = jnp.array([-0.5, 0.4]), jnp.array([0.8, -0.5])
+    base = _SmoothEEDist(arm, cx=1.4, cy=0.2, r=0.3)
+
+    def path_energy(scale):
+        metric = build_arm_metric(
+            arm, ScaledDistance(base, scale), manifold=ang, alpha=0.05, delta=0.05
+        )
+        solver = AVBDSolver(
+            step_size=0.05, iterations=400, energy_tol=1e-12, implicit_diff=True
+        )
+        return solver.solve(metric, q0, q1, n_steps=12).energy
+
+    s0 = jnp.array(1.0)
+    grad_adj = jax.grad(path_energy)(s0)
+    fd_step = 1e-4 if x64_enabled() else 1e-3
+    fd = (path_energy(s0 + fd_step) - path_energy(s0 - fd_step)) / (2 * fd_step)
+    rel = abs(float(grad_adj) - float(fd)) / (abs(float(fd)) + 1e-9)
+    assert rel < (0.02 if x64_enabled() else 0.10), (float(grad_adj), float(fd), rel)
+
+
+def test_l2_adjoint_finite_through_learnable_fields():
+    """Adjoint grads are finite (and nonzero) through the realistic min-field and an MLP field."""
+    arm = PlanarArm(2)
+    ang = angle_manifold(arm)
+    q0, q1 = jnp.array([-0.5, 0.4]), jnp.array([0.8, -0.5])
+
+    real = AnalyticDistance(arm, CircleScene([[1.4, 0.2, 0.3]]))
+
+    def energy_scale(scale):
+        metric = build_arm_metric(arm, ScaledDistance(real, scale), manifold=ang, alpha=0.05)
+        return AVBDSolver(step_size=0.05, iterations=250, implicit_diff=True).solve(
+            metric, q0, q1, n_steps=10
+        ).energy
+
+    assert bool(jnp.isfinite(jax.grad(energy_scale)(jnp.array(1.0))))
+
+    mlp = MLPDistance(2, width=16, depth=2, key=jax.random.PRNGKey(0))
+
+    def energy_mlp(field):
+        metric = build_arm_metric(arm, field, manifold=ang, alpha=0.02)
+        return AVBDSolver(step_size=0.05, iterations=200, implicit_diff=True).solve(
+            metric, q0, q1, n_steps=10
+        ).energy
+
+    grads = eqx.filter_grad(energy_mlp)(mlp)
+    leaves = [g for g in jax.tree_util.tree_leaves(grads) if eqx.is_array(g)]
+    assert all(bool(jnp.all(jnp.isfinite(g))) for g in leaves)
+    assert any(bool(jnp.any(g != 0)) for g in leaves)
+
+
+# ===========================================================================
+# L3 / L3b — independent geodesic cross-checks (the validation triangle).
+# ===========================================================================
+def test_l3_eikonal_cross_check():
+    """AVBD geodesic length agrees with the 2-DoF eikonal arrival field."""
+    arm = PlanarArm(2)
+    ang = angle_manifold(arm)
+    metric = build_arm_metric(arm, manifold=ang, gravity_strength=0.0)
+    q0, q1 = jnp.array([-0.5, 0.4]), jnp.array([0.8, -0.5])
+
+    avbd = AVBDSolver(step_size=0.05, iterations=400).solve(
+        metric, q0, q1, n_steps=32, train_mode=False
+    )
+    len_avbd = float(kinetic_cost(metric, avbd.xs))
+
+    eik = EikonalPlanner(max_iters=500, tol=1e-6)
+    extent = (-1.6, 1.6, -1.6, 1.6)
+    T = eik.arrival_field(metric, q0, extent, (91, 91))
+    t_goal = float(eik.sample(T, extent, q1))
+    assert abs(t_goal - len_avbd) / len_avbd < 0.05, (t_goal, len_avbd)
+
+
+def test_l3b_spray_oracle_triangle():
+    """AVBD ≈ spray-shot geodesic ≈ Gauss-Newton on the smooth metric."""
+    arm = PlanarArm(2)
+    ang = angle_manifold(arm)
+    metric = build_arm_metric(arm, manifold=ang, gravity_strength=0.0)
+    q0, q1 = jnp.array([-0.5, 0.4]), jnp.array([0.8, -0.5])
+
+    len_avbd = float(
+        kinetic_cost(metric, AVBDSolver(step_size=0.05, iterations=400).solve(
+            metric, q0, q1, n_steps=32, train_mode=False).xs)
+    )
+    xs_spray = spray_geodesic(metric, q0, q1, n_steps=64, iters=30)
+    len_spray = float(kinetic_cost(metric, xs_spray))
+    len_gn = float(
+        kinetic_cost(metric, GaussNewtonGeodesic(iterations=60).solve(
+            metric, q0, q1, n_steps=32, train_mode=False).xs)
+    )
+
+    # The spray actually reaches the goal (shooting converged).
+    assert float(jnp.linalg.norm(xs_spray[-1] - q1)) < 1e-3
+    assert abs(len_avbd - len_spray) / len_spray < 0.02
+    assert abs(len_avbd - len_gn) / len_gn < 0.02
+
+
+# ===========================================================================
+# L4 — barrier continuation converges where a cold single-shot diverges.
+# ===========================================================================
+def test_l4_continuation_beats_single_shot():
+    """Annealing a stiff barrier (warm-started) stays collision-free; a cold solve diverges."""
+    arm = PlanarArm(2)
+    ang = angle_manifold(arm)
+    qa, qb = jnp.array([-0.3, 1.2]), jnp.array([1.1, 0.3])
+    dist = AnalyticDistance(arm, CircleScene([[1.4, 1.0, 0.3]]))
+    # Endpoints are clear, but the straight C-space line dips into collision.
+    assert float(dist(qa)) > 0 and float(dist(qb)) > 0
+    assert float(min_clearance(dist, ang, jnp.linspace(qa, qb, 40))) < 0
+
+    def make_metric(alpha):
+        return build_arm_metric(arm, dist, manifold=ang, alpha=alpha, delta=0.04)
+
+    alpha = 12.0
+    single = AVBDSolver(step_size=0.05, iterations=800).solve(
+        make_metric(alpha), qa, qb, n_steps=24, train_mode=False
+    )
+    cont = AVBDPlanner(step_size=0.05, iterations=400).plan(
+        make_metric, qa, qb, n_steps=24, alphas=(0.05, 0.2, 0.6, 1.5, alpha)
+    )
+    clr_single = float(min_clearance(dist, ang, single.xs))
+    clr_cont = float(min_clearance(dist, ang, cont.xs))
+    # Continuation stays collision-free and converges to a far lower (stable)
+    # energy than the cold single-shot, which either collides (float64) or
+    # settles into a much worse local optimum (float32).
+    assert clr_cont > 0.0
+    assert clr_cont >= clr_single
+    assert float(cont.energy) < 0.5 * float(single.energy)
 
 
 # ===========================================================================

@@ -76,6 +76,7 @@ class ArmMetric(AsymmetricMetric):
     gravity_strength: float = eqx.field(static=True)
     alpha: float = eqx.field(static=True)
     delta: float = eqx.field(static=True)
+    barrier_width: float = eqx.field(static=True)
     epsilon: float = eqx.field(static=True)
     wind_stiffness: float = eqx.field(static=True)
     use_gravity: bool = eqx.field(static=True)
@@ -90,6 +91,7 @@ class ArmMetric(AsymmetricMetric):
         gravity_strength: float = 0.0,
         alpha: float = 0.0,
         delta: float = 0.05,
+        barrier_width: float = 0.05,
         epsilon: float = 1e-5,
         wind_stiffness: float = WIND_STIFFNESS,
     ):
@@ -99,6 +101,7 @@ class ArmMetric(AsymmetricMetric):
         self.gravity_strength = float(gravity_strength)
         self.alpha = float(alpha)
         self.delta = float(delta)
+        self.barrier_width = float(barrier_width)
         self.epsilon = float(epsilon)
         self.wind_stiffness = float(wind_stiffness)
         self.use_gravity = self.gravity_strength != 0.0
@@ -111,10 +114,17 @@ class ArmMetric(AsymmetricMetric):
         return x, jnp.eye(x.shape[-1], dtype=x.dtype)
 
     def _rho(self, q: jax.Array) -> jax.Array:
-        """Conformal barrier factor ``ρ(q) = 1 + α/(dist(q) - δ)₊`` (1 if disabled)."""
+        """Conformal barrier ``ρ(q) = 1 + α/gap`` with a smooth softplus gap (1 if disabled).
+
+        The gap ``w·softplus((dist - δ)/w)`` approaches ``(dist - δ)₊`` but stays
+        strictly positive and — crucially — keeps a restoring gradient *inside*
+        collision, so continuation can pull a colliding init out. A hard
+        ``max(dist - δ, 0)`` floor zeros that gradient and traps the path.
+        """
         if not self.use_obstacle:
             return jnp.asarray(1.0)
-        gap = jnp.maximum(self.dist(q) - self.delta, GRAD_EPS)
+        w = self.barrier_width
+        gap = w * jax.nn.softplus((self.dist(q) - self.delta) / w)
         return 1.0 + self.alpha / gap
 
     def zermelo_data(self, x: jax.Array) -> tuple[jax.Array, jax.Array, jax.Array]:
@@ -155,6 +165,7 @@ def build_arm_metric(
     gravity_strength: float = 0.0,
     alpha: float = 0.0,
     delta: float = 0.05,
+    barrier_width: float = 0.05,
     epsilon: float = 1e-5,
 ) -> ArmMetric:
     """Build an :class:`ArmMetric`, defaulting to the robot's Clifford torus.
@@ -170,6 +181,7 @@ def build_arm_metric(
         gravity_strength=gravity_strength,
         alpha=alpha,
         delta=delta,
+        barrier_width=barrier_width,
         epsilon=epsilon,
     )
 
