@@ -123,9 +123,7 @@ Concrete metrics live in `ham.geometry.zoo`; learnable ones in `ham.models`.
 | `SegmentQuadratureMetric` | `zoo` | Gauss-quadrature segment cost (high-accuracy arc length) |
 | `NeuralRanders`, `NeuralRiemannian` | `models.learned` | $H, W$ are neural networks |
 | `PullbackRanders`, `PullbackRiemannian` | `models.learned` | $H = J^\top J$ from a decoder Jacobian |
-| `DataDrivenPullbackRanders` | `models.learned` | pullback sea + kernel wind from data |
-| `EnergyBasedRanders` | `models.learned` | wind from the gradient of a scalar energy field |
-| `KernelWindField`, `PseudotimeRanders` | `models.learned` | kernel / pseudotime-driven winds |
+| `KernelWindField` | `models.learned` | non-parametric kernel-smoothed wind from data |
 | `CovariateConditionedRanders` | `models.wildfire` | wind conditioned on local terrain covariates |
 
 ### 3.1 The Randers specialization
@@ -250,7 +248,7 @@ src/ham/
 │   └── wildfire.py          # CovariateConditionedRanders, LocalTerrainCNN, SPD/‖B‖ projections
 ├── nn/
 │   ├── networks.py          # VectorField, PSDMatrixField, RandomFourierFeatures
-│   ├── ebm.py               # ScalarEnergyField, PseudotimePotential, QuadraticHead
+│   ├── ebm.py               # ScalarEnergyField, QuadraticHead
 │   └── kde.py               # GaussianKDEEnergy
 ├── solvers/
 │   ├── geodesic.py          # ExponentialMap (IVP)
@@ -263,7 +261,7 @@ src/ham/
 │   ├── pipeline.py          # HAMPipeline, TrainingPhase
 │   ├── losses.py            # geometry-aware loss components
 │   └── losses_ebm.py        # contrastive divergence, denoising score matching
-├── data/                    # dataset loaders (Weinreb, sim2real)
+├── data/                    # dataset loaders (sim2real, wildfire)
 ├── sim/                     # analytic vector fields (Rossby–Haurwitz, vortices)
 ├── utils/                   # numerics (safe_norm, epsilons), device, config
 └── vis/                     # plotting, isosurfaces, marching cubes
@@ -348,14 +346,14 @@ skipped (with a printed notice) when no lineage data is present.
      solver.
    - *Wildfire* (`models/wildfire.py`, `data/wildfire.py`) — front propagation
      with terrain-covariate-conditioned Randers metrics.
-   - *Single-cell* (`data/` Weinreb loaders) — generative latent-geometry models
-     of hematopoietic differentiation.
+   - *Robot-arm geodesics* (`experiments/arm/`) — configuration-space geodesic
+     motion planning with asymmetric (gravity-Randers) C-space cost.
 
 ### Known limitations
 
 7. **Curved-manifold VAEs.** Joint training of the full generative pipeline on
    strongly curved latent manifolds (`Sphere`, `Hyperboloid`) remains numerically
-   sensitive; the flat `EuclideanSpace` latent is the recommended default for
-   biological applications. Integrating exact `cosh`/`sinh` maps with deep
+   sensitive; the flat `EuclideanSpace` latent is the recommended default.
+   Integrating exact `cosh`/`sinh` maps with deep
    learning loops can still trigger solver collapse (see `spec/MATH_SPEC.md`
    § 4.1).

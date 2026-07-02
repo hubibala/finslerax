@@ -41,7 +41,7 @@ def _build_spatial_grid(
             Unused slots contain -1.
         grid_origin:  (2,) float64 XY origin of the bounding box.
         grid_cell_size: (2,) float64 cell dimensions.
-        max_m:        Maximum faces in any single cell (static).
+        max_m:        Maximum faces in any (static).
     """
     # Work in numpy so the build is pure Python, not JAX-traced.
     verts_np = np.asarray(jax.device_get(vertices))

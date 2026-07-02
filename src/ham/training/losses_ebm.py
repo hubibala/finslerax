@@ -152,20 +152,20 @@ class DenoisingScoreMatchingLoss(LossComponent[EnergyModel]):
 
 
 class MSELoss(LossComponent[EnergyModel]):
-    """Mean Squared Error Loss for Pseudotime Potential training.
+    """Mean Squared Error loss for scalar-potential regression.
 
-    Expects batch[0] = x_diffmap, batch[1] = target_dpt.
+    Expects batch[0] = inputs, batch[1] = target scalar values.
     """
 
     def __init__(self, weight: float = 1.0, name: str = "MSE"):
         super().__init__(weight, name)
 
     def __call__(self, model: EnergyModel, batch: tuple, key: jax.Array) -> jnp.ndarray:
-        x_diffmap = batch[0]
-        # In HAMPipeline, batch is (X, V, labels). We stored DPT in labels.
-        target_dpt = batch[2]
+        inputs = batch[0]
+        # In HAMPipeline, batch is (X, V, labels). The target scalar is in labels.
+        target = batch[2]
 
-        pred_dpt = model(x_diffmap)
+        pred = model(inputs)
 
-        loss = jnp.mean((pred_dpt - target_dpt) ** 2)
+        loss = jnp.mean((pred - target) ** 2)
         return loss * self.weight
