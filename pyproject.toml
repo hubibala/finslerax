@@ -39,14 +39,6 @@ dev = [
     "mypy",
     "ruff",
 ]
-# Single-cell / RNA-velocity data loaders (ham.utils.download_*). Not required
-# for the core geometry, solvers, or the synthetic experiments shipped in v1.
-bio = [
-    "anndata",
-    "scanpy",
-    "scvelo",
-    "pandas",
-]
 wildfire = [
     "Pillow>=9.0",
     "rasterio>=1.3",

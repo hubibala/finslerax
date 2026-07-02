@@ -7,7 +7,6 @@ parameter freezing, modular loss composition, and lineage-triple batching).
 See also:
     spec/ARCH_SPEC.md § 6.4 -- Training Pipeline.
     ham.training.losses -- Modular loss components.
-    examples/weinreb_smoke_test.py -- Minimal usage example.
 """
 
 from dataclasses import dataclass
@@ -76,7 +75,7 @@ class HAMPipeline:
         model: The eqx.Module being trained. Updated after each phase.
 
     See also:
-        spec/ARCH_SPEC.md § 6.4, ham.training.losses, examples/weinreb_smoke_test.py.
+        spec/ARCH_SPEC.md § 6.4, ham.training.losses.
     """
 
     def __init__(self, model: eqx.Module):

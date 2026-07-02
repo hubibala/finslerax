@@ -21,7 +21,6 @@ class LossComponent(eqx.Module, Generic[ModelType]):
 
     See also:
         ham.training.pipeline.TrainingPhase -- how losses are composed.
-        examples/weinreb_smoke_test.py -- working usage example.
     """
 
     weight: float = eqx.field(static=True)
@@ -81,8 +80,8 @@ class ZermeloAlignmentLoss(LossComponent[GenerativeModel]):
         super().__init__(weight, "Z_Align")
 
     def __call__(self, model, batch, key):
-        x, v_rna = batch[0], batch[1]
-        z_mean, u_lat = model.project_control(x, v_rna)
+        x, v_obs = batch[0], batch[1]
+        z_mean, u_lat = model.project_control(x, v_obs)
 
         if isinstance(model.metric, AsymmetricMetric):
             _, W, _ = model.metric.zermelo_data(z_mean)
@@ -120,8 +119,8 @@ class GeodesicSprayLoss(LossComponent[GenerativeModel]):
         super().__init__(weight, "Spray")
 
     def __call__(self, model, batch, key):
-        x, v_rna = batch[0], batch[1]
-        z_mean, u_lat = model.project_control(x, v_rna)
+        x, v_obs = batch[0], batch[1]
+        z_mean, u_lat = model.project_control(x, v_obs)
 
         if isinstance(model.metric, AsymmetricMetric):
             _, W, _ = model.metric.zermelo_data(z_mean)
@@ -467,7 +466,7 @@ class KinematicPriorLoss(LossComponent[GenerativeModel]):
 
 
 class FinslerActionMatchingLoss(LossComponent[GenerativeModel]):
-    """Minimizes the Finsler energy of observed biological transitions.
+    """Minimizes the Finsler energy of observed transitions.
 
     Requires joint training so the VAE reconstruction prevents scale collapse.
     Calculates E = (1/2) F(z, v)^2 (the Finsler energy functional,
@@ -488,7 +487,7 @@ class FinslerActionMatchingLoss(LossComponent[GenerativeModel]):
         z_start = model.encode(x_start, k1)
         z_end = model.encode(x_end, k2)
 
-        # 2. Approximate the tangent vector (observed biological flow)
+        # 2. Approximate the tangent vector (observed flow)
         v = z_end - z_start
 
         # 3. Calculate Finsler energy using the model's underlying Randers metric

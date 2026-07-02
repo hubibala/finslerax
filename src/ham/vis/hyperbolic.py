@@ -49,9 +49,9 @@ def plot_poincare_disk(
 
     Args:
         points: (N, 3) Hyperboloid coordinates (will be projected to 2D)
-        colors: (N,) Array for coloring points (e.g. cell type or pseudotime)
+        colors: (N,) Array for coloring points (e.g. a class label or scalar value)
         vectors: (N, 3) Optional vector field (e.g. the Wind) to plot arrows
-        lineage_pairs: (M, 2) Indices of (Parent, Child) to draw edges
+        lineage_pairs: (M, 2) Index pairs (i, j) to draw edges between points
     """
     if ax is None:
         _fig, ax = plt.subplots(figsize=(8, 8))
@@ -66,7 +66,7 @@ def plot_poincare_disk(
     )
     ax.add_artist(circle)
 
-    # 3. Draw Lineage Edges (Geodesics would be arcs, straight lines are approx)
+    # 3. Draw Edges (Geodesics would be arcs, straight lines are approx)
     if lineage_pairs is not None:
         start_pts = points_p[lineage_pairs[:, 0]]
         end_pts = points_p[lineage_pairs[:, 1]]
@@ -105,7 +105,7 @@ def plot_poincare_disk(
         points_p[:, 0], points_p[:, 1], c=colors, cmap="viridis", s=10, alpha=0.8
     )
     if colors is not None:
-        plt.colorbar(sc, ax=ax, label="Cell Type / Time")
+        plt.colorbar(sc, ax=ax, label="Value / Time")
 
     ax.set_xlim(-1.1, 1.1)
     ax.set_ylim(-1.1, 1.1)
