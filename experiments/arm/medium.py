@@ -7,8 +7,14 @@ Three layers, each grounded and mapped to existing HAM machinery:
    ``M(q)`` is lifted to the ambient tangent via ``E M Eᵀ``; on the intrinsic
    ``EuclideanSpace`` angle representation it is used directly.
 2. **Gravity asymmetry (the novelty)** ``+ β(q)·q̇`` with the Zermelo "wind"
-   ``W = -gravity_strength · ∇U(q)`` blowing *downhill*, so descending costs less
-   than lifting. The causal soft clamp keeps ``‖W‖_M < 1`` (mild-wind).
+   ``W = -gravity_strength · M⁻¹(q) ∇U(q)`` — the velocity drift the gravity
+   *force* induces under the mobility ``M⁻¹`` — blowing *downhill*, so descending
+   costs less than lifting. Raising the force with ``M⁻¹`` (not the identity) is
+   what makes the induced Randers 1-form ``β = -(M W)♭/λ = gₛ·dU/λ`` **exact** to
+   first order: the drift is then a pure gauge of path shape (projective
+   invariance; see ``spec/exact_drift_gauge_equivalence.md``), visible only in
+   directed cost — the identifiability structure Stage D measures. The causal
+   soft clamp keeps ``‖W‖_M < 1`` (mild-wind).
 3. **Obstacle conformal warp** ``ρ(q) F`` with ``ρ = 1 + α/(dist(q) - δ)₊`` over an
    injected :class:`DistanceField` (Region-Avoiding Metrics, IROS 2023). Conformal
    scaling is realised as ``H -> ρ²H, W -> W/ρ``, which leaves ``‖W‖_H`` — hence
@@ -73,6 +79,7 @@ class ArmMetric(AsymmetricMetric):
 
     robot: Any
     dist: Any | None
+    wind_field: Any | None
     gravity_strength: float = eqx.field(static=True)
     alpha: float = eqx.field(static=True)
     delta: float = eqx.field(static=True)
@@ -88,6 +95,7 @@ class ArmMetric(AsymmetricMetric):
         robot: Any,
         dist: Any | None = None,
         *,
+        wind_field: Any | None = None,
         gravity_strength: float = 0.0,
         alpha: float = 0.0,
         delta: float = 0.05,
@@ -98,6 +106,7 @@ class ArmMetric(AsymmetricMetric):
         super().__init__(manifold=manifold)
         self.robot = robot
         self.dist = dist
+        self.wind_field = wind_field
         self.gravity_strength = float(gravity_strength)
         self.alpha = float(alpha)
         self.delta = float(delta)
@@ -134,10 +143,18 @@ class ArmMetric(AsymmetricMetric):
         H_base = E @ M @ E.T
         H_base = 0.5 * (H_base + H_base.T)
 
+        # The joint-space drift: prescribed gravity wind and/or an extra wind
+        # field (learned in Stage D, or a ground-truth rotational component),
+        # summed and lifted to the ambient tangent. The gravity force -∇U is
+        # raised with the mobility M⁻¹ so its 1-form β = gₛ·dU/λ stays exact.
+        W_joint = jnp.zeros(q.shape, dtype=x.dtype)
         if self.use_gravity:
-            W = E @ (-self.gravity_strength * self.robot.gravity(q))
-        else:
-            W = jnp.zeros(x.shape, dtype=x.dtype)
+            W_joint = W_joint - self.gravity_strength * jnp.linalg.solve(
+                M, self.robot.gravity(q)
+            )
+        if self.wind_field is not None:
+            W_joint = W_joint + self.wind_field(q)
+        W = E @ W_joint
 
         # Causal soft clamp against the base sea (conformal-invariant: ‖W‖_H is
         # unchanged by the ρ-fold below, so clamping here is correct).
@@ -162,6 +179,7 @@ def build_arm_metric(
     dist: Any | None = None,
     *,
     manifold: Manifold | None = None,
+    wind_field: Any | None = None,
     gravity_strength: float = 0.0,
     alpha: float = 0.0,
     delta: float = 0.05,
@@ -171,13 +189,15 @@ def build_arm_metric(
     """Build an :class:`ArmMetric`, defaulting to the robot's Clifford torus.
 
     Pass ``manifold=EuclideanSpace(robot.dof)`` for the intrinsic-angle
-    representation (the 2-D eikonal grid and the spray oracle).
+    representation (the 2-D eikonal grid and the spray oracle), or a learnable
+    ``wind_field`` (``q -> Wⱼₒᵢₙₜ``) to recover the drift from demonstrations.
     """
     manifold = robot.manifold if manifold is None else manifold
     return ArmMetric(
         manifold,
         robot,
         dist,
+        wind_field=wind_field,
         gravity_strength=gravity_strength,
         alpha=alpha,
         delta=delta,

@@ -35,6 +35,8 @@ class AVBDPlanner(eqx.Module):
         step_size, beta, iterations, grad_clip: AVBD solver settings.
         polish: If set, refine the final (unconstrained) solve with Gauss-Newton.
         gn_iterations: Gauss-Newton iterations when ``polish``.
+        resample_between: Re-equalize vertex spacing between continuation
+            stages (anti-bunching / anti-tunneling; recommended beyond 2 DoF).
     """
 
     step_size: float = eqx.field(static=True, default=0.05)
@@ -43,6 +45,7 @@ class AVBDPlanner(eqx.Module):
     grad_clip: float = eqx.field(static=True, default=10.0)
     polish: bool = eqx.field(static=True, default=False)
     gn_iterations: int = eqx.field(static=True, default=40)
+    resample_between: bool = eqx.field(static=True, default=False)
 
     def plan(
         self,
@@ -88,6 +91,12 @@ class AVBDPlanner(eqx.Module):
                 init_path=path,
             )
             path = traj.xs
+            if self.resample_between:
+                # Re-equalize vertex spacing before the next (stiffer) stage.
+                # A partially-relaxed iterate bunches vertices in cheap regions
+                # and leaves one long segment whose midpoint-rule energy can
+                # tunnel straight through a thin obstacle body.
+                path = resample_path(path, n_steps, project=metric.manifold.project)
 
         if self.polish and not constraints:
             gn = GaussNewtonGeodesic(iterations=self.gn_iterations)
@@ -119,6 +128,41 @@ class EikonalPlanner(eqx.Module):
         solver = EikonalSolver(max_iters=self.max_iters, tol=self.tol)
         T, _, _ = solver.solve(metric, jnp.atleast_2d(source), grid_extent, grid_shape)
         return T
+
+    @staticmethod
+    def trace_path(
+        T: jax.Array,
+        grid_extent: tuple[float, float, float, float],
+        goal: jax.Array,
+        *,
+        step: float = 0.02,
+        max_steps: int = 3000,
+        tol_frac: float = 0.03,
+    ) -> jax.Array:
+        """Back-trace the characteristic from ``goal`` to the source by descending ``T``.
+
+        The arrival field's steepest-descent curve is the **globally** optimal
+        route on the grid (up to discretization) — no basins, no init. Used as
+        the ground-truth route class that a local BVP solve must reproduce.
+
+        Returns:
+            The traced path, shape ``(N, 2)``, goal first, source end last.
+        """
+        sample = jax.jit(lambda p: EikonalPlanner.sample(T, grid_extent, p))
+        grad = jax.jit(jax.grad(lambda p: EikonalPlanner.sample(T, grid_extent, p)))
+        t_goal = float(sample(goal))
+        x = goal
+        pts = [x]
+        for _ in range(max_steps):
+            g = grad(x)
+            n = float(jnp.linalg.norm(g))
+            if n < 1e-9:
+                break
+            x = x - step * g / n
+            pts.append(x)
+            if float(sample(x)) < tol_frac * t_goal:
+                break
+        return jnp.stack(pts)
 
     @staticmethod
     def sample(
