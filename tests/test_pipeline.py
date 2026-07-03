@@ -5,7 +5,7 @@ Covers:
   - Parameter freezing / unfreezing via eqx.partition
   - Loss component correctness (scalar output, weight application)
   - Multi-phase sequential execution
-  - Pipeline skips phases when lineage pairs are missing
+  - Pipeline skips phases when pairs are missing
   - Gradient flow through unfrozen parameters only
 """
 import unittest
@@ -59,11 +59,11 @@ class ConstantLoss(LossComponent):
 
 
 class DummyDataset:
-    def __init__(self, n=20, lineage_pairs=None):
+    def __init__(self, n=20, pair_indices=None):
         key = jax.random.PRNGKey(42)
         self.X = jax.random.normal(key, (n, 2))
         self.V = jnp.zeros((n, 2))
-        self.lineage_pairs = lineage_pairs
+        self.pair_indices = pair_indices
         self.labels = None
 
 
@@ -237,7 +237,7 @@ class TestMultiPhaseExecution(unittest.TestCase):
             requires_pairs=True,
         )
 
-        trained = HAMPipeline(model).fit(DummyDataset(lineage_pairs=None), [phase], batch_size=5)
+        trained = HAMPipeline(model).fit(DummyDataset(pair_indices=None), [phase], batch_size=5)
 
         self.assertTrue(jnp.allclose(trained.layer2.weight, w_init),
                         "Phase should have been skipped, weights unchanged")
@@ -270,13 +270,13 @@ class TestMultiPhaseExecution(unittest.TestCase):
                         "Loss should decrease over training")
 
     def test_requires_pairs_with_actual_pairs(self):
-        """When requires_pairs=True and lineage_pairs exist, phase should execute."""
+        """When requires_pairs=True and pair_indices exist, phase should execute."""
         key = jax.random.PRNGKey(0)
         model = DummyModel(key)
         w_init = model.layer2.weight.copy()
 
         pairs = jnp.array([[0, 1], [2, 3], [4, 5], [6, 7], [8, 9]])
-        ds = DummyDataset(n=10, lineage_pairs=pairs)
+        ds = DummyDataset(n=10, pair_indices=pairs)
 
         phase = TrainingPhase(
             name="PairPhase", epochs=3, optimizer=optax.sgd(0.1),
