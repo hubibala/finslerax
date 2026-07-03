@@ -159,13 +159,81 @@ def test_metric_matches_randers():
     q = jnp.array([0.4, -0.6])
     v = jnp.array([0.7, 0.3])
     H = arm.inertia(q)
-    W = -0.1 * arm.gravity(q)
+    W = -0.1 * jnp.linalg.solve(H, arm.gravity(q))  # mobility-raised gravity force
     ref = Randers(
         EuclideanSpace(2), lambda z, H=H: H, lambda z, W=W: W, wind_mode="soft"
     )
     np.testing.assert_allclose(
         metric.metric_fn(q, v), ref.metric_fn(q, v), atol=atol, rtol=rtol
     )
+
+
+def test_gravity_form_is_exact():
+    """The gravity drift's Randers 1-form is exactly gₛ·dU (the theorem's premise).
+
+    ``β = -(H W)/λ`` with ``W = -gₛ·M⁻¹∇U`` gives ``λβ = gₛ∇U`` — the mobility
+    raising in :mod:`experiments.arm.medium` is what makes the drift an *exact*
+    form, hence a pure gauge of path shape (projective invariance).
+    """
+    atol, rtol = tol(atol32=1e-5, atol64=1e-9)
+    arm = PlanarArm(2)
+    ang = angle_manifold(arm)
+    gs = 0.15
+    metric = build_arm_metric(arm, manifold=ang, gravity_strength=gs)
+    for q in [jnp.array([0.4, -0.7]), jnp.array([-1.0, 0.3]), jnp.array([0.9, 1.1])]:
+        H, W, _lam = metric.zermelo_data(q)
+        np.testing.assert_allclose(
+            -(H @ W), gs * arm.gravity(q), atol=atol, rtol=max(rtol, 1e-4)
+        )
+
+
+def test_roundtrip_asymmetry_measures_potential():
+    """cost(γ) − cost(γ⁻¹) = 2gₛ(U(B) − U(A)) — the note's clean estimator, on any path."""
+    from experiments.arm.learn import segment_asymmetry
+
+    arm = PlanarArm(2, g=1.0)
+    ang = angle_manifold(arm)
+    gs = 0.1
+    metric = build_arm_metric(arm, manifold=ang, gravity_strength=gs)
+    key = jax.random.PRNGKey(3)
+    A, B = jax.random.uniform(key, (2, 2), minval=-1.0, maxval=1.0)
+    # An arbitrary (non-geodesic!) wiggly path — the identity is path-independent.
+    t = jnp.linspace(0.0, 1.0, 33)[:, None]
+    path = A + t * (B - A) + 0.2 * jnp.sin(jnp.pi * t) * jnp.array([1.0, -1.0])
+    asym = 2.0 * float(jnp.sum(segment_asymmetry(metric, path)))
+    dU = 2.0 * gs * float(arm.potential(B) - arm.potential(A))
+    np.testing.assert_allclose(asym, dU, rtol=0.05)
+
+
+def test_projective_invariance_scaling():
+    """Point-set bending: second order for the exact gravity drift, first order for a vortex.
+
+    Traces the spray from the same start/direction under drifted and base
+    metrics; the exact drift's deviation quadruples when gₛ doubles (2nd order,
+    projective invisibility at 1st order), and a matched-strength vortex bends
+    the path more than an order of magnitude harder.
+    """
+    from experiments.arm.evaluate import polyline_deviation
+    from experiments.arm.fields import VortexWind
+    from ham.solvers import ExponentialMap
+
+    arm = PlanarArm(2)
+    ang = angle_manifold(arm)
+    A, v0 = jnp.array([-0.9, 0.2]), jnp.array([1.6, 0.8])
+    base = build_arm_metric(arm, manifold=ang)
+    ref, _ = ExponentialMap(max_steps=96).trace(base, A, v0)
+    em = ExponentialMap(max_steps=64)
+
+    def dev(metric):
+        pg, _ = em.trace(metric, A, v0)
+        return float(polyline_deviation(pg, ref))
+
+    d1 = dev(build_arm_metric(arm, manifold=ang, gravity_strength=0.1))
+    d2 = dev(build_arm_metric(arm, manifold=ang, gravity_strength=0.2))
+    assert 3.0 < d2 / d1 < 5.5  # doubling gs quadruples the bending (slope 2)
+    vw = VortexWind(arm, center=(0.2, 0.3), strength=0.1, width=0.7)
+    dv = dev(build_arm_metric(arm, manifold=ang, wind_field=vw))
+    assert dv > 10.0 * d1  # first-order rotational bending dominates
 
 
 def test_clifford_and_angle_representations_agree():
@@ -395,33 +463,261 @@ def test_l3b_spray_oracle_triangle():
 # L4 — barrier continuation converges where a cold single-shot diverges.
 # ===========================================================================
 def test_l4_continuation_beats_single_shot():
-    """Annealing a stiff barrier (warm-started) stays collision-free; a cold solve diverges."""
+    """Annealing a stiff barrier (warm-started) stays collision-free; a cold solve diverges.
+
+    α=0.6 is the stiff end of the honest barrier range: hard wall, still
+    localized. Beyond α≈1 the barrier defeats itself — the softplus wall's
+    hardness is fixed by its width, so larger α only inflates free space until
+    cutting through the wall beats detouring and even continuation tunnels.
+    Clearance is densified, so a tunneling segment cannot pass as clear.
+    """
     arm = PlanarArm(2)
     ang = angle_manifold(arm)
-    qa, qb = jnp.array([-0.3, 1.2]), jnp.array([1.1, 0.3])
-    dist = AnalyticDistance(arm, CircleScene([[1.4, 1.0, 0.3]]))
+    qa, qb = jnp.array([-1.2, -0.6]), jnp.array([1.8, -0.6])
+    dist = AnalyticDistance(arm, CircleScene([[1.3, 0.9, 0.35]]))
     # Endpoints are clear, but the straight C-space line dips into collision.
     assert float(dist(qa)) > 0 and float(dist(qb)) > 0
-    assert float(min_clearance(dist, ang, jnp.linspace(qa, qb, 40))) < 0
+    assert float(min_clearance(dist, ang, jnp.linspace(qa, qb, 49))) < 0
 
     def make_metric(alpha):
-        return build_arm_metric(arm, dist, manifold=ang, alpha=alpha, delta=0.04)
+        return build_arm_metric(arm, dist, manifold=ang, alpha=alpha, delta=0.05)
 
-    alpha = 12.0
-    single = AVBDSolver(step_size=0.05, iterations=800).solve(
-        make_metric(alpha), qa, qb, n_steps=24, train_mode=False
+    single = AVBDSolver(step_size=0.05, iterations=1000).solve(
+        make_metric(0.6), qa, qb, n_steps=48, train_mode=False
     )
-    cont = AVBDPlanner(step_size=0.05, iterations=400).plan(
-        make_metric, qa, qb, n_steps=24, alphas=(0.05, 0.2, 0.6, 1.5, alpha)
+    cont = AVBDPlanner(step_size=0.05, iterations=600).plan(
+        make_metric, qa, qb, n_steps=48, alphas=(0.03, 0.09, 0.24, 0.6)
     )
     clr_single = float(min_clearance(dist, ang, single.xs))
     clr_cont = float(min_clearance(dist, ang, cont.xs))
-    # Continuation stays collision-free and converges to a far lower (stable)
-    # energy than the cold single-shot, which either collides (float64) or
-    # settles into a much worse local optimum (float32).
-    assert clr_cont > 0.0
-    assert clr_cont >= clr_single
-    assert float(cont.energy) < 0.5 * float(single.energy)
+    assert clr_cont > 0.15          # continuation: genuinely clear (densified)
+    assert clr_single < 0.0         # cold single-shot dives through the wall
+    assert float(cont.energy) < 0.01 * float(single.energy)
+
+
+def test_3dof_no_tunneling():
+    """The 3-DoF plan is clear on the *densified* path — the tunneling regression.
+
+    At 24 segments this task tunnels: the barrier repels vertices until one
+    long chord spans the obstacle, and the midpoint-rule energy never sees it
+    (vertex clearance even reports +0.6). 48 segments keep every segment well
+    below the obstacle body thickness.
+    """
+    arm3 = PlanarArm(3, lengths=[0.9, 0.8, 0.7])
+    ang3 = angle_manifold(arm3)
+    dist3 = AnalyticDistance(arm3, CircleScene([[1.6, 0.9, 0.3]]))
+    qa3, qb3 = jnp.array([-0.9, -0.3, -0.3]), jnp.array([1.3, -0.4, 0.2])
+    assert float(min_clearance(dist3, ang3, jnp.linspace(qa3, qb3, 49))) < -0.2
+
+    geo3 = AVBDPlanner(step_size=0.02, iterations=1200, resample_between=True).plan(
+        lambda a: build_arm_metric(arm3, dist3, manifold=ang3, alpha=a, delta=0.04),
+        qa3, qb3, n_steps=48, alphas=(0.02, 0.05, 0.12, 0.3)).xs
+    assert float(min_clearance(dist3, ang3, geo3)) > 0.2
+    seg = jnp.linalg.norm(geo3[1:] - geo3[:-1], axis=-1)
+    assert float(seg.max()) < 0.6  # no chord long enough to straddle the body
+
+
+# ===========================================================================
+# L6 — exact ALM equality constraint (the upright cup).
+# ===========================================================================
+def test_l6_alm_constraint_enforced():
+    """The ALM holds the cup orientation to tolerance, far beyond the unconstrained drift."""
+    arm = PlanarArm(3, lengths=[1.0, 0.8, 0.6])
+    ang = angle_manifold(arm)
+    metric = build_arm_metric(arm, manifold=ang, gravity_strength=0.02)
+    qs, qg = jnp.array([1.2, -0.6, -0.6]), jnp.array([-0.9, 1.1, -0.2])
+    c = upright_constraint(arm, ang, target_angle=0.0)
+
+    uncon = AVBDSolver(step_size=0.05, iterations=500).solve(
+        metric, qs, qg, n_steps=24, train_mode=False)
+    # step 0.02: the constrained primal update overshoots the dual ascent at 0.05.
+    alm = AVBDSolver(step_size=0.02, beta=1.2, iterations=800, tol=1e-4).solve(
+        metric, qs, qg, n_steps=24, constraints=[c], train_mode=False)
+    v_uncon = float(max_constraint_violation(uncon.xs, [c]))
+    v_alm = float(max_constraint_violation(alm.xs, [c]))
+    assert v_uncon > 0.02       # the unconstrained motion tilts the cup
+    assert v_alm < 1e-2         # the ALM enforces upright to tolerance
+    assert v_alm < 0.2 * v_uncon  # ... a large reduction
+
+
+# ===========================================================================
+# Stage A avoidance intent — the obstacle constrains the optimum, verifiably.
+# ===========================================================================
+def test_stage_a_avoidance_is_the_global_optimum():
+    """The avoidance detour matches the eikonal characteristic on the barrier metric.
+
+    Three claims: (1) the straight motion collides deeply mid-path; (2) the
+    AVBD geodesic clears with its *tightest* point mid-swing (the barrier
+    actively shapes the optimum); (3) the eikonal arrival field on the same
+    barrier metric — a global method, no initialization — agrees with the AVBD
+    cost to grid accuracy, so the detour is the optimum, not a solver accident.
+    """
+    arm = PlanarArm(2, lengths=[1.0, 1.0])
+    ang = angle_manifold(arm)
+    qa, qb = jnp.array([-1.2, -0.6]), jnp.array([1.8, -0.6])
+    dist = AnalyticDistance(arm, CircleScene([[1.3, 0.9, 0.35]]))
+
+    def make_metric(alpha):
+        return build_arm_metric(arm, dist, manifold=ang, alpha=alpha, delta=0.05)
+
+    straight = jnp.linspace(qa, qb, 25)
+    d_str = jax.vmap(dist)(straight)
+    assert float(d_str.min()) < -0.2 and 8 <= int(jnp.argmin(d_str)) <= 16
+
+    geo = AVBDPlanner(step_size=0.05, iterations=600).plan(
+        make_metric, qa, qb, n_steps=24, alphas=(0.01, 0.03, 0.06, 0.15)).xs
+    d_geo = jax.vmap(dist)(geo)
+    assert float(min_clearance(dist, ang, geo)) > 0.15  # densified — no tunneling
+    assert 4 <= int(jnp.argmin(d_geo)) <= 20  # tightest point mid-swing
+
+    m_obs = make_metric(0.15)
+    extent = (-2.8, 2.8, -2.8, 2.8)
+    eik = EikonalPlanner(max_iters=800)
+    T = eik.arrival_field(m_obs, qa, extent, (121, 121))
+    t_goal = float(eik.sample(T, extent, qb))
+    len_avbd = float(m_obs.arc_length(geo))
+    assert abs(len_avbd - t_goal) / t_goal < 0.06  # global agreement (grid h≈0.05)
+
+
+# ===========================================================================
+# L7 — the exact-drift gauge / identifiability structure (Stage D).
+#
+# The gravity drift's β = gₛ·dU/λ is exact, so it is a *gauge* of path shape
+# (projective invariance = potential-based reward shaping). The tests gate the
+# structure, not blind recovery: the point-set diagnostic separates the pure-
+# gravity regime G from the +vortex regime G+R before any fit (L7d); the
+# timing channel recovers the potential where geometry cannot (L7); and the
+# convex round-trip-asymmetry estimator recovers gₛ·U on G (L7c) and the whole
+# drift form on G+R (L7e). See spec/exact_drift_gauge_equivalence.md.
+# ===========================================================================
+def _stage_d_fixtures(n=5, gs=0.15):
+    from experiments.arm.fields import VortexWind
+
+    arm = PlanarArm(2, lengths=[1.0, 1.0])
+    ang = angle_manifold(arm)
+    base = build_arm_metric(arm, manifold=ang)
+    vortex = VortexWind(arm, center=(0.2, 0.3), strength=0.12, width=0.7)
+    mG = build_arm_metric(arm, manifold=ang, gravity_strength=gs)
+    mGR = build_arm_metric(arm, manifold=ang, gravity_strength=gs, wind_field=vortex)
+    gen = AVBDSolver(step_size=0.05, iterations=400)
+    pairs = jax.random.uniform(jax.random.PRNGKey(0), (n, 2, 2), minval=-1.2, maxval=1.2)
+    demosG = [gen.solve(mG, p[0], p[1], n_steps=16, train_mode=False).xs for p in pairs]
+    demosGR = [gen.solve(mGR, p[0], p[1], n_steps=16, train_mode=False).xs for p in pairs]
+    return arm, ang, base, vortex, mG, mGR, gen, demosG, demosGR
+
+
+def _r2_vs_true_potential(arm, U_fn, region, gs=0.15):
+    u_hat = jax.vmap(U_fn)(region)
+    u_true = gs * jax.vmap(arm.potential)(region)
+    u_hat = u_hat - jnp.mean(u_hat)
+    u_true = u_true - jnp.mean(u_true)
+    return 1.0 - float(jnp.sum((u_hat - u_true) ** 2) / jnp.sum(u_true**2))
+
+
+def test_hodge_split_separates_known_channels():
+    """The region LSQ Hodge split recovers the components of a known mixed form."""
+    from experiments.arm.evaluate import form_cosine, hodge_split_form
+
+    key = jax.random.PRNGKey(0)
+    qs = jax.random.uniform(key, (160, 2), minval=-1.2, maxval=1.2)
+
+    def U(q):  # smooth non-linear potential
+        return jnp.sin(q[0]) * jnp.cos(0.7 * q[1])
+
+    def psi(q):  # smooth stream
+        return jnp.exp(-jnp.sum((q - jnp.array([0.3, -0.2])) ** 2))
+
+    def b_true_exact(q):
+        return jax.grad(U)(q)
+
+    def b_true_rot(q):
+        g = jax.grad(psi)(q)
+        return jnp.array([-g[1], g[0]])
+
+    b = jax.vmap(lambda q: b_true_exact(q) + b_true_rot(q))(qs)
+    g = jnp.linspace(-1.4, 1.4, 6)
+    C1, C2 = jnp.meshgrid(g, g, indexing="ij")
+    centers = jnp.stack([C1.ravel(), C2.ravel()], -1)
+    b_exact, b_rot = hodge_split_form(b, qs, centers, width=0.7)
+    assert form_cosine(jax.vmap(b_exact)(qs), jax.vmap(b_true_exact)(qs)) > 0.9
+    assert form_cosine(jax.vmap(b_rot)(qs), jax.vmap(b_true_rot)(qs)) > 0.9
+
+
+def test_l7d_shape_identifiability_diagnostic():
+    """The a-priori diagnostic separates G from G+R before any fit is attempted."""
+    from experiments.arm.evaluate import shape_identifiability
+
+    _, _, base, _, _, _, gen, demosG, demosGR = _stage_d_fixtures()
+    sG = shape_identifiability(base, demosG, gen)
+    sGR = shape_identifiability(base, demosGR, gen)
+    assert sG < 0.02          # pure gravity: demos already trace base geodesics
+    assert sGR > 3.0 * sG     # the rotational part bends demos at first order
+
+
+def test_l7c_cost_asymmetry_recovers_potential():
+    """Round-trip cost asymmetries recover gₛ·U by convex LSQ (seedless, global)."""
+    from experiments.arm.learn import recover_potential_lsq, segment_asymmetry
+
+    arm, _, _, _, mG, _, _, demosG, _ = _stage_d_fixtures()
+    starts = jnp.concatenate([d[:-1] for d in demosG], axis=0)
+    ends = jnp.concatenate([d[1:] for d in demosG], axis=0)
+    deltas = jnp.concatenate([segment_asymmetry(mG, d) for d in demosG], axis=0)
+    g = jnp.linspace(-1.4, 1.4, 6)
+    C1, C2 = jnp.meshgrid(g, g, indexing="ij")
+    centers = jnp.stack([C1.ravel(), C2.ravel()], -1)
+    U_hat, _ = recover_potential_lsq(starts, ends, deltas, centers, width=0.7)
+    r2 = _r2_vs_true_potential(arm, U_hat, jnp.concatenate(demosG, axis=0))
+    assert r2 > 0.9
+
+
+def test_l7e_full_form_recovery_on_gr():
+    """On G+R the same convex estimator recovers the entire drift 1-form."""
+    from experiments.arm.evaluate import form_cosine
+    from experiments.arm.fields import star_grad
+    from experiments.arm.learn import recover_form_lsq, segment_asymmetry
+
+    arm, _, _, vortex, _, mGR, _, _, demosGR = _stage_d_fixtures()
+    starts = jnp.concatenate([d[:-1] for d in demosGR], axis=0)
+    ends = jnp.concatenate([d[1:] for d in demosGR], axis=0)
+    deltas = jnp.concatenate([segment_asymmetry(mGR, d) for d in demosGR], axis=0)
+    g = jnp.linspace(-1.4, 1.4, 6)
+    C1, C2 = jnp.meshgrid(g, g, indexing="ij")
+    centers = jnp.stack([C1.ravel(), C2.ravel()], -1)
+    _, _, b_hat = recover_form_lsq(starts, ends, deltas, centers, width=0.7)
+    region = jnp.concatenate(demosGR, axis=0)
+    b_true = (0.15 * jax.vmap(arm.gravity)(region)
+              + jax.vmap(lambda q: star_grad(vortex.stream, q))(region))
+    assert form_cosine(jax.vmap(b_hat)(region), b_true) > 0.9
+
+
+def test_l7_timing_channel_recovers_where_geometry_cannot():
+    """Same potential hypothesis, same demos: L-T identifies gₛ·U, L-B does not."""
+    from experiments.arm.fields import PotentialWind
+    from experiments.arm.learn import (
+        cost_matching_loss,
+        el_residual_loss,
+        fit_field,
+        segment_costs,
+    )
+
+    arm, ang, _, _, mG, _, _, demosG, _ = _stage_d_fixtures()
+
+    def make_metric(field):
+        return build_arm_metric(arm, manifold=ang, wind_field=field)
+
+    region = jnp.concatenate(demosG, axis=0)
+    costs = [segment_costs(mG, d) for d in demosG]
+    f0 = PotentialWind(arm, width=32, depth=2, key=jax.random.PRNGKey(1))
+    ft, _ = fit_field(f0, demosG, make_metric, loss_fn=cost_matching_loss,
+                      steps=600, lr=5e-3, demo_costs=costs)
+    # normal_only quotients out vertex spacing (= timing in disguise), leaving
+    # pure path shape — the channel the gauge theorem says is blind here.
+    fb, _ = fit_field(f0, demosG, make_metric, loss_fn=el_residual_loss,
+                      steps=600, lr=5e-3, normal_only=True)
+    r2_t = _r2_vs_true_potential(arm, ft.potential, region)
+    r2_b = _r2_vs_true_potential(arm, fb.potential, region)
+    assert r2_t > 0.8                # timing: parametrization-rigidity
+    assert r2_t - r2_b > 0.2         # the shape channel starves in comparison
 
 
 # ===========================================================================
