@@ -16,9 +16,30 @@ from .constraints import (
     upright_constraint,
     waypoint_constraint,
 )
-from .evaluate import path_metrics, spray_geodesic
-from .fields import MLPDistance, ScaledDistance
+from .evaluate import (
+    path_metrics,
+    polyline_deviation,
+    shape_identifiability,
+    spray_geodesic,
+)
+from .fields import (
+    BoundedWind,
+    HodgeWind,
+    MLPDistance,
+    PotentialWind,
+    ScaledDistance,
+    StreamWind,
+    VortexWind,
+)
 from .interfaces import DemoSource, DistanceField, Robot, Scene
+from .learn import (
+    LOSS_ARMS,
+    fit_field,
+    recover_form_lsq,
+    recover_potential_lsq,
+    segment_asymmetry,
+    segment_costs,
+)
 from .medium import ArmMetric, angle_manifold, build_arm_metric
 from .planners import AVBDPlanner, EikonalPlanner
 from .providers import (
@@ -29,24 +50,37 @@ from .providers import (
 )
 
 __all__ = [
+    "LOSS_ARMS",
     "AVBDPlanner",
     "AnalyticDistance",
     "ArmMetric",
+    "BoundedWind",
     "CircleScene",
     "DemoSource",
     "DistanceField",
     "EikonalPlanner",
     "GroundTruthDemos",
+    "HodgeWind",
     "MLPDistance",
     "PlanarArm",
+    "PotentialWind",
     "Robot",
     "ScaledDistance",
     "Scene",
+    "StreamWind",
+    "VortexWind",
     "angle_manifold",
     "build_arm_metric",
     "constraint_penalty",
+    "fit_field",
     "max_constraint_violation",
     "path_metrics",
+    "polyline_deviation",
+    "recover_form_lsq",
+    "recover_potential_lsq",
+    "segment_asymmetry",
+    "segment_costs",
+    "shape_identifiability",
     "spray_geodesic",
     "upright_constraint",
     "waypoint_constraint",

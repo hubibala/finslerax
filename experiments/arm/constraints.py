@@ -35,14 +35,23 @@ def upright_constraint(
 ) -> Callable[[jax.Array], jax.Array]:
     """End-effector orientation pinned to ``target_angle`` (the upright-cup condition).
 
-    Residual ``c(x) = sin(target - φ(x))`` where ``φ`` is the last link's angle;
-    zero exactly when aligned, with a non-vanishing gradient there. The opposite
-    branch (``φ = target + π``) is avoided by warm-starting near upright.
+    On the intrinsic-angle representation the orientation ``Σθᵢ`` is a smooth,
+    unwrapped function, so the residual is the **linear** ``ee_orientation - target``
+    — well conditioned for the ALM (constant gradient). On the Clifford torus,
+    where the joint sum wraps, the residual is the seam-safe ``sin(target - φ)``
+    built from the last link's direction; the opposite branch (``φ = target + π``)
+    is avoided by warm-starting near upright.
     """
+    if not isinstance(manifold, FlatTorus):
+        def c_linear(x: jax.Array) -> jax.Array:
+            return robot.ee_orientation(x) - target_angle
+
+        return c_linear
+
     d_star = jnp.array([jnp.cos(target_angle), jnp.sin(target_angle)])
 
     def c(x: jax.Array) -> jax.Array:
-        q = _angles(robot, manifold, x)
+        q = manifold.to_angles(x)
         pts = robot.link_points(q)
         d = pts[-1] - pts[-2]
         d = d / (jnp.linalg.norm(d) + NORM_EPS)
