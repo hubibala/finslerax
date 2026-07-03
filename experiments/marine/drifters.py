@@ -84,19 +84,22 @@ def simulate_drifters(
 
     trajs, ts = jax.vmap(rollout)(starts)  # (N, n_steps, 2), (N, n_steps)
 
-    idx = jnp.arange(0, n_steps - ping_interval, ping_interval)
-    pos = trajs[:, idx, :]  # (N, P, 2)
-    pos_next = trajs[:, idx + ping_interval, :]
-    t_obs = ts[:, idx]
+    # GPS noise is applied to the pings BEFORE finite-differencing, so the
+    # velocity observations carry the amplified (~√2·noise/Δt) ping noise a
+    # real drifter product would.
+    ping_idx = jnp.arange(0, n_steps, ping_interval)
+    pings = trajs[:, ping_idx, :]  # (N, P, 2)
+    pings = pings + noise * jax.random.normal(k_noise, pings.shape)
     dt_ping = ping_interval * dt
-    vel_obs = (pos_next - pos) / dt_ping
+    vel_obs = (pings[:, 1:, :] - pings[:, :-1, :]) / dt_ping
+    pos = pings[:, :-1, :]
+    t_obs = ts[:, ping_idx][:, :-1]
 
-    pos = pos.reshape(-1, 2)
-    t_obs = t_obs.reshape(-1)
-    vel_obs = vel_obs.reshape(-1, 2)
-
-    pos = pos + noise * jax.random.normal(k_noise, pos.shape)
-    return DrifterObs(positions=pos, times=t_obs, velocities=vel_obs)
+    return DrifterObs(
+        positions=pos.reshape(-1, 2),
+        times=t_obs.reshape(-1),
+        velocities=vel_obs.reshape(-1, 2),
+    )
 
 
 # =============================================================================

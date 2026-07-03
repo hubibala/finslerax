@@ -37,6 +37,8 @@ class MPCResult(NamedTuple):
     arrival_time: float          # ELAPSED travel time (matches planner/evaluate)
     plans: list                  # list of (N+1, D) planned paths, one per replan
     issue_times: list            # the absolute clock at each replan
+    reached: bool = True         # False if max_replans expired short of the goal
+                                 # (arrival_time is then only a lower bound)
 
 
 def _advance(path, true_medium, glider, t_start, horizon):
@@ -119,6 +121,7 @@ def run_mpc(
     flown = [pos.copy()]
     plans, issue_times = [], []
     remaining = None
+    arrived = False
 
     for _ in range(max_replans):
         belief = forecast.issue(true_medium, t)
@@ -142,9 +145,10 @@ def run_mpc(
                 _, tt = thread_clock(hop, true_medium, glider, t)
                 t = float(tt[-1])
                 flown.append(end_np.copy())
+            arrived = True
             break
 
         remaining = _resample(path, pos, n_steps + 1)
 
     # Report ELAPSED travel time, matching TimeLiftedPlanner / executed_arrival_time.
-    return MPCResult(np.asarray(flown), float(t - t0), plans, issue_times)
+    return MPCResult(np.asarray(flown), float(t - t0), plans, issue_times, arrived)

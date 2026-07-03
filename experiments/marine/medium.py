@@ -208,7 +208,7 @@ class OceanMedium(eqx.Module):
         cy = self.lens_y + 1.5 * jnp.sin(ang)
         r = jnp.array([x0 - cx, y0 - cy])
         decay = jnp.exp(-z / self.ekman_depth)
-        # ∇(½‖r‖²) = r  -> divergent (∇·W_ek ≠ 0)
+        # r/(1+‖r‖²) = ∇(½·ln(1+‖r‖²)): a gradient (curl-free) with ∇·W_ek ≠ 0
         w_h = self.ekman_strength * decay * r / (1.0 + jnp.sum(r**2))
         return jnp.array([w_h[0], w_h[1], 0.0])
 
