@@ -73,6 +73,10 @@ exclude = [
 
 [tool.ruff]
 line-length = 88
+# Walkthrough notebooks are generated from build_notebook.py scripts (which ARE
+# linted); their cells follow notebook idiom (top-of-cell imports after path
+# bootstrap, exploratory names), so they are excluded from the gate.
+extend-exclude = ["*.ipynb"]
 # Kept at py39 deliberately: bumping to py310 triggers a large unrelated
 # pyupgrade sweep (Optional[X] -> X | None, collections.abc imports). Modernise
 # in a dedicated pass. (Package support is float-tested at >=3.10; see CI.)
