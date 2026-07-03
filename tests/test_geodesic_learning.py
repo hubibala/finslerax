@@ -198,7 +198,7 @@ class PairDataset:
         self.X = starts
         self.V = ends  # V slot stores the "end" points for these tests
         n = starts.shape[0]
-        self.lineage_pairs = jnp.stack([jnp.arange(n), jnp.arange(n)], axis=1)
+        self.pair_indices = jnp.stack([jnp.arange(n), jnp.arange(n)], axis=1)
         self.labels = None
 
 

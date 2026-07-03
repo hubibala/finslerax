@@ -40,7 +40,7 @@ def plot_poincare_disk(
     points: np.ndarray,
     colors=None,
     vectors: Optional[np.ndarray] = None,
-    lineage_pairs: Optional[np.ndarray] = None,
+    pair_indices: Optional[np.ndarray] = None,
     title: str = "Hyperbolic Embedding (Poincaré Disk)",
     ax=None,
 ):
@@ -51,7 +51,7 @@ def plot_poincare_disk(
         points: (N, 3) Hyperboloid coordinates (will be projected to 2D)
         colors: (N,) Array for coloring points (e.g. a class label or scalar value)
         vectors: (N, 3) Optional vector field (e.g. the Wind) to plot arrows
-        lineage_pairs: (M, 2) Index pairs (i, j) to draw edges between points
+        pair_indices: (M, 2) Index pairs (i, j) to draw edges between points
     """
     if ax is None:
         _fig, ax = plt.subplots(figsize=(8, 8))
@@ -67,9 +67,9 @@ def plot_poincare_disk(
     ax.add_artist(circle)
 
     # 3. Draw Edges (Geodesics would be arcs, straight lines are approx)
-    if lineage_pairs is not None:
-        start_pts = points_p[lineage_pairs[:, 0]]
-        end_pts = points_p[lineage_pairs[:, 1]]
+    if pair_indices is not None:
+        start_pts = points_p[pair_indices[:, 0]]
+        end_pts = points_p[pair_indices[:, 1]]
         lines = np.stack([start_pts, end_pts], axis=1)  # type: ignore[list-item]
         lc = mc.LineCollection(lines, colors="gray", alpha=0.2, linewidths=0.5)  # type: ignore[arg-type]
         ax.add_collection(lc)

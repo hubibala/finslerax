@@ -2,7 +2,7 @@
 
 Provides TrainingPhase (a declarative description of one training stage) and
 HAMPipeline (an orchestrator that executes phases sequentially with per-phase
-parameter freezing, modular loss composition, and lineage-triple batching).
+parameter freezing, modular loss composition, and pair/triple batching).
 
 See also:
     spec/ARCH_SPEC.md § 6.4 -- Training Pipeline.
@@ -37,8 +37,8 @@ class TrainingPhase:
         filter_spec: Callable taking the model (eqx.Module) and returning a
             PyTree of booleans with the same structure, where True marks
             trainable leaves and False marks frozen leaves. Used by eqx.partition.
-        requires_pairs: If True, the phase expects lineage pair or triple data.
-            If neither dataset.lineage_pairs nor lineage_triples is available,
+        requires_pairs: If True, the phase expects pair or triple data.
+            If neither dataset.pair_indices nor triple_indices is available,
             the phase is skipped with a printed warning. Default: False.
 
     Example:
@@ -91,7 +91,7 @@ class HAMPipeline:
         phases: list[TrainingPhase],
         batch_size: int = 256,
         seed: int = 2025,
-        lineage_triples: Any = None,
+        triple_indices: Any = None,
         device: str = "cpu",
     ):
         """Execute the training pipeline.
@@ -100,16 +100,16 @@ class HAMPipeline:
 
         Args:
             dataset: Object with attributes X (shape (N, D)), V (shape (N, D)),
-                and optionally labels (shape (N,) or None), lineage_pairs
+                and optionally labels (shape (N,) or None), pair_indices
                 (shape (P, 2) or None), and Traj_long.
             phases: List of TrainingPhase objects executed in order.
             batch_size: Number of samples per mini-batch. Default: 256.
                 Note: tail samples are dropped if num_items % batch_size != 0.
             seed: Random seed for reproducibility. Default: 2025.
-            lineage_triples: Optional array of shape (T, 3) with index triples
-                (i, j, k) into dataset.X for lineage-aware losses. When provided
+            triple_indices: Optional array of shape (T, 3) with index triples
+                (i, j, k) into dataset.X for pair/triple-aware losses. When provided
                 and a phase has requires_pairs=True, triples take precedence over
-                dataset.lineage_pairs.
+                dataset.pair_indices.
             device: Target device for training data. ``"cpu"`` (default) or
                 ``"gpu"``. Whole-dataset arrays are moved to the chosen device
                 once before the phase loop begins. Use
@@ -120,7 +120,7 @@ class HAMPipeline:
             The trained eqx.Module. Same object as self.model (mutated in-place).
 
         Note:
-            Phases with requires_pairs=True are silently skipped if no lineage
+            Phases with requires_pairs=True are silently skipped if no pair/triple
             data is available; a message is printed to stdout.
             Despite the name, requires_pairs controls both pair and triple
             batching modes.
@@ -184,10 +184,10 @@ class HAMPipeline:
             # Training loop for the phase
             if (
                 phase.requires_pairs
-                and dataset.lineage_pairs is None
-                and lineage_triples is None
+                and dataset.pair_indices is None
+                and triple_indices is None
             ):
-                print("Skipping phase: requires lineage pairs/triples but none found.")
+                print("Skipping phase: requires pairs/triples but none found.")
                 continue
 
             data_x = jax.device_put(dataset.X, target_device)
@@ -198,14 +198,14 @@ class HAMPipeline:
                 else jnp.zeros(dataset.X.shape[0]),
                 target_device,
             )
-            if lineage_triples is not None:
-                lineage_triples = jax.device_put(lineage_triples, target_device)
-            if hasattr(dataset, "lineage_pairs") and dataset.lineage_pairs is not None:
-                dataset_lineage_pairs = jax.device_put(
-                    dataset.lineage_pairs, target_device
+            if triple_indices is not None:
+                triple_indices = jax.device_put(triple_indices, target_device)
+            if hasattr(dataset, "pair_indices") and dataset.pair_indices is not None:
+                dataset_pair_indices = jax.device_put(
+                    dataset.pair_indices, target_device
                 )
             else:
-                dataset_lineage_pairs = None
+                dataset_pair_indices = None
             num_samples = data_x.shape[0]
 
             for epoch in range(phase.epochs):
@@ -214,10 +214,10 @@ class HAMPipeline:
                 epoch_stats = {l.name: 0.0 for l in phase.losses}
 
                 if phase.requires_pairs:
-                    if lineage_triples is not None:
-                        num_items = lineage_triples.shape[0]
+                    if triple_indices is not None:
+                        num_items = triple_indices.shape[0]
                     else:
-                        num_items = dataset_lineage_pairs.shape[0]
+                        num_items = dataset_pair_indices.shape[0]
                     perm = jax.random.permutation(subkey, num_items)
                 else:
                     num_items = num_samples
@@ -230,8 +230,8 @@ class HAMPipeline:
 
                     # Unpack batch data depending on what the phase requires
                     if phase.requires_pairs:
-                        if lineage_triples is not None:
-                            triple_idx = lineage_triples[idx]
+                        if triple_indices is not None:
+                            triple_idx = triple_indices[idx]
                             i2 = triple_idx[:, 0]
                             i4 = triple_idx[:, 1]
                             i6 = triple_idx[:, 2]
@@ -243,7 +243,7 @@ class HAMPipeline:
                                 data_x[i6],
                             )
                         else:
-                            pair_indices = dataset_lineage_pairs[idx]
+                            pair_indices = dataset_pair_indices[idx]
                             batch_data = (
                                 data_x[pair_indices[:, 0]],
                                 data_x[pair_indices[:, 1]],
