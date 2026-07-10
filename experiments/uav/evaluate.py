@@ -2,9 +2,11 @@
 
 The headline metric is :func:`directed_energy_r2`: on held-out segments, match
 each climb to the most similar descent (same log, nearest ``(length, dt)``) and
-score the predicted energy *difference* of each pair. Matching cancels the even
-bracket, so the score isolates exactly the odd channel the gauge claim is
-about — a model with the right nuisance but no ledger scores ≤ 0 here.
+score the predicted energy *difference* of each pair. Matching makes the even
+bracket nearly cancel, so the score is dominated by the odd channel the gauge
+claim is about — a model with the right nuisance but no ledger keeps only the
+residual even-bracket correlation that imperfect matching leaves behind, far
+below the full model (Stage B shows the gap).
 
 The wind cross-check compares the recovered wind (via ``estimate.implied_wind``)
 against the onboard EKF estimate — an instrument the fit never saw.
@@ -40,13 +42,18 @@ def cosine(u: np.ndarray, v: np.ndarray) -> float:
 def split_segments(
     df: pd.DataFrame, test_frac: float = 0.3, seed: int = 0
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Per-log stratified random segment split → (train, test)."""
+    """Per-log stratified random segment split → (train, test).
+
+    Every log keeps at least one train segment (a log split entirely into test
+    would have no fit to predict it with), so 1-segment logs stay in train.
+    """
     rng = np.random.default_rng(seed)
     test_mask = np.zeros(len(df), dtype=bool)
     for _, sub in df.groupby("log_id", sort=True):
         idx = df.index.get_indexer(sub.index)
-        n_test = max(1, round(test_frac * len(idx)))
-        test_mask[rng.choice(idx, size=n_test, replace=False)] = True
+        n_test = min(max(1, round(test_frac * len(idx))), len(idx) - 1)
+        if n_test > 0:
+            test_mask[rng.choice(idx, size=n_test, replace=False)] = True
     return df[~test_mask], df[test_mask]
 
 
@@ -126,6 +133,75 @@ def wind_field_cosine(wind_fn: Callable[[np.ndarray], np.ndarray], df: pd.DataFr
     mids = sub[["mid_x", "mid_y"]].to_numpy(float)
     pred = np.stack([wind_fn(m) for m in mids])
     return cosine(pred, sub[["wind_x", "wind_y"]].to_numpy(float))
+
+
+# ---------------------------------------------------------------------------
+# Stage-A pilot metrics — the crudest possible ledger read, a-priori of any fit
+# ---------------------------------------------------------------------------
+def _updown(df: pd.DataFrame, rate_min: float):
+    """Split the *vertical-dominant* segments into climb / descent bins.
+
+    Only segments where vertical speed exceeds horizontal (the climb-out and
+    descent phases) enter the bins — a cruise leg with a slight altitude drift
+    carries the horizontal drag term, which would otherwise leak into the crude
+    ledger read and inflate its variance. Returns ``(vz, specific power, up, dn)``.
+    """
+    dt = df["dt"].to_numpy(float)
+    vz = df["dz"].to_numpy(float) / dt
+    vh = np.sqrt(df["dx"].to_numpy(float) ** 2 + df["dy"].to_numpy(float) ** 2) / dt
+    sp = df["energy"].to_numpy(float) / dt
+    vertical = np.abs(vz) > vh
+    return vz, sp, (vz > rate_min) & vertical, (vz < -rate_min) & vertical
+
+
+def two_bin_k(df: pd.DataFrame, rate_min: float = 0.3) -> float:
+    """Crudest ledger estimate [J/m]: up/down specific-power gap over climb-rate gap.
+
+    ``(⟨E/dt⟩_climb − ⟨E/dt⟩_descent) / (⟨vz⟩_climb − ⟨vz⟩_descent)`` — the Stage-A
+    two-bin read (§4 U-A2). Biased by the symmetric |dz| overhead when climb/
+    descent rates are lopsided, but monotone in the true ``k`` and seedless; its
+    within-airframe CV is the pilot's consistency gate.
+    """
+    vz, sp, up, dn = _updown(df, rate_min)
+    if up.sum() < 2 or dn.sum() < 2:
+        return float("nan")
+    return float((sp[up].mean() - sp[dn].mean()) / (vz[up].mean() - vz[dn].mean()))
+
+
+def ledger_conditioned(
+    df: pd.DataFrame, *, min_dz_std: float = 1.5, min_updown: int = 3, rate_min: float = 1.0
+) -> pd.Series:
+    """Per-log boolean: does the flight climb/descend enough to *identify* ``k``?
+
+    A flight flown at constant altitude has no vertical dynamic range, so its
+    ledger coefficient is unidentifiable and the per-log fit blows up (± hundreds
+    of J/m on real data). This gate — a minimum altitude spread and enough
+    climb *and* descent segments above ``rate_min`` — is the honest precondition
+    for reading ``k`` from a log, not a fit-quality cherry-pick: it is decidable
+    before the fit, from the geometry alone.
+    """
+    out = {}
+    for lid, g in df.groupby("log_id", sort=True):
+        vz = (g["dz"].to_numpy(float) / g["dt"].to_numpy(float))
+        out[str(lid)] = bool(
+            float(g["dz"].std()) > min_dz_std
+            and (vz > rate_min).sum() >= min_updown
+            and (vz < -rate_min).sum() >= min_updown
+        )
+    return pd.Series(out, name="conditioned")
+
+
+def climb_costs_more(df: pd.DataFrame, rate_min: float = 0.3) -> bool | None:
+    """True if climb specific-power exceeds descent (the physically required sign).
+
+    The Stage-A go/no-go signal (§4 U-A1): the up/down asymmetry must have the
+    correct sign in ≥ 90% of logs or the energy channel is too dirty to proceed.
+    ``None`` when a log lacks enough climb/descent segments to judge.
+    """
+    _, sp, up, dn = _updown(df, rate_min)
+    if up.sum() < 2 or dn.sum() < 2:
+        return None
+    return bool(sp[up].mean() > sp[dn].mean())
 
 
 # ---------------------------------------------------------------------------
