@@ -1,0 +1,27 @@
+[
+  {
+    "gate": "B1a mask predicts loss curvature",
+    "pass": true,
+    "detail": "pooled spearman +0.874 over 140 blocks"
+  },
+  {
+    "gate": "B1b even channel absorbs wind where mask=0",
+    "pass": true,
+    "detail": "compensated/uncompensated loss ratio 0.04 in low-coverage quartile"
+  },
+  {
+    "gate": "B2 low-coverage wind shrunk",
+    "pass": true,
+    "detail": "|W| in lowest-coverage quartile reduced by 44%"
+  },
+  {
+    "gate": "B2 high-coverage wind retained",
+    "pass": true,
+    "detail": "|W| in highest-coverage quartile kept at 84%"
+  },
+  {
+    "gate": "B2 no material degradation",
+    "pass": true,
+    "detail": "wind err 0.244 -> 0.274 (shrinkage is conservatism, not accuracy)"
+  }
+]
