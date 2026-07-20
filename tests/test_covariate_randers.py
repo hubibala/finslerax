@@ -36,16 +36,16 @@ def _make_scene(key=None):
     """Return a dict of minimal 10×10 scene arrays."""
     rng = jax.random.PRNGKey(42) if key is None else key
     k1, k2, k3, k4 = jax.random.split(rng, 4)
-    return dict(
-        elev=jax.random.uniform(k1, (_H, _W)) * 500.0,
-        slope=jax.random.uniform(k2, (_H, _W)) * 0.5,
-        aspect=jax.random.uniform(k3, (_H, _W)) * 2.0 * jnp.pi,
-        canopy=jax.random.uniform(k4, (_H, _W)),
-        fuel_codes=jnp.ones((_H, _W), dtype=jnp.int32) * 3,
-        weather_vec=jnp.array([20.0, 0.4, 0.5, 0.866]),
-        pixel_spacing_m=_PIXEL_SPACING,
-        origin_xy=_ORIGIN,
-    )
+    return {
+        "elev": jax.random.uniform(k1, (_H, _W)) * 500.0,
+        "slope": jax.random.uniform(k2, (_H, _W)) * 0.5,
+        "aspect": jax.random.uniform(k3, (_H, _W)) * 2.0 * jnp.pi,
+        "canopy": jax.random.uniform(k4, (_H, _W)),
+        "fuel_codes": jnp.ones((_H, _W), dtype=jnp.int32) * 3,
+        "weather_vec": jnp.array([20.0, 0.4, 0.5, 0.866]),
+        "pixel_spacing_m": _PIXEL_SPACING,
+        "origin_xy": _ORIGIN,
+    }
 
 
 def _make_model(use_wind=True, key=None):
@@ -230,7 +230,7 @@ def test_metric_fn_riemannian_matches_sqrt_Gv(riemannian_model):
     v = jnp.array([1.0, 0.0])
 
     # Extract G directly via _get_params
-    G, b = riemannian_model._get_params(x)
+    G, _b = riemannian_model._get_params(x)
     expected = jnp.sqrt(jnp.dot(v, jnp.dot(G, v)))
     actual = riemannian_model.metric_fn(x, v)
     np.testing.assert_allclose(float(actual), float(expected), rtol=1e-5)
@@ -468,3 +468,80 @@ class TestRasterStopGradient:
                 assert jnp.all(g == 0), (
                     f"{attr} received non-zero gradient: max|g|={float(jnp.max(jnp.abs(g)))}"
                 )
+
+
+# ---------------------------------------------------------------------------
+# Coupled wind mode (wind_mode="coupled": b = -c * measured_wind)
+# ---------------------------------------------------------------------------
+
+class TestCoupledWindMode:
+    """b is the measured wind velocity times one learned scalar coupling."""
+
+    _WIND = jnp.array([1.5, 0.0])  # raw mean wind velocity, model coords
+
+    def _coupled_model(self, coupling=0.3):
+        import equinox as eqx
+
+        model = _make_model(use_wind="coupled")
+        model = eqx.tree_at(
+            lambda m: m.wind_coupling, model, jnp.asarray(coupling)
+        )
+        scene = _make_scene()
+        bound = model.bind_scene(**scene).bind_weather(
+            scene["weather_vec"], measured_wind=self._WIND
+        )
+        return bound.precompute_metric_field()
+
+    def test_use_wind_string_and_bool_modes(self):
+        assert _make_model(use_wind=True).wind_mode == "free"
+        assert _make_model(use_wind=False).wind_mode == "none"
+        assert _make_model(use_wind="coupled").wind_mode == "coupled"
+        assert _make_model(use_wind="coupled").use_wind is True
+        assert _make_model(use_wind=False).use_wind is False
+        with pytest.raises(ValueError):
+            _make_model(use_wind="sideways")
+
+    def test_downwind_cheaper_with_positive_coupling(self):
+        """With c > 0, moving along the wind velocity costs less than against it."""
+        bound = self._coupled_model(coupling=0.3)
+        x = jnp.array([150.0, 150.0])
+        v = self._WIND / jnp.linalg.norm(self._WIND)
+        cost_down = float(bound.metric_fn(x, v))
+        cost_up = float(bound.metric_fn(x, -v))
+        assert cost_down < cost_up, (
+            f"downwind {cost_down} should be cheaper than upwind {cost_up}"
+        )
+
+    def test_drift_matches_c_w_when_within_bound(self):
+        """For small c*w the causality projection is inert: b == c * w."""
+        c = 0.05
+        bound = self._coupled_model(coupling=c)
+        _, b = bound._get_params(jnp.array([150.0, 150.0]))
+        np.testing.assert_allclose(
+            np.array(b), c * np.array(self._WIND), rtol=1e-3, atol=1e-6
+        )
+
+    def test_gradient_flows_to_coupling_only(self):
+        """d(cost)/dc is non-zero; the encoder's raw drift outputs are dead."""
+        import equinox as eqx
+
+        bound = self._coupled_model(coupling=0.3)
+        x = jnp.array([150.0, 150.0])
+        v = jnp.array([1.0, 0.2])
+
+        def cost(m):
+            m2 = m.precompute_metric_field()
+            return m2.metric_fn(x, v)
+
+        # Re-bind without the precomputed field so grads flow through precompute.
+        model = eqx.tree_at(lambda m: m.metric_field, bound, None,
+                            is_leaf=lambda x: x is None)
+        grads = eqx.filter_grad(cost)(model)
+        assert float(jnp.abs(grads.wind_coupling)) > 0.0
+
+    def test_coupled_without_measured_wind_raises(self):
+        model = _make_model(use_wind="coupled")
+        scene = _make_scene()
+        bound = model.bind_scene(**scene).precompute_metric_field()
+        with pytest.raises(AssertionError, match="measured_wind"):
+            bound._get_params(jnp.array([150.0, 150.0]))

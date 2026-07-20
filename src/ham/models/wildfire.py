@@ -259,7 +259,14 @@ class CovariateConditionedRanders(AsymmetricMetric):
         eps_G:        Minimum eigenvalue of G. Default: 0.1.
         max_G:        Maximum eigenvalue of G. Default: 10.0.
         max_b_norm:   G^{-1}-norm bound for the drift. Default: 0.9.
-        use_wind:     If False, sets ``b = 0`` (pure Riemannian). Default: True.
+        use_wind:     Drift mode. ``True``/``"free"``: the drift field is the
+            encoder's per-pixel output (Gahtan-style free ``b``).
+            ``"coupled"``: ``b = wind_coupling * measured_wind`` — the drift is
+            the *measured* mean wind velocity times a single learned coupling
+            scalar, so only the even channel (G) is learned per-pixel and the
+            odd channel transfers across scenes as an input. Requires
+            ``measured_wind`` to be bound (see :meth:`bind_weather`).
+            ``False``/``"none"``: ``b = 0`` (pure Riemannian). Default: True.
 
     Reference:
         spec/MATH_SPEC.md §§ 1–2, 5; spec/ARCH_SPEC.md § 3.
@@ -274,7 +281,8 @@ class CovariateConditionedRanders(AsymmetricMetric):
 
     global_mlp: eqx.nn.MLP  # weather covariates (4,) → raw 5 params
     local_cnn: LocalTerrainCNN  # fully-conv terrain encoder: (5,H,W) → (H,W,5)
-    fuel_embedding: jax.Array  # (13, fuel_emb_dim) — FBFM13 type embeddings
+    fuel_embedding: jax.Array  # (14, fuel_emb_dim) — FBFM13 types + non-burnable
+    wind_coupling: jax.Array  # scalar c in b = -c * measured_wind ("coupled" mode)
 
     # Per-step precomputed local metric parameter field; set by precompute_metric_field().
     # None in the unbound model; (H, W, 5) float64 after precomputation.
@@ -287,6 +295,11 @@ class CovariateConditionedRanders(AsymmetricMetric):
     canopy_raster: Optional[jax.Array]  # (H, W) float64
     fuel_code_raster: Optional[jax.Array]  # (H, W) int32
     weather_vec: Optional[jax.Array]  # (4,) [T_air, humidity, sin_wind, cos_wind]
+    # Raw (unnormalised) mean wind VELOCITY in model (x, y) coordinates. Kept
+    # separate from weather_vec because the encoder input is standardised
+    # (mean-centred), which would corrupt the physical wind direction that the
+    # "coupled" drift mode depends on.
+    measured_wind: Optional[jax.Array]  # (2,) [w_x, w_y], model coords
     # Stored as a regular JAX leaf (not static) so eqx.tree_at can update it in
     # bind_scene. Inside metric computations it is wrapped in stop_gradient to
     # prevent unintended gradient flow through the grid resolution.
@@ -297,7 +310,7 @@ class CovariateConditionedRanders(AsymmetricMetric):
     eps_G: float = eqx.field(static=True)
     max_G: float = eqx.field(static=True)
     max_b_norm: float = eqx.field(static=True)
-    use_wind: bool = eqx.field(static=True)
+    wind_mode: str = eqx.field(static=True)  # "free" | "coupled" | "none"
     fuel_emb_dim: int = eqx.field(static=True)
     cnn_channels: int = eqx.field(static=True)
 
@@ -311,7 +324,7 @@ class CovariateConditionedRanders(AsymmetricMetric):
         eps_G: float = 0.1,
         max_G: float = 10.0,
         max_b_norm: float = 0.9,
-        use_wind: bool = True,
+        use_wind: bool | str = True,
     ):
         """Initialise networks and embeddings.
 
@@ -325,13 +338,24 @@ class CovariateConditionedRanders(AsymmetricMetric):
             eps_G:        Minimum eigenvalue of the metric tensor G.
             max_G:        Maximum eigenvalue of the metric tensor G.
             max_b_norm:   Upper bound on ``||b||_{G^{-1}}``.
-            use_wind:     Include Randers drift (directional asymmetry).
+            use_wind:     Drift mode: True/"free", "coupled", or False/"none"
+                          (see class docstring).
         """
         self.manifold = manifold
         self.eps_G = float(eps_G)
         self.max_G = float(max_G)
         self.max_b_norm = float(max_b_norm)
-        self.use_wind = bool(use_wind)
+        if use_wind is True:
+            self.wind_mode = "free"
+        elif use_wind is False:
+            self.wind_mode = "none"
+        elif use_wind in ("free", "coupled", "none"):
+            self.wind_mode = use_wind
+        else:
+            raise ValueError(
+                f"use_wind must be a bool or one of 'free'/'coupled'/'none', "
+                f"got {use_wind!r}"
+            )
         self.fuel_emb_dim = int(fuel_emb_dim)
         self.cnn_channels = int(cnn_channels)
 
@@ -350,7 +374,10 @@ class CovariateConditionedRanders(AsymmetricMetric):
             key=k2,
             weather_dim=4,  # [T_air, humidity, sin_wind, cos_wind]
         )
-        self.fuel_embedding = jnp.zeros((13, fuel_emb_dim), dtype=DEFAULT_JNP_DTYPE)
+        # 14 rows: FBFM13 classes 1-13 at indices 0-12, plus index 13 for
+        # non-burnable land cover (raw codes 91-99: water/urban/rock/etc.).
+        self.fuel_embedding = jnp.zeros((14, fuel_emb_dim), dtype=DEFAULT_JNP_DTYPE)
+        self.wind_coupling = jnp.asarray(0.1, dtype=DEFAULT_JNP_DTYPE)
 
         # metric_field is None until precompute_metric_field() is called
         self.metric_field = None
@@ -362,8 +389,14 @@ class CovariateConditionedRanders(AsymmetricMetric):
         self.canopy_raster = None
         self.fuel_code_raster = None
         self.weather_vec = None
+        self.measured_wind = None
         self.pixel_spacing_m = jnp.asarray(1.0, dtype=DEFAULT_JNP_DTYPE)
         self.scene_origin_xy = None
+
+    @property
+    def use_wind(self) -> bool:
+        """Backward-compatible drift flag: True unless ``wind_mode == "none"``."""
+        return self.wind_mode != "none"
 
     def bind_scene(
         self,
@@ -476,26 +509,41 @@ class CovariateConditionedRanders(AsymmetricMetric):
             is_leaf=lambda x: x is None,
         )
 
-    def bind_weather(self, weather_vec: jax.Array) -> "CovariateConditionedRanders":
-        """Return a new instance with only the weather vector updated.
+    def bind_weather(
+        self,
+        weather_vec: jax.Array,
+        measured_wind: Optional[jax.Array] = None,
+    ) -> "CovariateConditionedRanders":
+        """Return a new instance with only the per-fire weather updated.
 
         Designed for use inside ``jax.vmap`` over fire batches.  Terrain rasters
         must already be baked in via :meth:`bind_scene_rasters` (called once
-        per scene before the vmap) so that only the 4-element weather vector
-        differs across fires in the batch.
+        per scene before the vmap) so that only the per-fire weather differs
+        across fires in the batch.
 
         Args:
-            weather_vec: (4,) ``[T_air, humidity, sin_wind, cos_wind]``.
+            weather_vec: (4,) standardised encoder input
+                ``[T_air, humidity, wind_x, wind_y]``.
+            measured_wind: Optional (2,) raw (unnormalised) mean wind velocity
+                in model coordinates.  Required for ``wind_mode="coupled"``.
 
         Returns:
-            New instance with ``weather_vec`` updated.
+            New instance with per-fire weather updated.
         """
-        return eqx.tree_at(
+        model = eqx.tree_at(
             lambda m: m.weather_vec,
             self,
             jnp.asarray(weather_vec, dtype=DEFAULT_JNP_DTYPE),
             is_leaf=lambda x: x is None,
         )
+        if measured_wind is not None:
+            model = eqx.tree_at(
+                lambda m: m.measured_wind,
+                model,
+                jnp.asarray(measured_wind, dtype=DEFAULT_JNP_DTYPE),
+                is_leaf=lambda x: x is None,
+            )
+        return model
 
     def precompute_metric_field(self) -> "CovariateConditionedRanders":
         """Run the terrain CNN over the full scene rasters and cache the result.
@@ -533,7 +581,7 @@ class CovariateConditionedRanders(AsymmetricMetric):
 
         # Per-pixel fuel embeddings: (H, W, fuel_emb_dim) → (fuel_emb_dim, H, W)
         fuel_codes_clipped = jnp.clip(
-            jax.lax.stop_gradient(self.fuel_code_raster), 0, 12
+            jax.lax.stop_gradient(self.fuel_code_raster), 0, 13
         )
         fuel_field = self.fuel_embedding[fuel_codes_clipped]  # (H, W, fuel_emb_dim)
         fuel_field = fuel_field.transpose(2, 0, 1).astype(DEFAULT_JNP_DTYPE)
@@ -645,9 +693,21 @@ class CovariateConditionedRanders(AsymmetricMetric):
         G_raw = jnp.stack([jnp.stack([raw[0], raw[1]]), jnp.stack([raw[1], raw[2]])])
         G = project_spd(G_raw, self.eps_G, self.max_G)
 
-        # use_wind is static — Python if is safe inside JIT
-        if self.use_wind:
+        # wind_mode is static — Python if is safe inside JIT
+        if self.wind_mode == "free":
             b = project_b_norm(raw[3:5], G, self.max_b_norm)
+        elif self.wind_mode == "coupled":
+            assert self.measured_wind is not None, (
+                "wind_mode='coupled' requires measured_wind to be bound "
+                "(pass it to bind_weather)."
+            )
+            # metric_fn is the Zermelo form F = (sqrt(lam v^T G v + (b.v)^2)
+            # - b.v)/lam, so b.v > 0 is CHEAPER: b points downwind. With c > 0
+            # the drift therefore favours motion along the measured wind
+            # velocity. The encoder's raw drift outputs (raw[3:5]) are ignored
+            # — the odd channel is a measured input times one learned scalar.
+            w = jax.lax.stop_gradient(self.measured_wind)
+            b = project_b_norm(self.wind_coupling * w, G, self.max_b_norm)
         else:
             b = jnp.zeros(2, dtype=G.dtype)
         return G, b
@@ -675,11 +735,9 @@ class CovariateConditionedRanders(AsymmetricMetric):
             ``zoo.Randers`` and the (mesh/grid) eikonal solvers consume the
             triple via ``F = (sqrt(lam v^T H v + (v^T H W)^2) - v^T H W)/lam``;
             this reproduces ``metric_fn``'s primal ``(G, b)`` form exactly iff
-            ``H = G`` and ``W = G^{-1} b`` (verified in
-            ``tests/test_src_deep_review.py``).  An earlier version returned
-            ``H = G^{-1}``, which silently made the eikonal-solved metric
-            disagree with ``metric_fn``/AVBD by a large factor (review finding
-            MATH-ZD1).
+            ``H = G`` and ``W = G^{-1} b``.  Returning ``H = G^{-1}`` instead
+            would make the eikonal-solved metric disagree with
+            ``metric_fn``/AVBD by a large factor.
         """
         G, b = self._get_params(x)
         det_G = jnp.maximum(G[0, 0] * G[1, 1] - G[0, 1] ** 2, 1e-8)
