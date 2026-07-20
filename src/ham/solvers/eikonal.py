@@ -91,6 +91,20 @@ def sharp_min(a, b):
     return jnp.where(a <= b, a, b)
 
 
+def zermelo_to_dual(metric, pt):
+    """Dual-Randers Godunov data ``(G, B)`` at ``pt`` from the Zermelo triple.
+
+    With ``(H, W, lam)`` from ``metric.zermelo_data``:
+    ``B = -HW / lam`` and ``G = (H + (HW)(HW)^T / lam) / lam``, so the arrival
+    time solves ``(grad T - B)^T G^{-1} (grad T - B) = 1``.
+    """
+    H, W, lam = metric.zermelo_data(pt)
+    HW = jnp.dot(H, W)
+    B = -HW / lam
+    G = (H + jnp.outer(HW, HW) / lam) / lam
+    return G, B
+
+
 def compute_two_point_update(
     T1: jax.Array,
     T2: jax.Array,
@@ -408,15 +422,9 @@ class EikonalSolver(eqx.Module):
         hx = float((xmax - xmin) / max(1, nx - 1))
         hy = float((ymax - ymin) / max(1, ny - 1))
 
-        def extract_GB(pt):
-            # Zermelo data maps to Eikonal Godunov via inverse matrix
-            H, W, lam = metric.zermelo_data(pt)
-            B = -jnp.dot(H, W) / lam
-            HW = jnp.dot(H, W)
-            G = (H + jnp.outer(HW, HW) / lam) / lam
-            return G, B
-
-        G_mat, B_vec = jax.vmap(jax.vmap(extract_GB))(coords)
+        G_mat, B_vec = jax.vmap(jax.vmap(lambda pt: zermelo_to_dual(metric, pt)))(
+            coords
+        )
 
         # Format for fast sweeping (channels, nx, ny)
         g11 = G_mat[..., 0, 0]

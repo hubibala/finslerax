@@ -16,6 +16,7 @@ from ham.solvers.eikonal import (
     compute_two_point_update,
     sharp_min,
     steady_state_min,
+    zermelo_to_dual,
 )
 
 
@@ -368,9 +369,9 @@ class MeshEikonalSolver(eqx.Module):
         Returns:
             T: Global arrival times for each vertex. Shape ``(V,)``.
 
-        Reference:
-            Implementation utilizes characteristic ray clamping (Option A) for strict
-            causality preservation.
+        Note:
+            Updates clamp the characteristic ray to the donor simplex, preserving
+            strict causality.
         """
 
         # 1. Map source points to closest vertices
@@ -386,14 +387,9 @@ class MeshEikonalSolver(eqx.Module):
         # The Godunov scheme assumes piecewise constant metric per face
         face_centroids = jnp.mean(vertices[faces], axis=1)
 
-        def extract_GB(pt):
-            H, W, lam = metric.zermelo_data(pt)
-            B = -jnp.dot(H, W) / lam
-            HW = jnp.dot(H, W)
-            G = (H + jnp.outer(HW, HW) / lam) / lam
-            return G, B
-
-        G_faces, B_faces = jax.vmap(extract_GB)(face_centroids)
+        G_faces, B_faces = jax.vmap(lambda pt: zermelo_to_dual(metric, pt))(
+            face_centroids
+        )
 
         # 3. Solve!
         T = _fast_mesh_solve(

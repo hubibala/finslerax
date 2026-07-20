@@ -367,8 +367,8 @@ class TestRandersNonZeroCurvature(unittest.TestCase):
         K_riemannian = sectional_curvature(riemannian_metric, x, v1, v2)
 
         # They should differ because Randers adds velocity-dependent curvature
-        # (For flat background Riemannian, K_riemannian ~ 0)
-        # We just verify Randers curvature is non-trivially different
+        # (for a flat background the Riemannian sectional curvature vanishes).
+        self.assertLess(abs(float(K_riemannian)), 1e-4)
         self.assertFalse(jnp.isnan(K_randers))
         # K_randers != 0 for position-dependent wind
         self.assertGreater(abs(float(K_randers)), 1e-6)
