@@ -298,9 +298,9 @@ class LongTrajectoryAlignmentLoss(LossComponent[GenerativeModel]):
 
 class EulerLagrangeResidualLoss(LossComponent[GenerativeModel]):
     """
-    Physically-informed loss that penalizes violations of the Euler-Lagrange equations.
-    This provides a simulation-free, mathematically rigorous method to align empirical
-    trajectories with the geodesics of the learned Randers metric.
+    Loss that penalizes violations of the Euler-Lagrange equations, aligning
+    empirical trajectories with the geodesics of the learned Randers metric
+    without simulating them.
 
     The residual R measures the degree to which an observed path deviates from the
     extremum of the energy functional. R = d/dt (dL/dv) - dL/dz.

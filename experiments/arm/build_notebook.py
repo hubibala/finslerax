@@ -673,7 +673,7 @@ Same scalar-potential hypothesis class, same demonstrations, two losses:
 
 The shape loss has only the second-order leak to feed on: it overfits a few demos
 and *degrades* as demos are added. The timing loss identifies the potential
-essentially perfectly. We report R² of the recovered potential against the true
+accurately. We report R² of the recovered potential against the true
 $g_s U$ (additive constant removed).
 """)
 
