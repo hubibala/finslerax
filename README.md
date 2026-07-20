@@ -397,6 +397,18 @@ header. CI runs the full matrix (`JAX_ENABLE_X64` ∈ {0, 1} × Python 3.10/3.11
 
 ---
 
+## Development and AI disclosure
+
+HAM was developed with substantial assistance from AI coding tools
+(Anthropic's Claude), used for implementation, tests, and documentation
+throughout. All mathematics is validated against the published literature and
+a numerical test suite that runs in both float32 and float64, and every
+component has been human-reviewed. Responsibility for correctness rests with
+the author, not the tools — if you find an error, please open an issue.
+
+Contributions are welcome, including AI-assisted ones, under the disclosure
+policy in [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Citation
 
 ```bibtex
