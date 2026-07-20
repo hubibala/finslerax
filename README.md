@@ -413,7 +413,7 @@ policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ```bibtex
 @software{ham2026,
-  author = {HAM Research Team},
+  author = {Hubicska, Bal\'azs Attila},
   title  = {HAM: Differentiable Finsler Geometry in JAX},
   year   = {2026},
   url    = {https://github.com/hubibala/HAM}
