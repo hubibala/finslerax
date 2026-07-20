@@ -12,7 +12,7 @@ __all__ = ["GeodesicLearningSolver"]
 
 
 class GeodesicLearningSolver(eqx.Module):
-    """Geodesic Learning approach (as used in RiemannEBM).
+    """Direct path-optimization geodesic solver.
 
     Finds the energy-minimizing path by optimizing the entire discrete path
     simultaneously using the optax.adam optimizer.

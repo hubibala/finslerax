@@ -406,7 +406,7 @@ class TriangularMesh(Manifold):
 
         k1, k2 = jax.random.split(key)
 
-        # Fixed: calculate n using Python to avoid ConcretizationTypeError in JIT
+        # Compute n in Python (not JAX) to avoid ConcretizationTypeError in JIT.
         n = 1
         for s in shape:
             n *= s

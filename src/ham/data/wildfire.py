@@ -7,7 +7,6 @@ the Sim2Real-Fire dataset (Gahtan et al., 2026).
 """
 
 from __future__ import annotations
-from typing import Optional
 
 import numpy as np
 
@@ -249,8 +248,8 @@ class SceneNormalizer:
         slope_std: float = 1.0,
         canopy_mean: float = 0.0,
         canopy_std: float = 1.0,
-        weather_mean: Optional[np.ndarray] = None,
-        weather_std: Optional[np.ndarray] = None,
+        weather_mean: np.ndarray | None = None,
+        weather_std: np.ndarray | None = None,
     ):
         self.elev_mean = float(elev_mean)
         self.elev_std = float(elev_std)
@@ -389,7 +388,7 @@ def load_wildfire_scenario(
     event_id: str,
     normalizer: SceneNormalizer,
     k_train_obs: int,
-    seed: Optional[int] = None,
+    seed: int | None = None,
 ) -> WildfireScenario:
     """Load and preprocess a single fire scenario from a dataset loader.
 

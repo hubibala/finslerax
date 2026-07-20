@@ -1,4 +1,4 @@
-"""Providers implementing the arm interfaces — synthetic (session 1) and real (stub)."""
+"""Providers implementing the arm interfaces — synthetic and real (stub)."""
 
 from .synthetic import (
     AnalyticDistance,

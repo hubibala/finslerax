@@ -54,7 +54,7 @@ def path_length(trajectory: Union[jnp.ndarray, NamedTuple, tuple]) -> float:
     Handles array, NamedTuple with .xs / .x field, or tuple.
     """
     # Extract positions
-    if isinstance(trajectory, (tuple, NamedTuple)):
+    if isinstance(trajectory, tuple):  # includes NamedTuple instances
         if hasattr(trajectory, "xs"):
             xs = trajectory.xs
         elif hasattr(trajectory, "x"):
@@ -144,7 +144,7 @@ def main():
     # ────────────────────────────────────────────────────────────────
     # 6. Visualization
     # ────────────────────────────────────────────────────────────────
-    fig, ax = setup_3d_plot(elev=15, azim=120)
+    _fig, ax = setup_3d_plot(elev=15, azim=120)
     plot_sphere(ax, alpha=0.08)
 
     # Wind field
@@ -157,7 +157,7 @@ def main():
         scale=0.18,
         color="cyan",
         alpha=0.35,
-        label="Rossby–Haurwitz wind",
+        label="Rossby-Haurwitz wind",
     )
 
     # Trajectories
@@ -188,7 +188,7 @@ def main():
 
     ax.legend(loc="upper right", fontsize=9)
     plt.title(
-        "Rossby–Haurwitz Wind on Sphere\nOptimal steering vs passive drift vs verification shot",
+        "Rossby-Haurwitz Wind on Sphere\nOptimal steering vs passive drift vs verification shot",
         fontsize=11,
     )
     print("\nPlot ready. Rotate to see how the optimal path exploits the wind.")

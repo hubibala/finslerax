@@ -33,12 +33,6 @@ class Randers(AsymmetricMetric):
         a NaN guard. Use for *trusted, prescribed* fields that the caller
         guarantees satisfy ``||W||_H < 1`` (e.g. a known ocean current), when
         maximum precision is required.
-
-    Note:
-        The historical ``max_speed * tanh(||W||) / ||W||`` squash bent *every*
-        wind (its slope at the origin is ``max_speed < 1``), silently distorting
-        valid currents — e.g. ``0.5 -> 0.46``. The soft clamp fixes this; see
-        :func:`ham.utils.causal_wind_scale`.
     """
 
     h_net: Any
@@ -112,13 +106,11 @@ class Randers(AsymmetricMetric):
             W_safe = W_raw
             lambda_factor = jnp.maximum(1.0 - w_norm_sq, GRAD_EPS)
         else:
-            # Default: smooth, identity-preserving causal clamp.  Unlike the
-            # historical ``max_speed * tanh(w_norm)/w_norm`` squash -- which bent
-            # every wind (slope max_speed<1 at 0) and so silently distorted valid
-            # currents -- this is the identity to ~exp(-stiffness*(max_speed -
-            # w_norm)) inside the physical region and only bends within a thin
-            # shell around the causal boundary, keeping F in C^infinity and
-            # guaranteeing ||W_safe||_H < max_speed < 1 (strong convexity).
+            # Default: smooth, identity-preserving causal clamp.  It is the
+            # identity to ~exp(-stiffness*(max_speed - w_norm)) inside the
+            # physical region and only bends within a thin shell around the
+            # causal boundary, keeping F in C^infinity and guaranteeing
+            # ||W_safe||_H < max_speed < 1 (strong convexity).
             # Reference: spec/MATH_SPEC.md section 5.
             scale = causal_wind_scale(w_norm, max_speed, self.wind_stiffness)
             W_safe = W_raw * scale

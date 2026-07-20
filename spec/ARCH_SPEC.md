@@ -226,7 +226,7 @@ v^k$, so transport is again an ODE driven by auto-differentiation. See
 ### 4.7 Curvature (`geometry/curvature.py`)
 
 `sectional_curvature`, `flag_curvature_sample` (the Finsler generalization),
-`riemann_curvature_tensor`, and `scalar_curvature` — all computed from the
+and `riemann_curvature_tensor` — all computed from the
 nonlinear connection derived from the spray.
 
 ---

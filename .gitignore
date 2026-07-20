@@ -94,3 +94,10 @@ docs/_templates/
 *.h5
 *.hdf5
 *.npz
+
+# Experiment artifacts (re-creatable by the stage scripts)
+experiments/*/checkpoints/
+experiments/**/*.bak
+
+# Local benchmarks (machine-specific paths)
+experiments/arm/bench_avbd_xpu.py

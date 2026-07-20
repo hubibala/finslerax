@@ -1,4 +1,4 @@
-"""Terrain mesh utilities for HAMTools.
+"""Terrain mesh utilities for HAM.
 
 Provides helpers for constructing triangular meshes from DEM rasters,
 interpolating raster covariates to mesh vertices, computing face normals and
@@ -163,7 +163,7 @@ def pixel_to_world_3d(
 
 
 def compute_face_normals(mesh: TriangularMesh) -> jnp.ndarray:
-    """Compute per-face unit outward normals.
+    """Compute per-face unit normals (orientation follows vertex winding).
 
     Args:
         mesh: TriangularMesh with triangles of shape (F, 3, N).
@@ -479,9 +479,8 @@ class CovariateMeshRanders(AsymmetricMetric):
             The wind returned is the Zermelo wind *vector* ``b / g_iso``, not
             the drift one-form ``b`` itself.  The eikonal/zoo reconstruction
             ``F = (sqrt(lam v^T H v + (v^T H W)^2) - v^T H W)/lam`` reproduces
-            ``metric_fn`` exactly only with ``W = H^{-1} b``; returning the raw
-            ``b`` made the eikonal-solved metric disagree with ``metric_fn``
-            (review finding MATH-ZD1).
+            ``metric_fn`` exactly only with ``W = H^{-1} b``, not with the raw
+            ``b``.
         """
         weights = self.manifold.get_face_weights(x)
         face_idx = jnp.argmax(weights)

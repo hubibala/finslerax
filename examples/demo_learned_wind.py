@@ -12,8 +12,8 @@ from ham.vis import generate_icosphere, plot_sphere, plot_vector_field, setup_3d
 
 
 def main():
-    print("--- HAM Metric Learning (Smoothed) ---")
-    print("Iterating: Adding Jacobian Regularization to fix vector lengths.")
+    print("--- HAM Metric Learning ---")
+    print("Fitting a wind field with Jacobian regularization for smooth vector lengths.")
 
     key = jax.random.PRNGKey(2025)
 
@@ -76,14 +76,14 @@ def main():
         return new_model, new_state, loss_fn(model)
 
     print("Training with Smoothness Constraint...")
-    for i in range(5001):  # Increased steps slightly to allow settling
+    for i in range(5001):  # enough steps for the metric to settle
         learner, opt_state, loss = train_step(learner, X, V, opt_state)
         if i % 300 == 0:
             print(f"  Step {i:04d}: Loss = {loss:.4f}")
 
     # 5. Visualization
     print("Visualizing...")
-    fig, ax = setup_3d_plot()
+    _fig, ax = setup_3d_plot()
     plot_sphere(ax, alpha=0.1)
 
     grid_pts, _ = generate_icosphere(radius=1.0, subdivisions=2)

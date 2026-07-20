@@ -16,9 +16,9 @@ from .networks import RandomFourierFeatures
 class QuadraticHead(eqx.Module):
     """Quadratic output head for EBMs.
 
-    Ensures the energy function is bounded from below and structurally
-    confining (E(x) -> infinity as ||x|| -> infinity).
-    Calculates: w1(x) * w2(x) + w3(x^2).
+    Calculates: w1(x) * w2(x) + w3(x^2). The quadratic term biases the energy
+    toward growth away from the data, but the learned weights are unconstrained,
+    so confinement (E(x) -> infinity as ||x|| -> infinity) is not guaranteed.
     """
 
     w1: eqx.nn.Linear

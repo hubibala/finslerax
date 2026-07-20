@@ -3,8 +3,8 @@
 A multirotor's segment energy decomposes by parity under segment *reversal*
 (``Δx → −Δx`` at fixed duration, length and speed profile):
 
-    E_seg ≈ [c₀·Δt + c₁·len + c₂·len²/Δt + c₃·|Δz|] + [k·Δz + b·Δxy]
-            └────────────── even (nuisance) ────────┘  └─ odd: the 1-form β ─┘
+    E_seg ≈ [c₀·Δt + c₁·len + c₂·len²/Δt + s·|Δz|] + [k·Δz + b·Δxy]
+            └────────────── even (nuisance) ───────┘  └─ odd: the 1-form β ─┘
 
 * The even bracket absorbs hover, drag, the speed profile, and the *symmetric*
   half of the vertical cost (``|Δz|``: climbing and descending both cost extra

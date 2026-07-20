@@ -1,5 +1,5 @@
 """
-Finsler Metric base class — the core geometric abstraction of HAMTools.
+Finsler Metric base class — the core geometric abstraction of HAM.
 
 This module defines :class:`FinslerMetric`, from which all concrete
 metrics (Euclidean, Riemannian, Randers, learned neural metrics) inherit.

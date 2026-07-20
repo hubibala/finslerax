@@ -5,8 +5,8 @@ inside a concrete provider, so the same numbers apply to a synthetic or a real
 arm. ``spray_geodesic`` is the HAM-internal cross-check: it re-derives the geodesic
 by integrating the spray ODE (``ExponentialMap``) and shooting to the goal — a
 different computation from AVBD's discrete BVP, so agreement is real evidence the
-metric's whole autodiff chain and both solvers are correct (validation rungs
-L3b/L7b). Use it on the smooth intrinsic-angle metric at moderate distance;
+metric's whole autodiff chain and both solvers are correct (validation rung
+L3b). Use it on the smooth intrinsic-angle metric at moderate distance;
 shooting is unstable on stiff or long geodesics, where the eikonal (L3) governs.
 """
 

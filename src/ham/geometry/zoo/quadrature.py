@@ -7,7 +7,7 @@ sampled at the segment **start vertex**.  For a stiff, data-driven conformal
 metric this under-samples the cost along long segments: a segment leaping from an
 on-data point (where the metric is cheap) across a high-cost void pays only the
 cheap start-vertex cost and never "sees" the void, so the solver can *tunnel*
-through empty regions (see ``spec/AVBD_LATENT_FINDINGS_2026-06-14.md``).
+through empty regions.
 
 :class:`SegmentQuadratureMetric` wraps any :class:`~ham.geometry.metric.FinslerMetric`
 and replaces the single start-vertex sample with a multi-point quadrature of the

@@ -3,8 +3,8 @@
 The discrete geodesic energy under a stiff, data-driven metric is non-convex, and
 a cold straight-line guess between distant latents dives into a high-cost void
 where *every* local solver (Gauss-Seidel relaxation or Newton alike) is unstable
-or critically slow (see ``spec/AVBD_LATENT_FINDINGS_2026-06-14.md``). Numerical
-continuation is the standard cure: solve a sequence of easier problems, each
+or critically slow. Numerical continuation is the standard cure: solve a
+sequence of easier problems, each
 warm-started from the previous solution, so the iterate is always inside a good
 basin.
 
@@ -22,14 +22,13 @@ previous (resampled) path carried forward. Any solver exposing that signature
 (``AVBDSolver``, ``GaussNewtonGeodesic``) works as a stage solver.
 """
 
-from typing import Iterable, Optional
+from collections.abc import Iterable
+from typing import Optional
 
 import jax
 import jax.numpy as jnp
 
-from ham.solvers.avbd import Trajectory
-
-__all__ = ["resample_path", "reparametrize_arclength", "solve_continuation"]
+__all__ = ["reparametrize_arclength", "resample_path", "solve_continuation"]
 
 
 def resample_path(path: jax.Array, n_steps: int, project=None) -> jax.Array:

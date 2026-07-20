@@ -1,10 +1,11 @@
 # HAM — Differentiable Finsler Geometry in JAX
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![JAX](https://img.shields.io/badge/backend-JAX-green.svg)](https://github.com/google/jax)
 
-**HAM** is a JAX-native library for **learnable Finsler geometry**. You define a
+**HAM** (*Holonomic Association Model*) is a JAX-native library for **learnable
+Finsler geometry**. You define a
 cost function $F(x, v)$ — the price of moving through point $x$ in direction $v$ —
 and HAM auto-differentiates everything that follows: geodesics, the geodesic
 spray, curvature, and parallel transport. Because metrics are
@@ -57,6 +58,16 @@ print(metric.arc_length(traj.xs),          # downwind cost  ≈ 1.19
 - **A declarative training pipeline.** Compose multi-phase schedules with
   per-phase parameter freezing and a library of geometry-aware losses.
 
+### Why "Holonomic Association Model"?
+
+The name records the program behind the library: represent context as
+geometry. Parallel transport moves a representation between contexts along a
+path, and holonomy — the path dependence of that transport — is what the
+geometry "remembers"; associations between states become geodesics of a
+learned, possibly asymmetric, metric. The library is useful far beyond that
+program (navigation, robotics, spreading fronts), but the transport-and-holonomy
+machinery it required is why every piece here exists.
+
 ---
 
 ## Installation
@@ -65,6 +76,7 @@ print(metric.arc_length(traj.xs),          # downwind cost  ≈ 1.19
 git clone https://github.com/hubibala/HAM.git
 cd HAM
 pip install -e ".[dev]"          # core + dev tooling (pytest, ruff, matplotlib, …)
+pip install -e ".[viz]"          # core + plotting (matplotlib, plotly) for ham.vis
 ```
 
 The distribution is named **`hamtools`**; you import it as **`ham`**.
@@ -141,7 +153,7 @@ deliberately.
 
 ---
 
-## ⚡ Quickstart
+## Quickstart
 
 ### 1. Shoot a geodesic on a sphere
 
@@ -267,7 +279,7 @@ for the software design, [`spec/ARCH_SPEC.md`](spec/ARCH_SPEC.md).
 
 ---
 
-## 📂 Repository structure
+## Repository structure
 
 ```text
 src/ham/
@@ -305,13 +317,13 @@ src/ham/
 
 examples/        # runnable demo scripts + Jupyter notebooks
 experiments/     # larger applications (marine navigation, …)
-spec/            # MATH_SPEC.md, ARCH_SPEC.md, solver studies
-tests/           # 333 tests across 32 modules
+spec/            # MATH_SPEC.md, ARCH_SPEC.md, theory notes
+tests/           # 425 tests across 36 modules
 ```
 
 ---
 
-## 📚 Examples
+## Examples
 
 Runnable scripts live in [`examples/`](examples/); narrated walkthroughs with
 plots live in [`examples/notebooks/`](examples/notebooks/).
@@ -358,7 +370,7 @@ reproduction commands, and limitations.
 
 ---
 
-## 🧪 Tests
+## Tests
 
 ```bash
 python -m pytest tests/ -q                       # full suite (float32, default)
@@ -385,7 +397,7 @@ header. CI runs the full matrix (`JAX_ENABLE_X64` ∈ {0, 1} × Python 3.10/3.11
 
 ---
 
-## 📝 Citation
+## Citation
 
 ```bibtex
 @software{ham2026,

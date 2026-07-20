@@ -39,6 +39,11 @@ dev = [
     "mypy",
     "ruff",
 ]
+viz = [
+    # ham.vis: matplotlib/plotly are imported at module level.
+    "matplotlib>=3.5",
+    "plotly>=5.0",
+]
 wildfire = [
     "Pillow>=9.0",
     "rasterio>=1.3",
@@ -104,6 +109,7 @@ select = [
     "C4",
 ]
 ignore = [
+    "E731", # lambda-assignment (idiomatic for small JAX field/metric closures)
     "N802", # invalid-function-name (often used for math)
     "N803", # invalid-argument-name (often used for matrices like X)
     "N806", # non-lowercase-variable-in-function (often used for matrices)
