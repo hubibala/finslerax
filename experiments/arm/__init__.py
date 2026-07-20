@@ -1,6 +1,6 @@
 """HAM Robot-Arm Geodesics — energy-optimal, asymmetric-cost motion planning in C-space.
 
-A differentiable geodesic-BVP study (the AVBD twin of ``experiments/marine``):
+A differentiable geodesic-BVP study:
 geodesics on configuration-space Riemannian/Finsler metrics with gravity-aware
 asymmetry, obstacles folded into the metric, exact ALM task constraints, and a
 metric/obstacle field learnable from demonstrations.

@@ -15,7 +15,7 @@ nn       : Neural network building blocks (VectorField, PSDMatrixField, EBM, KDE
 data, sim, utils, vis : Dataset loaders, analytical fields, numerics, visualization
 """
 
-__version__ = "1.1.0"
+__version__ = "1.0.0"
 
 # Core geometry
 from ham.geometry import (

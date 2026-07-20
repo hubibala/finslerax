@@ -83,7 +83,7 @@ The distribution is named **`hamtools`**; you import it as **`ham`**.
 
 ```python
 import ham
-ham.__version__   # '1.1.0'
+ham.__version__   # '1.0.0'
 ```
 
 Optional extras:
@@ -91,6 +91,7 @@ Optional extras:
 | Extra | Installs | For |
 | :--- | :--- | :--- |
 | `dev` | pytest, ruff, mypy, matplotlib, jupyter, plotly | development & examples |
+| `viz` | matplotlib, plotly | the `ham.vis` plotting helpers |
 | `gpu` | `jax[cuda12]` | NVIDIA GPU acceleration |
 | `wildfire` | Pillow, rasterio | the wildfire terrain application |
 
@@ -316,7 +317,7 @@ src/ham/
 ├── data/  sim/  utils/  vis/  # loaders, analytic fields, numerics, plotting
 
 examples/        # runnable demo scripts + Jupyter notebooks
-experiments/     # larger applications (marine navigation, …)
+experiments/     # larger applications (wildfire spread, robot-arm geodesics)
 spec/            # MATH_SPEC.md, ARCH_SPEC.md, theory notes
 tests/           # 425 tests across 36 modules
 ```
@@ -340,33 +341,34 @@ plots live in [`examples/notebooks/`](examples/notebooks/).
 | High-dimensional latent geodesics | — | `demo_high_dim_latent_geodesics.ipynb` |
 | Generic neural Finsler metric | — | `demo_generic_finsler.ipynb` |
 
-### Worked application: marine navigation
+### Worked applications
 
-[`experiments/marine/`](experiments/marine/README.md) is a larger, end-to-end use
-of the library: planning a time-optimal route for a buoyancy-driven underwater
-glider through a time-varying, depth-stratified ocean current. It's a useful
-reference for how the pieces fit together on a real problem.
+Two end-to-end applications ship with the library; two more (marine navigation
+and UAV energy modeling) are in preparation on the `wip/marine-uav` branch.
 
-Time-optimal navigation through a current is [Zermelo's
-problem](https://arxiv.org/abs/2304.00478), whose solutions are the geodesics of
-a Randers metric — so the experiment is built directly on HAM's `Randers` metric,
-the differentiable `VolumetricEikonalSolver` (arrival-time field), and
-`AVBDSolver` (route), plus a clock-threaded planner for the time-dependent case.
-It runs in four stages:
+**Wildfire spread** ([`experiments/wildfire/`](experiments/wildfire/README.md))
+models a fire front as the unit-time level sets of an anisotropic Randers
+metric: terrain and fuel set the symmetric part, wind the drift. It is a
+companion study to [Gahtan, Shpund & Bronstein
+(2026)](https://arxiv.org/abs/2603.00035), decomposing their cross-scene
+generalization collapse with an identifiability analysis (a low-dimensional
+scene gauge plus wind parity/coverage) and repairing most of it with a
+two-parameter few-shot recalibration and measured-wind coupling. Built on
+`CovariateConditionedRanders`, the differentiable `EikonalSolver`, and the
+covariate-encoder training loop; runs in four staged scripts (W-A–W-D) with
+per-stage gate ledgers.
 
-| Stage | What it does | HAM components |
-| :--- | :--- | :--- |
-| **A — Forward planning** | arrival-time field + route through a frozen current | `VolumetricEikonalSolver`, `AVBDSolver` |
-| **B — Reconstruction** | recover the current from passive drifter tracks (velocity regression) | `KernelWindField`, stream-function fit |
-| **C — Time-dependent** | route through an *evolving* current (the stationary eikonal no longer applies) | time-lifted planner + differentiable penalties |
-| **D — Closed-loop (MPC)** | receding-horizon replanning under a forecast that decays with lead time | warm-started re-solves |
-
-The numbers are modest and reported with their caveats — e.g. diving to a
-favorable deep layer saves ~10% over a surface-locked plan, and a time-aware
-route is ~7% faster than a frozen-field one under a perfect forecast, with the
-honest gap to closed-loop performance spelled out. See the
-[experiment README](experiments/marine/README.md) for the full write-up,
-reproduction commands, and limitations.
+**Robot-arm geodesics** ([`experiments/arm/`](experiments/arm/README.md))
+plans energy-optimal motion in configuration space: the arm's mass matrix is
+the Riemannian metric, gravity enters as a Randers drift, obstacles are folded
+into the metric, and task constraints are enforced exactly via augmented
+Lagrangian terms. Stage D studies the inverse problem — exact drift is
+provably invisible in path *shapes* (projective invariance) and is recovered
+from the timing/asymmetry channel instead; the theory note ships in
+[`spec/exact_drift_gauge_equivalence.md`](spec/exact_drift_gauge_equivalence.md).
+Built on `AVBDSolver`, `GaussNewtonGeodesic`, continuation, and the eikonal
+planners; runs in four staged scripts (A–D) against a validation ladder in
+`tests/test_arm.py`.
 
 ---
 
