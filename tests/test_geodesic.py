@@ -1,6 +1,6 @@
 """Tests for the IVP Geodesic Solver (ExponentialMap).
 
-Verifies ballistic motion, great-circle trajectories, energy conservation, 
+Verifies ballistic motion, great-circle trajectories, energy conservation,
 and differentiability of the shooting solver.
 """
 
@@ -30,7 +30,7 @@ class Plane(Manifold):
     def to_tangent(self, x, v): return v
     def retract(self, x, v): return x + v
     def random_sample(self, key, shape):
-        return jax.random.normal(key, shape + (2,))
+        return jax.random.normal(key, (*shape, 2))
 
 def test_euclidean_ballistic(solver):
     """In flat space, a geodesic is a straight line x(t) = x0 + v0*t."""

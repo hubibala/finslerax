@@ -143,7 +143,7 @@ def test_mesh_constant_wind_directional():
     Tg = np.array(T).reshape(nm, nm)
 
     ic = nm // 2
-    off = int(round(d / (2.0 / (nm - 1))))
+    off = round(d / (2.0 / (nm - 1)))
 
     assert abs(Tg[ic + off, ic] - d / (1 + w)) < 0.03, (
         f"downwind T={Tg[ic + off, ic]:.4f}, expected {d / (1 + w):.4f}"

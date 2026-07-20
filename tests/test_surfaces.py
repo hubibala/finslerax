@@ -43,7 +43,7 @@ class SurfaceTestMixin:
         shape = (3, 4)
         k1, k2 = jax.random.split(self.key)
         pts = self.manifold.random_sample(k1, shape)
-        self.assertEqual(pts.shape, shape + (self.manifold.ambient_dim,))
+        self.assertEqual(pts.shape, (*shape, self.manifold.ambient_dim))
 
         # Test project
         proj = self.manifold.project(pts)
@@ -74,7 +74,7 @@ class TestSphere(SurfaceTestMixin, unittest.TestCase):
 
     def test_exp_log_roundtrip(self):
         x = self.manifold.random_sample(self.key, ())
-        k1, k2 = jax.random.split(self.key)
+        k1, _k2 = jax.random.split(self.key)
         v = self.manifold.to_tangent(x, jax.random.normal(k1, x.shape) * 0.1)
 
         y = self.manifold.exp_map(x, v)
@@ -124,7 +124,7 @@ class TestTorus(SurfaceTestMixin, unittest.TestCase):
 
     def test_torus_exp_log_approx(self):
         x = self.manifold.random_sample(self.key, ())
-        k1, k2 = jax.random.split(self.key)
+        k1, _k2 = jax.random.split(self.key)
         v = self.manifold.to_tangent(x, jax.random.normal(k1, x.shape) * 0.01)
 
         y = self.manifold.exp_map(x, v)
@@ -169,7 +169,7 @@ class TestHyperboloid(SurfaceTestMixin, unittest.TestCase):
 
     def test_exp_log_roundtrip(self):
         x = self.manifold.random_sample(self.key, ())
-        k1, k2 = jax.random.split(self.key)
+        k1, _k2 = jax.random.split(self.key)
         v = self.manifold.to_tangent(x, jax.random.normal(k1, x.shape) * 0.1)
 
         y = self.manifold.exp_map(x, v)

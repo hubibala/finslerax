@@ -68,7 +68,7 @@ def _probe(metric, n=41, d=0.5):
     solver = VolumetricEikonalSolver(max_iters=100, tol=1e-6)
     T, Q, B = solver.solve(metric, _SRC, _EXT, (n, n, n))
     ic = n // 2
-    off = int(round(d / (2.0 / (n - 1))))
+    off = round(d / (2.0 / (n - 1)))
     return T, Q, B, ic, off
 
 

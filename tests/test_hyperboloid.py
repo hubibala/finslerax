@@ -31,7 +31,7 @@ class TestHyperboloid(unittest.TestCase):
         x0 > 0
         """
         # Generate random ambient points (some valid, some invalid)
-        key, subkey = jax.random.split(self.key)
+        _key, subkey = jax.random.split(self.key)
         random_ambient = jax.random.normal(subkey, (10, 3)) * 5.0
 
         projected = self.manifold.project(random_ambient)
