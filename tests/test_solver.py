@@ -1,7 +1,7 @@
 """Integration tests for boundary-value problem (BVP) solvers on manifolds.
 
-Verifies that AVBDSolver correctly finds energy-minimizing paths on various 
-topologies (Torus, Sphere, Paraboloid) and respects physical invariants 
+Verifies that AVBDSolver correctly finds energy-minimizing paths on various
+topologies (Torus, Sphere, Paraboloid) and respects physical invariants
 like Zermelo asymmetry.
 """
 

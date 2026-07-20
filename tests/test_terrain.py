@@ -175,7 +175,7 @@ def _make_metric(use_wind=True, H=4, W=4):
 
 def test_covariate_mesh_randers_positive():
     """metric_fn should return a positive value for nonzero velocity."""
-    metric, mesh = _make_metric()
+    metric, _mesh = _make_metric()
     # Query point near centre of mesh
     x = jnp.array([15.0, 15.0, 0.0], dtype=jnp.float32)
     v = jnp.array([1.0, 0.0, 0.0], dtype=jnp.float32)
@@ -185,7 +185,7 @@ def test_covariate_mesh_randers_positive():
 
 def test_covariate_mesh_randers_zero_velocity():
     """metric_fn should return 0 for the zero velocity."""
-    metric, mesh = _make_metric()
+    metric, _mesh = _make_metric()
     x = jnp.array([15.0, 15.0, 0.0], dtype=jnp.float32)
     v = jnp.zeros(3, dtype=jnp.float32)
     cost = metric.metric_fn(x, v)
@@ -194,7 +194,7 @@ def test_covariate_mesh_randers_zero_velocity():
 
 def test_covariate_mesh_randers_homogeneous():
     """F(x, lambda*v) = lambda * F(x, v) for lambda > 0."""
-    metric, mesh = _make_metric()
+    metric, _mesh = _make_metric()
     x = jnp.array([15.0, 15.0, 0.0], dtype=jnp.float32)
     v = jnp.array([1.0, 1.0, 0.0], dtype=jnp.float32)
     lam = 3.7
@@ -208,7 +208,7 @@ def test_covariate_mesh_randers_homogeneous():
 
 def test_covariate_mesh_randers_no_wind():
     """With use_wind=False the metric should still return a positive cost."""
-    metric, mesh = _make_metric(use_wind=False)
+    metric, _mesh = _make_metric(use_wind=False)
     x = jnp.array([15.0, 15.0, 0.0], dtype=jnp.float32)
     v = jnp.array([0.0, 1.0, 0.0], dtype=jnp.float32)
     cost = metric.metric_fn(x, v)

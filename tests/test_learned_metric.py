@@ -31,7 +31,7 @@ class MockManifold(Manifold):
     def to_tangent(self, x, v): return v
     def retract(self, x, v): return x + v
     def random_sample(self, key, shape):
-        return jax.random.normal(key, shape + (3,))
+        return jax.random.normal(key, (*shape, 3))
 
 
 class TestNeuralRanders(unittest.TestCase):

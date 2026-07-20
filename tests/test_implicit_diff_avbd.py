@@ -35,7 +35,7 @@ def _neural_randers(key, hidden_dim=16, depth=2):
 
 def _make_solvers(iterations=30):
     """Return a matched pair (unrolled, implicit) of AVBDSolvers."""
-    common = dict(step_size=0.05, iterations=iterations, energy_tol=1e-9)
+    common = {"step_size": 0.05, "iterations": iterations, "energy_tol": 1e-9}
     unrolled = AVBDSolver(**common, implicit_diff=False)
     implicit = AVBDSolver(**common, implicit_diff=True)
     return unrolled, implicit

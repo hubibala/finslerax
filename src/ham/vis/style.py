@@ -18,22 +18,22 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 __all__ = [
-    "PALETTE",
     "CYCLE",
-    "use_ham_style",
+    "PALETTE",
     "axes3d",
-    "style_axes3d",
+    "draw_path",
     "draw_sphere",
     "draw_surface",
-    "draw_path",
-    "tangent_arrows",
+    "palette_colorscale",
+    "plotly_cones",
     "plotly_layout",
-    "plotly_sphere",
-    "plotly_surface",
     "plotly_mesh",
     "plotly_path",
-    "plotly_cones",
-    "palette_colorscale",
+    "plotly_sphere",
+    "plotly_surface",
+    "style_axes3d",
+    "tangent_arrows",
+    "use_ham_style",
 ]
 
 # A restrained, colour-blind-aware palette. Colours carry consistent meaning
@@ -115,7 +115,9 @@ def style_axes3d(ax, frame=False):
         axis.pane.set_edgecolor((0, 0, 0, 0))
         axis.line.set_color((0, 0, 0, 0.12))
     ax.grid(False)
-    ax.set_xticks([]); ax.set_yticks([]); ax.set_zticks([])
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_zticks([])
     return ax
 
 
@@ -159,7 +161,8 @@ def tangent_arrows(ax, base, vecs, color=None, scale=0.22, lw=1.4, alpha=0.9,
     already lie in the tangent space). ``scale`` sets a uniform visual length so
     the field reads as a clean quiver rather than a thicket.
     """
-    base = np.asarray(base); vecs = np.asarray(vecs)
+    base = np.asarray(base)
+    vecs = np.asarray(vecs)
     color = color or PALETTE["primary"]
     if normalize:
         n = np.linalg.norm(vecs, axis=1, keepdims=True)
@@ -180,18 +183,18 @@ def _solid(color):
 
 def plotly_layout(fig, title=None, height=620, eye=(1.35, 1.25, 0.8)):
     """Apply the shared clean, frameless 3-D scene styling to a Plotly figure."""
-    clean = dict(showbackground=False, showgrid=False, zeroline=False,
-                 showticklabels=False, title="", visible=False)
+    clean = {"showbackground": False, "showgrid": False, "zeroline": False,
+                 "showticklabels": False, "title": "", "visible": False}
     fig.update_layout(
-        title=dict(text=title or "", x=0.5, xanchor="center",
-                   font=dict(size=17, color=PALETTE["ink"])),
-        scene=dict(xaxis=clean, yaxis=clean, zaxis=clean, aspectmode="data",
-                   camera=dict(eye=dict(x=eye[0], y=eye[1], z=eye[2]))),
-        margin=dict(l=0, r=0, t=44, b=0),
+        title={"text": title or "", "x": 0.5, "xanchor": "center",
+                   "font": {"size": 17, "color": PALETTE["ink"]}},
+        scene={"xaxis": clean, "yaxis": clean, "zaxis": clean, "aspectmode": "data",
+                   "camera": {"eye": {"x": eye[0], "y": eye[1], "z": eye[2]}}},
+        margin={"l": 0, "r": 0, "t": 44, "b": 0},
         height=height,
         paper_bgcolor="white",
-        legend=dict(x=0.02, y=0.98, bgcolor="rgba(255,255,255,0.6)",
-                    bordercolor="#d8dee6", borderwidth=1, font=dict(size=12)),
+        legend={"x": 0.02, "y": 0.98, "bgcolor": "rgba(255,255,255,0.6)",
+                    "bordercolor": "#d8dee6", "borderwidth": 1, "font": {"size": 12}},
     )
     return fig
 
@@ -205,7 +208,7 @@ def plotly_sphere(radius=1.0, color=None, opacity=0.16, n=60):
         x=radius * np.cos(u) * np.sin(v), y=radius * np.sin(u) * np.sin(v),
         z=radius * np.cos(v), colorscale=_solid(color), opacity=opacity,
         showscale=False, hoverinfo="skip",
-        lighting=dict(ambient=0.9, diffuse=0.2, specular=0.05), name="")
+        lighting={"ambient": 0.9, "diffuse": 0.2, "specular": 0.05}, name="")
 
 
 def plotly_surface(X, Y, Z, color=None, opacity=0.42):
@@ -214,18 +217,19 @@ def plotly_surface(X, Y, Z, color=None, opacity=0.42):
     color = color or PALETTE["surface"]
     return go.Surface(x=X, y=Y, z=Z, colorscale=_solid(color), opacity=opacity,
                       showscale=False, hoverinfo="skip",
-                      lighting=dict(ambient=0.75, diffuse=0.5, specular=0.08))
+                      lighting={"ambient": 0.75, "diffuse": 0.5, "specular": 0.08})
 
 
 def plotly_mesh(verts, faces, color=None, opacity=0.45):
     """A flat-shaded triangle mesh surface."""
     import plotly.graph_objects as go
-    verts = np.asarray(verts); faces = np.asarray(faces)
+    verts = np.asarray(verts)
+    faces = np.asarray(faces)
     color = color or PALETTE["surface"]
     return go.Mesh3d(x=verts[:, 0], y=verts[:, 1], z=verts[:, 2],
                      i=faces[:, 0], j=faces[:, 1], k=faces[:, 2],
                      color=color, opacity=opacity, flatshading=True,
-                     hoverinfo="skip", lighting=dict(ambient=0.7, diffuse=0.6),
+                     hoverinfo="skip", lighting={"ambient": 0.7, "diffuse": 0.6},
                      name="")
 
 
@@ -235,9 +239,9 @@ def plotly_path(xs, color=None, name=None, width=6, dash=None, show_start=True):
     xs = np.asarray(xs)
     color = color or PALETTE["accent"]
     mode = "lines+markers" if show_start else "lines"
-    marker = dict(size=[5] + [0] * (len(xs) - 1), color=color) if show_start else None
+    marker = {"size": [5] + [0] * (len(xs) - 1), "color": color} if show_start else None
     return go.Scatter3d(x=xs[:, 0], y=xs[:, 1], z=xs[:, 2], mode=mode,
-                        line=dict(color=color, width=width, dash=dash),
+                        line={"color": color, "width": width, "dash": dash},
                         marker=marker, name=name, showlegend=name is not None)
 
 
@@ -256,7 +260,8 @@ def plotly_cones(base, vecs, name=None, color=None, colorscale=None,
     trace; add it with ``fig.add_trace(plotly_cones(...))``.
     """
     import plotly.graph_objects as go
-    base = np.asarray(base, float); vecs = np.asarray(vecs, float)
+    base = np.asarray(base, float)
+    vecs = np.asarray(vecs, float)
     if color is not None and colorscale is None:
         colorscale = _solid(color)
     elif colorscale is None:
@@ -266,5 +271,5 @@ def plotly_cones(base, vecs, name=None, color=None, colorscale=None,
         u=vecs[:, 0], v=vecs[:, 1], w=vecs[:, 2],
         anchor="tail", sizemode=sizemode, sizeref=sizeref, colorscale=colorscale,
         showscale=showscale, name=name, hoverinfo="skip",
-        colorbar=dict(title=colorbar_title, thickness=14, len=0.6) if showscale else None,
+        colorbar={"title": colorbar_title, "thickness": 14, "len": 0.6} if showscale else None,
     )

@@ -34,7 +34,7 @@ def test_analytical_normals():
     x = jnp.linspace(0, 1, nx)
     y = jnp.linspace(0, 1, ny)
     z = jnp.linspace(0, 1, nz)
-    X, Y, Z = jnp.meshgrid(x, y, z, indexing='ij')
+    X, _Y, _Z = jnp.meshgrid(x, y, z, indexing='ij')
 
     # Simple linear field in X: normals should be (1, 0, 0)
     volume = X

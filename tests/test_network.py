@@ -1,6 +1,6 @@
 """Tests for neural network building blocks (VectorField, PSDMatrixField).
 
-Verifies shapes, mathematical properties (symmetry, positive-definiteness), 
+Verifies shapes, mathematical properties (symmetry, positive-definiteness),
 and compatibility with JAX transformations (jit, vmap, grad).
 """
 

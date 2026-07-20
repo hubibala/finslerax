@@ -60,13 +60,13 @@ class TestMeshSolver(unittest.TestCase):
     def test_obstacle_avoidance(self):
         """
         Verifies that the solver respects varying metric costs on the mesh.
-        Scenario: 
+        Scenario:
             - Same Pyramid geometry.
             - Path from Front (y=0.9) to Back (y=-0.9).
             - Right side (x > 0) has HIGH HEADWIND ("Lava").
             - Left side (x < 0) has NO WIND ("Grass").
-            
-        Expected: 
+
+        Expected:
             The path should swing to the Left (negative x) to avoid the headwind on the right,
             breaking the geometric symmetry.
         """

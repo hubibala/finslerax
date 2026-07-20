@@ -133,7 +133,7 @@ class TestTransport(unittest.TestCase):
         """
         Verify that a position-dependent Riemannian metric produces
         analytically non-zero Christoffel symbols.
-        
+
         Uses metric g = diag(1, 1+x^2) on R^2.
         For this metric: Gamma^2_11 = x / (1+x^2) (non-zero when x != 0).
         """
@@ -166,7 +166,7 @@ class TestTransport(unittest.TestCase):
         """
         Riemannian transport on a Sphere (via projection-based Berwald).
         MUST preserve the norm (isometry) and tangency.
-        
+
         Uses a non-degenerate initial vector (1, 0, 0) that is NOT
         orthogonal to the path plane, forcing the projection to do
         real work at each step.
@@ -222,10 +222,10 @@ class TestTransport(unittest.TestCase):
     def test_randers_velocity_dependence(self):
         """
         Verify that Randers Berwald transport depends on velocity.
-        
+
         We compare Randers transport against a reference Riemannian transport
-        on the SAME path geometry. For Riemannian metrics, the Berwald 
-        connection Gamma(x) is velocity-independent, so doubling v with 
+        on the SAME path geometry. For Riemannian metrics, the Berwald
+        connection Gamma(x) is velocity-independent, so doubling v with
         the same discrete dt is purely a rescaling artifact. For Randers,
         the difference must exceed the Riemannian difference.
         """
@@ -262,10 +262,10 @@ class TestTransport(unittest.TestCase):
         """
         Verify parallel transport around a latitude circle on S^2
         reproduces a known holonomy angle.
-        
+
         Note: Our implementation uses g(x) = I_3 (ambient Euclidean), so
         Gamma^i_jk = 0 and the transport is entirely projection-based.
-        The resulting holonomy angle is 2*pi*cos(theta), which is the 
+        The resulting holonomy angle is 2*pi*cos(theta), which is the
         complement of the standard solid-angle formula 2*pi*(1-cos(theta)).
         Both are equivalent modulo 2*pi (cos(a) = cos(2*pi - a)).
         """
@@ -365,27 +365,27 @@ class TestTransport(unittest.TestCase):
     def test_poincare_half_plane_transport(self):
         """
         Transport a vector along a vertical geodesic in the Poincaré half-plane.
-        
+
         This is the key test that exercises the Berwald connection ODE with
         analytically non-zero Christoffel symbols. Unlike the sphere tests
         (where g(x)=I_3 gives Gamma=0), here the connection genuinely drives
         the transport.
-        
+
         Setup:
             Metric: ds^2 = (dx^2 + dy^2) / y^2  (constant negative curvature)
             Christoffel symbols:
                 Gamma^1_12 = Gamma^1_21 = -1/y
                 Gamma^2_11 = 1/y,  Gamma^2_22 = -1/y
-            
+
             Path: vertical geodesic y(t) = e^t, x(t) = 0, t in [0, 1]
             Velocity: v(t) = (0, e^t)
-            
+
         Analytic solution:
             The transport ODE with v = (0, y) gives dX/dt = X (both components),
             so X(t) = X(0) * e^t. For X(0) = (1, 0): X(1) = (e, 0).
-            
+
             The metric norm ||X||_g = ||X|| / y = e^t / e^t = 1 (preserved).
-            
+
         Critical check:
             If Gamma were incorrectly zero, the vector would stay at (1, 0),
             and the metric norm would drop to 1/e ≈ 0.368 (wrong).

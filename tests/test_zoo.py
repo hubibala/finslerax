@@ -20,7 +20,7 @@ class FlatPlane(Manifold):
     def to_tangent(self, x, v): return v
     def retract(self, x, delta): return x + delta
     def random_sample(self, key, shape):
-        return jax.random.normal(key, shape + (2,))
+        return jax.random.normal(key, (*shape, 2))
 
 class MockMesh(Manifold):
     """Minimal mock for DiscreteRanders testing."""
@@ -32,7 +32,7 @@ class MockMesh(Manifold):
     def to_tangent(self, x, v): return v
     def retract(self, x, delta): return x + delta
     def random_sample(self, key, shape):
-        return jax.random.normal(key, shape + (2,))
+        return jax.random.normal(key, (*shape, 2))
     def get_face_weights(self, x):
         return jnp.array([1.0, 0.0])
 

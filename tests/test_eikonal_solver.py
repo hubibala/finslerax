@@ -15,7 +15,7 @@ class DummyRandersMetric(AsymmetricMetric):
         self.wind_scale = float(wind_scale)
 
     def metric_fn(self, x, v):
-        H, W, lam = self.zermelo_data(x)
+        _H, _W, _lam = self.zermelo_data(x)
         # Re-implement metric_fn just for testing completeness or rely on Zermelo alone
         return jnp.sqrt(jnp.sum(v**2))
 
@@ -128,7 +128,7 @@ def _solve_probe(metric, n=61, d=0.5):
         metric, jnp.array([0.0, 0.0]), (-1.0, 1.0, -1.0, 1.0), (n, n)
     )
     ic = n // 2
-    off = int(round(d / (2.0 / (n - 1))))
+    off = round(d / (2.0 / (n - 1)))
     return T, ic, off
 
 

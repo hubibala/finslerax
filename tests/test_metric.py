@@ -34,7 +34,7 @@ class MockManifold(Manifold):
     def to_tangent(self, x, v): return v
     def retract(self, x, delta): return x + delta
     def random_sample(self, key, shape):
-        return jax.random.normal(key, shape + (3,))
+        return jax.random.normal(key, (*shape, 3))
 
 class EuclideanMetric(FinslerMetric):
     """F(x, v) = |v|. Batch-safe via axis=-1."""
