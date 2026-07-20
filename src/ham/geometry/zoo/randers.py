@@ -12,7 +12,7 @@ from ham.utils import GRAD_EPS, WIND_STIFFNESS, causal_wind_scale
 
 
 class Randers(AsymmetricMetric):
-    """Rigorous Randers Metric using Zermelo Navigation.
+    """Randers metric via Zermelo navigation.
 
     A Randers metric is an asymmetric Finsler metric defined by a Riemannian
     "sea" (H) and a drift "wind" field (W). The Zermelo strong-convexity bound

@@ -37,18 +37,17 @@ print(metric.arc_length(traj.xs),          # downwind cost  ≈ 1.19
 
 ---
 
-## Why HAM?
+## Features
 
 - **Metric-first design.** Define $F(x, v)$; the geodesic spray, fundamental
-  tensor $g_{ij}$, Berwald connection, and flag curvature all follow from
-  `jax.grad` / `jax.hessian`. You never hand-code a Christoffel symbol.
+  tensor $g_{ij}$, Berwald connection, and flag curvature follow from
+  `jax.grad` / `jax.hessian`, without hand-coding Christoffel symbols.
 - **Implicit dynamics.** The Euler–Lagrange equations are solved as a small
-  linear system per step, avoiding the $O(N^3)$ blow-up of explicit connection
+  linear system per step, avoiding the $O(N^3)$ cost of explicit connection
   coefficients.
-- **Asymmetric (Randers) metrics done right.** A built-in Zermelo
-  parameterization keeps the wind field causal ($\|W\|_h < 1$) and the metric
-  strongly convex, with a $C^1$ squashing function (no discontinuity at the
-  boundary).
+- **Asymmetric (Randers) metrics.** A built-in Zermelo parameterization keeps
+  the wind field causal ($\|W\|_h < 1$) and the metric strongly convex, using a
+  $C^1$ squashing function at the boundary.
 - **Four ways to find a geodesic.** Shoot from initial conditions
   (`ExponentialMap`), relax a boundary-value path locally (`AVBDSolver`) or
   globally (`GaussNewtonGeodesic`), or solve the arrival-time PDE on a grid/mesh

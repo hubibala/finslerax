@@ -153,8 +153,8 @@ def compute_analytical_normals(
     scalar volume directly. The gradients are trilinearly interpolated to the precise
     sub-voxel coordinates of the isosurface vertices.
 
-    This guarantees $C^1$ smooth, continuous surface normals suitable for high-fidelity
-    rendering or downstream geometric modeling operations (like generating wind fields).
+    This yields $C^1$ smooth, continuous surface normals suitable for rendering
+    or downstream geometric modeling (for example, generating wind fields).
 
     Args:
         triangles: Extracted triangle vertices. Shape ``(..., 3, 3)``.
