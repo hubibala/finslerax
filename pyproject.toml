@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [
-  { name = "HAM Research Team", email = "hubibala@protonmail.com" },
+  { name = "Balázs Attila Hubicska", email = "hubibala@protonmail.com" },
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
