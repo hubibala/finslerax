@@ -226,22 +226,3 @@ def flag_curvature_sample(
     return sectional_curvature(metric, x, t1, t2)
 
 
-# ---------------------------------------------------------------------------
-# Backward-compatibility alias
-# ---------------------------------------------------------------------------
-# The old name 'scalar_curvature' was mathematically incorrect (it computed a
-# single sectional curvature, not the Ricci trace). It is preserved as an
-# alias with a deprecation note for any code that references it by name.
-def scalar_curvature(metric: FinslerMetric, x: jnp.ndarray) -> jnp.ndarray:
-    """
-    .. deprecated::
-        This function is retained for backward compatibility only.
-        It is NOT the Ricci scalar curvature. For a single flag-curvature sample
-        use ``flag_curvature_sample(metric, x, key)`` explicitly.
-
-    Evaluates the flag curvature at a fixed canonical tangent plane (seed=42).
-    The result is direction-dependent and only equals the Gaussian curvature
-    for 2-dimensional surfaces.
-    """
-    key = jax.random.PRNGKey(42)
-    return flag_curvature_sample(metric, x, key)

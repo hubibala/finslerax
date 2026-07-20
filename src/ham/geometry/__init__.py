@@ -1,7 +1,6 @@
 from .curvature import (
     flag_curvature_sample,
     riemann_curvature_tensor,
-    scalar_curvature,
     sectional_curvature,
 )
 from .manifold import Manifold
@@ -42,6 +41,5 @@ __all__ = [
     "TriangularMesh",
     "flag_curvature_sample",
     "riemann_curvature_tensor",
-    "scalar_curvature",  # backward-compat alias
     "sectional_curvature",
 ]

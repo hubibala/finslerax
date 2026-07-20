@@ -89,7 +89,7 @@ def generate_sphere_vortex(n: int = 400, noise: float = 0.0):
 
 def generate_hyperboloid_vortex(n: int = 400, noise: float = 0.0):
     """Rotational flow on H^2 (upper sheet of two-sheeted hyperboloid).
-    
+
     Samples points near the tip (x0 close to 1) where the wind field
     is well-defined and avoids the exponential spread of random_sample.
     """
@@ -130,7 +130,7 @@ def generate_hyperboloid_vortex(n: int = 400, noise: float = 0.0):
 class DirectWindAlignmentLoss(LossComponent):
     """
     Aligns W(start) with the log_map displacement (start → end).
-    
+
     This is the core learning signal: the wind should point from
     start to end with the correct magnitude.
     """
@@ -226,7 +226,7 @@ def train_wind_field(manifold, dataset: SyntheticDataset,
                      batch_size: int = 64, seed: int = 2025):
     """
     Train a NeuralRanders metric to recover the wind field from pair data.
-    
+
     Uses direct alignment (MSE between W(start) and log_map(start, end)),
     which is far more stable than joint geodesic BVP optimization.
     """
@@ -292,12 +292,9 @@ class TestGeodesicLearning(unittest.TestCase):
         trained = train_wind_field(manifold, dataset, epochs=80, lr=5e-3)
 
         # Evaluate: true tangent direction at (x, y) is proportional to (-y, x)
-        eval_pts = jax.random.uniform(jax.random.PRNGKey(99), (100, 2),
-                                      minval=-1.5, maxval=1.5)
         def get_w(pt):
             _, W, _ = trained.zermelo_data(pt)
             return W
-        W_pred = jax.vmap(get_w)(eval_pts)
 
         # True displacement per point
         true_disp = jax.vmap(manifold.log_map)(dataset.starts[:100], dataset.ends[:100])
