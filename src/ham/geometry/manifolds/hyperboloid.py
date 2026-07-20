@@ -57,9 +57,7 @@ class Hyperboloid(Manifold):
         Overrides the Euclidean :meth:`Manifold.tangent_dot` default: the
         hyperboloid is embedded in Minkowski space, so the induced metric on
         each tangent space is the Lorentzian product ``<u, v>_L`` (which is
-        positive-definite when restricted to T_x M).  Lets generic consumers
-        (losses, VAE) obtain the correct inner product without reaching for the
-        private ``_minkowski_dot`` (review finding W-MK).
+        positive-definite when restricted to T_x M).
         """
         return self._minkowski_dot(u, v)
 
@@ -136,7 +134,8 @@ class Hyperboloid(Manifold):
         return self.exp_map(x, safe_delta)
 
     def random_sample(self, key: jax.Array, shape: tuple[int, ...] = ()) -> jax.Array:
-        """Samples uniformly on the hyperboloid upper sheet."""
+        """Samples points on the upper sheet via the exponential map of a
+        standard Gaussian in the tangent space at the apex (not area-uniform)."""
         spat_dim = self.intrinsic_dim
         v_spatial = jax.random.normal(key, (*shape, spat_dim))
         norm_v = jnp.linalg.norm(v_spatial, axis=-1, keepdims=True)

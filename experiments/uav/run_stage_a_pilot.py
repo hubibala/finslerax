@@ -19,7 +19,7 @@ so the frame/energy/filter machinery is exercised, not bypassed):
 Until the real corpus is downloaded (``ingest.download_logs``), the corpus here
 is synthetic PX4-convention raw flights with a known climb-cost ledger, so the
 gate is exercised deterministically. Swapping in real ``.ulg`` paths is a
-one-line change (``parse_ulog`` for ``_simulate``).
+one-line change (``parse_ulog`` in place of ``simulate_raw_flight``).
 
 Run:  python -m experiments.uav.run_stage_a_pilot
 Writes experiments/uav/visualizations/stage_a_pilot.png

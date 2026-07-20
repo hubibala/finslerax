@@ -28,7 +28,7 @@ def vortex_field(center, strength=1.0, decay=2.0):
 
 
 def main():
-    print("--- HAM Stiffness Fix Demo ---")
+    print("--- HAM Vortex Demo: solver behavior in a stiff metric ---")
 
     # 1. Setup Strong Vortex
     sphere = Sphere(radius=1.0)
@@ -55,7 +55,7 @@ def main():
     traj_relaxed = solver_relaxed.solve(metric, start, end, n_steps=40)
 
     # 4. Visualization
-    fig, ax = setup_3d_plot()
+    _fig, ax = setup_3d_plot()
     plot_sphere(ax, alpha=0.1)
 
     # Wind
@@ -77,9 +77,9 @@ def main():
     )
 
     ax.legend()
-    plt.title("Solver Stiffness Comparison\nNotice the Red line finding the 'D' shape!")
+    plt.title("Solver Stiffness Comparison\nRelaxed solver (red) follows the vortex; stiff solver (gray) stays nearly straight")
     print(
-        "Showing plot. The Red line should now curve significantly more than the Gray line."
+        "Showing plot. The relaxed solver (red) curves with the vortex; the stiff solver (gray) stays nearly straight."
     )
     plt.show()
 

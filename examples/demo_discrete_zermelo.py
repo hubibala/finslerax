@@ -15,7 +15,7 @@ from ham.vis import (
 
 # --- 1. Continuous Physics ---
 radius = 1.0
-sphere_cont = Sphere(radius)
+sphere_cont = Sphere(radius=radius)
 
 
 # Wind: Rotational around Z (Equatorial Trade Winds)
@@ -69,7 +69,7 @@ print(f"Energy Discrete Mesh path: {e_mesh:.4f}")
 # --- 4. Visualization ---
 fig, ax = setup_3d_plot()
 ax.set_title(
-    f"Zermelo S^2: Discrete Matches Continuous\\nEnergy: {e_rand:.2f} (Cont) vs {e_mesh:.2f} (Disc)"
+    f"Zermelo S^2: Discrete Matches Continuous\nEnergy: {e_rand:.2f} (Cont) vs {e_mesh:.2f} (Disc)"
 )
 
 plot_sphere(ax, alpha=0.05)

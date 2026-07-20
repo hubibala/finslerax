@@ -49,11 +49,11 @@ def plot_vector_field(
     )
 
 
-# --- FIXED FUNCTION ---
 def plot_trajectory(ax, traj, color="red", label=None, **kwargs):
-    """
-    Plots a 3D trajectory.
-    Now accepts **kwargs for alpha, linewidth, linestyle, etc.
+    """Plot a 3D trajectory.
+
+    Extra ``**kwargs`` (alpha, linewidth, linestyle, ...) are forwarded to
+    ``ax.plot``.
     """
     # Handle both raw arrays and SolverResult objects
     if hasattr(traj, "xs"):
@@ -71,9 +71,6 @@ def plot_trajectory(ax, traj, color="red", label=None, **kwargs):
 
     # Mark the start point (solid, opaque dot)
     ax.scatter(xs[0, 0], xs[0, 1], xs[0, 2], color=color, s=20, alpha=1.0)
-
-
-# ----------------------
 
 
 def plot_indicatrices(

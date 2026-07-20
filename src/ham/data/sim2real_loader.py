@@ -6,7 +6,7 @@ Adapted from Gahtan, Shpund & Bronstein (2026),
 
 Only ``Sim2RealFireLoader``, ``extract_arrival_times``, and
 ``find_ignition_point`` are retained here; the PyTorch-dependent
-``CovariateAdapter`` has been omitted as HAMTools uses JAX.
+``CovariateAdapter`` has been omitted as HAM uses JAX.
 
 Dataset folder structure expected at ``data_root``::
 
@@ -36,9 +36,15 @@ import os
 from typing import Optional
 
 import numpy as np
-from PIL import Image
 
 from ham.utils.config import DEFAULT_NP_DTYPE
+
+try:
+    from PIL import Image
+
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
 
 try:
     import rasterio
@@ -46,6 +52,13 @@ try:
     HAS_RASTERIO = True
 except ImportError:
     HAS_RASTERIO = False
+
+
+def _require_pil():
+    if not HAS_PIL:
+        raise ImportError(
+            "Pillow is required to load this dataset; install the [wildfire] extra."
+        )
 
 
 class Sim2RealFireLoader:
@@ -164,6 +177,7 @@ class Sim2RealFireLoader:
             with rasterio.open(filepath) as src:
                 return src.read(1).astype(DEFAULT_NP_DTYPE)
         # Fallback to PIL (works for simple single-band TIFs)
+        _require_pil()
         img = Image.open(filepath)
         return np.array(img, dtype=DEFAULT_NP_DTYPE)
 
@@ -188,6 +202,7 @@ class Sim2RealFireLoader:
             mask_files = glob.glob(os.path.join(mask_dir, "*.png"))
             mask_files = sorted(mask_files)
 
+        _require_pil()
         masks = []
         for f in mask_files:
             img = Image.open(f).convert("L")

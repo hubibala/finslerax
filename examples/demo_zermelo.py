@@ -15,7 +15,7 @@ from ham.vis import (
 
 # --- 1. Define the Physics ---
 radius = 1.0
-sphere_cont = Sphere(radius)
+sphere_cont = Sphere(radius=radius)
 
 
 # Wind: Strong rotation around Z-axis (Equatorial Trade Winds)
@@ -46,7 +46,7 @@ traj_riem = solver.solve(metric_riem, start, end, n_steps=40)
 print("Solving Randers (Zermelo)...")
 traj_rand = solver.solve(metric_randers, start, end, n_steps=40)
 
-# Calculate Energies using VMAP (Fixes dimensions error)
+# Calculate energies over the path with vmap
 batch_energy = jax.vmap(metric_randers.energy)
 e_riem = batch_energy(traj_riem.xs[:-1], traj_riem.vs).sum()
 e_rand = batch_energy(traj_rand.xs[:-1], traj_rand.vs).sum()

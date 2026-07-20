@@ -1,4 +1,4 @@
-"""Synthetic providers for session 1: an analytic planar arm, circle obstacles, demos.
+"""Synthetic providers: an analytic planar arm, circle obstacles, demos.
 
 These instantiate the :mod:`experiments.arm.interfaces` protocols with closed-form
 physics so the machinery can be proven before real data. The real counterparts

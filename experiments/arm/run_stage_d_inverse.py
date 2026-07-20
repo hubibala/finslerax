@@ -1,8 +1,8 @@
 """Stage D — the exact-drift gauge: what demonstrations can and cannot teach.
 
-The prior Stage D tried to recover the gravity drift from demonstrated *paths*
-and found it "weakly identified". That was not a numerical soft spot — it is a
-theorem (``spec/exact_drift_gauge_equivalence.md``): the gravity drift's Randers
+Recovering the gravity drift from demonstrated *paths* is only weakly
+identified — and that is not a numerical soft spot but a theorem
+(``spec/exact_drift_gauge_equivalence.md``): the gravity drift's Randers
 1-form ``β = gₛ·dU/λ`` is **exact**, and adding an exact form to a cost changes
 the value of every path but the choice of path not at all (Finsler projective
 invariance = potential-based reward shaping, verbatim). Path shape is
@@ -32,7 +32,7 @@ regimes — **G** (pure gravity, exact) and **G+R** (gravity + solenoidal vortex
    and the *entire* drift form on G+R — with the Hodge *split* of the recovered
    form only softly determined by a finite demo graph (harmonic ambiguity),
    reported as such.
-5. **De-circularization (L7b).** The eikonal arrival field of the recovered
+5. **De-circularization.** The eikonal arrival field of the recovered
    metric (a solver independent of AVBD) reproduces a held-out demo's cost.
 
 Run:  python -m experiments.arm.run_stage_d_inverse
@@ -112,12 +112,11 @@ def main():
     em, em_ref = ExponentialMap(max_steps=64), ExponentialMap(max_steps=96)
     ref, _ = em_ref.trace(base, A0, v0)
     strengths = np.array([0.05, 0.1, 0.2, 0.3])
-    dev_g, dev_r, asym_g = [], [], []
+    dev_g, dev_r = [], []
     for s in strengths:
         mg = build_arm_metric(arm, manifold=ang, gravity_strength=float(s))
         pg, _ = em.trace(mg, A0, v0)
         dev_g.append(float(polyline_deviation(pg, ref)))
-        asym_g.append(float(2.0 * jnp.abs(jnp.sum(segment_asymmetry(mg, pg)))))
         vw = VortexWind(arm, center=VORTEX["center"], strength=float(s) / 4.0,
                         width=VORTEX["width"])
         pv, _ = em.trace(build_arm_metric(arm, manifold=ang, wind_field=vw), A0, v0)
@@ -168,7 +167,7 @@ def main():
         span = [shape_runs[s][-1] for s in seeds]
         print(f"  3. #demos={k:2d}: potential R²  shape={min(span):+.2f}..{max(span):+.2f} "
               f"(3 seeds)  timing={timing_curve[-1]:+.3f}")
-    pot_final = ft  # timing-channel fit on all demos (used for L7b)
+    pot_final = ft  # timing-channel fit on all demos (used by the de-circularization check)
 
     # ------------------------------------------------------------------ 4a.
     # Convex potential recovery from round-trip cost asymmetries (regime G).
@@ -200,8 +199,8 @@ def main():
           f"(soft Hodge split: U R²={r2_ugr:.2f}, rot cos={cos_rot:.2f})")
 
     # ------------------------------------------------------------------ 5.
-    # L7b — de-circularization: eikonal on the timing-recovered metric
-    # reproduces a held-out demo's cost (eikonal is independent of AVBD).
+    # De-circularization: eikonal on the timing-recovered metric reproduces
+    # a held-out demo's cost (eikonal is independent of AVBD).
     ho = _demos(mG, 1, jax.random.PRNGKey(99))[0]
     learned_metric = make_metric(pot_final)
     eik = EikonalPlanner(max_iters=500)
@@ -209,7 +208,7 @@ def main():
     T = eik.arrival_field(learned_metric, ho[0], extent, (101, 101))
     t_eik = float(eik.sample(T, extent, ho[-1]))
     t_true = float(kinetic_cost(mG, ho))
-    print(f"  5. L7b de-circularization: held-out true cost={t_true:.4f}  "
+    print(f"  5. de-circularization: held-out true cost={t_true:.4f}  "
           f"eikonal(learned)={t_eik:.4f}  rel-err={abs(t_eik - t_true) / t_true:.3f}")
 
     _figure(arm, base, demosG, demosGR, diag_solver, strengths, dev_g, dev_r,

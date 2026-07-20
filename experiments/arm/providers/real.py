@@ -1,10 +1,10 @@
-"""Real-data providers — STUBS for the follow-up session.
+"""Real-data providers — stubs for the real-data follow-up.
 
 These lock the signatures of the real :mod:`experiments.arm.interfaces`
 implementations so the synthetic→real transition is a provider swap. Filling
 them in (URDF FK/inertia via pinocchio, a MotionBenchMaker/MπNets scene, a
-learned CDF clearance field, logged teleop demos) is a separate research
-session; nothing downstream changes when they land.
+learned CDF clearance field, logged teleop demos) is separate follow-up work;
+nothing downstream changes when they land.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import jax
 
 from ham.geometry.manifold import Manifold
 
-_TODO = "real provider is a follow-up session; implement against the locked interface"
+_TODO = "real provider is follow-up work; implement against the locked interface"
 
 
 class URDFRobot:

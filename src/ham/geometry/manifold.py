@@ -1,5 +1,5 @@
 """
-Abstract Manifold base class — the topological domain for HAMTools.
+Abstract Manifold base class — the topological domain for HAM.
 
 This module defines :class:`Manifold`, the abstract base class that
 specifies the domain M and its constraints (projection, tangent spaces,
@@ -222,11 +222,6 @@ class Manifold(eqx.Module, ABC):
         TriangularMesh, EuclideanSpace).  Manifolds whose ambient space carries
         an indefinite metric (e.g. :class:`~ham.geometry.manifolds.hyperboloid.Hyperboloid`,
         which lives in Minkowski space) must override this.
-
-        Providing this on the ABC removes the need for downstream code (losses,
-        VAE) to reach into manifold-private helpers such as ``_minkowski_dot``,
-        which would raise ``AttributeError`` on non-hyperboloid manifolds
-        (review finding W-MK).
 
         Args:
             x: Base point on M (unused for position-independent ambient metrics,

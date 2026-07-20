@@ -67,7 +67,7 @@ class VectorField(eqx.Module):
 
     In the Zermelo parameterization of Randers metrics (see MATH_SPEC § 5),
     this network produces the raw wind field W^i(x). The strong-convexity
-    constraint ||W||_h < 1 is enforced downstream by the RandersMetric.
+    constraint ||W||_h < 1 is enforced downstream by the Randers metric.
 
     Uses tanh activation for C^∞ smoothness, which is critical for higher-order
     autodiff through the spray and Berwald connection.

@@ -13,10 +13,14 @@ from .losses import LossComponent
 
 
 def sgld_step(x, ebm_model, step_size, noise_scale, key):
-    """A single step of Stochastic Gradient Langevin Dynamics.
+    r"""A single step of Stochastic Gradient Langevin Dynamics.
 
-    x_{t+1} = x_t + step_size * \nabla \\log p(x_t) + noise_scale * N(0, I)
-    Since p(x) \\propto \\exp(-E(x)), \nabla \\log p(x) = -\nabla E(x).
+    x_{t+1} = x_t + step_size * \nabla \log p(x_t) + noise_scale * N(0, I)
+    Since p(x) \propto \exp(-E(x)), \nabla \log p(x) = -\nabla E(x).
+
+    ``step_size`` and ``noise_scale`` are decoupled; exact Langevin sampling
+    would require ``noise_scale = sqrt(2 * step_size)``. The decoupled form is
+    the usual choice for contrastive-divergence-style training.
     """
     grad_fn = jax.grad(ebm_model)
     score = -grad_fn(x)

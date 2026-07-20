@@ -1,4 +1,4 @@
-"""Canonical numerical stability primitives for HAMTools.
+"""Canonical numerical stability primitives for HAM.
 
 This module centralises all epsilon constants and gradient-safe numerical
 operations used throughout the library. Every constant corresponds to a specific
@@ -23,7 +23,7 @@ __all__ = [
 ]
 
 # ---------------------------------------------------------------------------
-# Canonical numerical constants (P2: consolidate magic numbers)
+# Canonical numerical constants
 # ---------------------------------------------------------------------------
 
 # These floors scale with the working precision (see ham.utils.config.eps):
@@ -118,7 +118,7 @@ def causal_wind_scale(norm, max_speed, stiffness=WIND_STIFFNESS):
     in ``(0, 1)``) and satisfies ``sup_r phi(r) = max_speed``, approached from
     below. The returned scale is ``phi(norm) / norm``.
 
-    Why not ``max_speed * tanh(norm) / norm`` (the historical squash)?
+    Why not ``max_speed * tanh(norm) / norm`` (the common tanh squash)?
         ``tanh`` has slope ``max_speed < 1`` at the origin, so it bends *every*
         wind — e.g. a requested ``||W|| = 0.5`` silently becomes ``~0.46``.
         This clamp is instead the identity to within

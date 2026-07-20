@@ -88,10 +88,8 @@ class ZermeloAlignmentLoss(LossComponent[GenerativeModel]):
         else:
             W = jnp.zeros_like(u_lat)
 
-        # Generic tangent inner product / norm (Euclidean ambient by default,
-        # Minkowski on the hyperboloid) -- avoids the hyperboloid-private
-        # ``_minkowski_*`` coupling that raised AttributeError on other
-        # manifolds (review finding W-MK).
+        # Generic tangent inner product / norm: Euclidean ambient by default,
+        # Minkowski on the hyperboloid.
         norm_w = model.manifold.tangent_norm(z_mean, W)
         norm_v = model.manifold.tangent_norm(z_mean, u_lat)
 
@@ -111,8 +109,8 @@ class GeodesicSprayLoss(LossComponent[GenerativeModel]):
         A flat metric trivially minimizes it regardless of the data. Prefer
         :class:`EulerLagrangeResidualLoss`, which penalizes the Euler-Lagrange
         residual of the observed trajectory and is therefore zero exactly when
-        the observed path *is* a geodesic of the learned metric (review finding
-        W-GS). This component is retained as an optional flatness regularizer.
+        the observed path *is* a geodesic of the learned metric. This component
+        is retained as an optional flatness regularizer.
     """
 
     def __init__(self, weight: float = 1.0):
@@ -187,8 +185,8 @@ class ContrastiveAlignmentLoss(LossComponent[GenerativeModel]):
             W_out = jnp.zeros_like(parent_z)
         v_tan = model.manifold.log_map(parent_z, child_z)
 
-        # Generic tangent inner product (W-MK): Euclidean by default, Minkowski
-        # on the hyperboloid, without reaching into manifold-private helpers.
+        # Generic tangent inner product: Euclidean by default, Minkowski on the
+        # hyperboloid.
         align_score = -model.manifold.tangent_dot(parent_z, W_out, v_tan)
         return align_score * self.weight
 
@@ -310,8 +308,8 @@ class EulerLagrangeResidualLoss(LossComponent[GenerativeModel]):
     The Lagrangian differentiated here is the model's own ``metric.energy``
     (L = 1/2 F^2) via autodiff -- *not* a hand-rolled smoothed Randers surrogate.
     This guarantees the residual measures geodesy of the exact metric the rest
-    of the pipeline trains (review finding W-EL); for a Randers metric the true
-    energy uses the Zermelo discriminant form with the 1/lambda factor, which a
+    of the pipeline trains; for a Randers metric the true energy uses the
+    Zermelo discriminant form with the 1/lambda factor, which a
     ``sqrt(v^T H v) - <W,v>`` surrogate does not reproduce.
     """
 
@@ -350,9 +348,8 @@ class EulerLagrangeResidualLoss(LossComponent[GenerativeModel]):
 
             # The true Lagrangian the model optimizes: L(z, v) = 1/2 F(z, v)^2.
             # Differentiating model.metric.energy directly (rather than a
-            # hand-rolled smoothed Randers surrogate) is the rigorous form --
-            # it is exactly the energy whose spray the rest of the geometry
-            # stack derives (review finding W-EL).
+            # hand-rolled smoothed Randers surrogate) is exactly the energy
+            # whose spray the rest of the geometry stack derives.
             L = model.metric.energy
 
             # d/dt(dL/dv) = Hess_v(L) a + d/dz(dL/dv) v   along the path.
@@ -460,11 +457,6 @@ class KinematicPriorLoss(LossComponent[GenerativeModel]):
         return jnp.mean(loss) * self.weight
 
 
-# =====================================================================
-# THE NEW FINSLER ACTION MATCHING LOSS
-# =====================================================================
-
-
 class FinslerActionMatchingLoss(LossComponent[GenerativeModel]):
     """Minimizes the Finsler energy of observed transitions.
 
@@ -535,11 +527,6 @@ class WindAssistedTrajectoryAlignmentLoss(LossComponent[GenerativeModel]):
         return mse_loss * self.weight
 
 
-# =====================================================================
-# SOTA LOSS FUNCTIONS: FINSLERIAN FLOW MATCHING & EIKONAL ALIGNMENT
-# =====================================================================
-
-
 class FinslerianFlowMatchingLoss(LossComponent[GenerativeModel]):
     """
     Learns the Randers wind field W_theta(z) by matching it to the empirical drift.
@@ -601,11 +588,6 @@ class FinslerianFlowMatchingLoss(LossComponent[GenerativeModel]):
         loss = 1.0 - alignment
 
         return jnp.mean(loss) * self.weight
-
-
-# =====================================================================
-# ARRIVAL TIME LOSS FOR METRIC RECOVERY (Gahtan Experiment)
-# =====================================================================
 
 
 class ArrivalTimeLoss(eqx.Module):

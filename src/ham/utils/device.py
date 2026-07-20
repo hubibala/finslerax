@@ -1,4 +1,4 @@
-"""Device configuration utilities for HAMTools.
+"""Device configuration utilities for HAM.
 
 Provides a thin wrapper around JAX's device selection mechanism, allowing
 experiments and the training pipeline to target CPU or GPU with a single
