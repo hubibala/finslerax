@@ -1,7 +1,7 @@
 """The validation ladder as a runnable gate — machinery hardening before the science.
 
 Run ``python -m experiments.arm.validate`` to check each rung and print a table.
-The posture mirrors ``experiments/marine``: the experiment ships its own
+The experiment ships its own
 independent ground-truth cross-checks, not just pretty paths. The L7 rungs gate
 the *identifiability structure* of Stage D (the exact-drift gauge), not blind
 recovery: L7 asserts path-shape inversion succeeds/fails exactly where the

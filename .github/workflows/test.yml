@@ -28,7 +28,7 @@ jobs:
 
     - name: Ruff
       run: |
-        uv run ruff check src/ tests/ examples/
+        uv run ruff check src/ tests/ examples/ experiments/
 
   test:
     runs-on: ubuntu-latest

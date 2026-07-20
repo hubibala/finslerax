@@ -211,7 +211,7 @@ def main() -> int:
          f"not accuracy)")
 
     # ---- figure ----
-    sc0, _fires0, cov0, d_null0, _res0 = first
+    _sc0, _fires0, cov0, d_null0, _res0 = first
     fig, axes = plt.subplots(1, 4, figsize=(18.5, 4.4))
     im = axes[0].imshow(cov0, cmap="viridis")
     plt.colorbar(im, ax=axes[0], shrink=0.85)

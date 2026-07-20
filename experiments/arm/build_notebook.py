@@ -35,7 +35,7 @@ md(r"""
 # Energy-Optimal Arm Motion as Finsler Geometry — and What Demonstrations Can Teach
 
 This notebook is a walkthrough of the `experiments/arm` study built on the HAM
-framework — the configuration-space twin of the marine-navigation study. It develops
+framework. It develops
 one idea carefully: **a gravity-loaded robot arm's cost of motion is an *asymmetric*
 metric on its configuration space**, and HAM's differentiable Randers machinery plans
 with it, constrains it, and — the deepest part — tells us *exactly which parts of it
@@ -153,7 +153,7 @@ def arm_trace(robot, q, color, width=5, name=None, opacity=1.0):
 
 
 def player(fig, frames, prefix="step "):
-    """Attach Play/Pause + a scrub slider (the marine-notebook pattern)."""
+    """Attach Play/Pause + a scrub slider."""
     play = dict(label="▶ Play", method="animate",
                 args=[None, {"frame": {"duration": 140, "redraw": True},
                              "fromcurrent": True, "transition": {"duration": 0}}])

@@ -332,8 +332,8 @@ def direction_coverage(normal_list: list[np.ndarray], block: int = 1) -> np.ndar
 
     ``λ_min/λ_max`` of the accumulated structure tensor — 0 where every fire
     crossed in the same (or no) direction (odd channel invisible), → 1 for
-    isotropic coverage. The field analogue of the UAV ``ledger_conditioned``
-    gate: computable from observations alone, before any fit.
+    isotropic coverage. An a-priori identifiability gate: computable from
+    observations alone, before any fit.
 
     ``block > 1`` pools the structure tensor over ``block x block`` patches
     before the eigen-ratio (returning the coarse (H//block, W//block) map).

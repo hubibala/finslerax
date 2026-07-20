@@ -79,7 +79,7 @@ class PlanarArm(eqx.Module):
     def inertia(self, q: jax.Array) -> jax.Array:
         """Mass matrix ``M(q) = Σ_i m_i J_iᵀ J_i`` from the tip Jacobians."""
         masses = jnp.asarray(self.masses, dtype=q.dtype)
-        tips = lambda qq: self.link_points(qq)[1:]  # noqa: E731 — (n, 2)
+        tips = lambda qq: self.link_points(qq)[1:]
         J = jax.jacobian(tips)(q)  # (n, 2, n)
         return jnp.einsum("i,iaj,iak->jk", masses, J, J)
 

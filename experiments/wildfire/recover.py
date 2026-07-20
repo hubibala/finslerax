@@ -6,7 +6,7 @@ Two estimators live here:
   ``(H_grid, W_grid)`` through the differentiable eikonal solver against one or
   more observed fires. Multi-fire is the multi-source identifiability
   mechanism; single-fire is the confounded negative control (Stage W-A gate).
-* :func:`recalibrate` — the few-shot scene gauge refit (UAV Stage-D recipe):
+* :func:`recalibrate` — the few-shot scene gauge refit:
   freeze everything, refit only a global time scale ``s`` (closed-form given
   the wind multiplier) and a wind multiplier ``c`` (1-D grid + refine), from
   the first K hours of a new fire.

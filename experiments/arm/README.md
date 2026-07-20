@@ -1,7 +1,7 @@
 # HAM Robot-Arm Geodesics — Asymmetric C-Space Cost and the Exact-Drift Gauge
 
-A physically-grounded experiment built on the HAM framework (the AVBD twin of
-`experiments/marine`): **energy-optimal motion planning as geodesics of a
+A physically-grounded experiment built on the HAM framework: **energy-optimal
+motion planning as geodesics of a
 layered Randers/Finsler metric on configuration space**, with gravity as a
 joint-space "wind", obstacles folded into the metric, exact task constraints
 via the Augmented Lagrangian, and — the capstone — a *theorem-grade* treatment
@@ -185,4 +185,4 @@ Figures are written to `experiments/arm/visualizations/`.
   (`H¹ ≠ 0`) are closed but not exact — loop demos around the torus would
   expose the topological corner of the gauge story (§5.1 of the note).
 * **More constraints:** any equality `c(q) = 0` plugs into the ALM; inequality
-  physics belongs in a penalty/continuation layer as in the marine experiment.
+  physics belongs in a penalty/continuation layer.
