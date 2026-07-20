@@ -94,6 +94,38 @@ class TestGaussNewtonGeodesic(unittest.TestCase):
         self.assertEqual(traj.xs.shape, (9, D))
         self.assertTrue(np.all(np.isfinite(np.array(traj.xs))))
 
+    def test_block_thomas_matches_dense_solve(self):
+        """_block_thomas is exact for non-commuting blocks (regression: the forward
+        elimination must use A_k @ inv(Bprev), not inv(Bprev) @ A_k)."""
+        from ham.solvers.gauss_newton import _block_thomas
+
+        rng = np.random.RandomState(0)
+        n, D = 6, 3
+        A = np.zeros((n, D, D), np.float64)
+        B = np.zeros((n, D, D), np.float64)
+        C = np.zeros((n, D, D), np.float64)
+        for k in range(n):
+            M = rng.randn(D, D)
+            B[k] = M @ M.T + 6.0 * np.eye(D)
+        for k in range(1, n):
+            A[k] = rng.randn(D, D)
+            C[k - 1] = A[k].T  # Hessian symmetry
+        rhs = rng.randn(n, D)
+
+        H = np.zeros((n * D, n * D))
+        for k in range(n):
+            H[k * D:(k + 1) * D, k * D:(k + 1) * D] = B[k]
+            if k > 0:
+                H[k * D:(k + 1) * D, (k - 1) * D:k * D] = A[k]
+                H[(k - 1) * D:k * D, k * D:(k + 1) * D] = C[k - 1]
+        x_dense = np.linalg.solve(H, rhs.reshape(-1)).reshape(n, D)
+
+        x_bt = np.asarray(
+            _block_thomas(jnp.asarray(A), jnp.asarray(B), jnp.asarray(C),
+                          jnp.asarray(rhs), 0.0)
+        )
+        self.assertLess(float(np.max(np.abs(x_bt - x_dense))), 1e-5)
+
     def test_finite_on_n_inner_one(self):
         """n_steps=2 (a single interior vertex) is handled by block-Thomas."""
         D = 3

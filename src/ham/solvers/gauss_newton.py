@@ -2,9 +2,8 @@
 
 Where :class:`~ham.solvers.avbd.AVBDSolver` relaxes the discrete path with
 *local* Gauss-Seidel gradient steps — whose convergence suffers the classic
-O(N^2) critical slowing down of a 1-D Laplacian relaxation (see
-``spec/AVBD_LATENT_FINDINGS_2026-06-14.md``) — this solver takes a *global*
-second-order step over the whole path at once.
+O(N^2) critical slowing down of a 1-D Laplacian relaxation — this solver takes
+a *global* second-order step over the whole path at once.
 
 The discrete path energy E(x_1, ..., x_{N-1}) with fixed endpoints has a Hessian
 that is **block-tridiagonal** with D x D blocks, because each segment energy
@@ -91,14 +90,15 @@ def _block_thomas(A, B, C, rhs, mu):
     Diagonal blocks B[k], sub-diagonal A[k] (couples to k-1), super-diagonal C[k]
     (couples to k+1).  Returns x of shape (n, D).  Robust to n == 1.
     """
-    n, D = rhs.shape
+    _n, D = rhs.shape
     eye = jnp.eye(D, dtype=B.dtype)
     Bd = B + mu * eye
 
     def fwd(carry, inp):
         Bprev, gprev = carry
         A_k, B_k, C_prev, r_k = inp
-        w = jax.scipy.linalg.solve(Bprev, A_k)  # A_k @ inv(Bprev)
+        # w = A_k @ inv(Bprev)  solved as  Bprev^T @ w^T = A_k^T
+        w = jax.scipy.linalg.solve(Bprev.T, A_k.T).T
         Bnew = B_k - w @ C_prev
         rnew = r_k - w @ gprev
         return (Bnew, rnew), (Bnew, rnew)
@@ -174,7 +174,6 @@ class GaussNewtonGeodesic(eqx.Module):
         Returns:
             A :class:`~ham.solvers.avbd.Trajectory`.
         """
-        D = p_start.shape[0]
         n_inner = n_steps - 1
 
         if init_path is None:
