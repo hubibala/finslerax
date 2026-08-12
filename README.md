@@ -92,7 +92,6 @@ Optional extras:
 | `dev` | pytest, ruff, mypy, matplotlib, jupyter, plotly | development & examples |
 | `viz` | matplotlib, plotly | the `ham.vis` plotting helpers |
 | `gpu` | `jax[cuda12]` | NVIDIA GPU acceleration |
-| `wildfire` | Pillow, rasterio | the wildfire terrain application |
 
 > The core install carries only the geometry/solver stack (JAX, Equinox, Optax,
 > NumPy, SciPy).
@@ -127,8 +126,8 @@ jax.config.update("jax_enable_x64", True)
 import ham   # now float64
 ```
 
-That single switch flips the whole stack — core geometry, solvers, experiments,
-and examples — because precision is decided at the data-construction boundary and
+That single switch flips the whole stack — core geometry, solvers, and
+examples — because precision is decided at the data-construction boundary and
 the solvers are dtype-following. Query or use it via `ham.utils.config`:
 
 ```python
