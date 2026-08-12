@@ -1,0 +1,49 @@
+name: Bug report
+description: Something computes the wrong answer, crashes, or contradicts the docs.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happens, and what should happen instead
+      description: For numerical issues, give the observed and expected values with a tolerance.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproducible example
+      description: The smallest script that shows it. Please include imports.
+      render: python
+    validations:
+      required: true
+
+  - type: dropdown
+    id: precision
+    attributes:
+      label: Precision
+      description: Numerical bugs very often appear in one precision only.
+      options:
+        - float32 (default)
+        - float64 (JAX_ENABLE_X64=1)
+        - both
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Output of `python -c "import ham, jax; print(ham.__version__, jax.__version__)"`
+      placeholder: "1.0.0 0.4.35"
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Platform and accelerator
+      placeholder: "Linux, CPU / Windows, RTX 4070 CUDA 12"
+    validations:
+      required: true

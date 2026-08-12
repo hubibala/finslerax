@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ "main" ]
 
+# Supersede in-flight runs for the same ref; a stale matrix is never the answer.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     runs-on: ubuntu-latest
@@ -26,9 +31,66 @@ jobs:
       run: |
         uv sync --all-extras
 
-    - name: Ruff
+    # --no-cache: a warm ruff cache has been observed reporting stale results
+    # after files change. CI is cheap; determinism is worth more here.
+    - name: Ruff (lint)
       run: |
-        uv run ruff check src/ tests/ examples/
+        uv run ruff check --no-cache src/ tests/ examples/
+
+    - name: Ruff (format)
+      run: |
+        uv run ruff format --check --no-cache src/ tests/ examples/
+
+  types:
+    runs-on: ubuntu-latest
+    # Advisory, not a merge gate: the annotations are being tightened
+    # incrementally. Make this blocking once the error count reaches zero.
+    continue-on-error: true
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Install dependencies
+      run: |
+        uv sync --all-extras
+
+    - name: Mypy
+      run: |
+        uv run mypy src/ham
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        enable-cache: true
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    # Catches packaging rot — a bad manifest, an unbuildable sdist, or README
+    # markup that PyPI would reject — before a release does.
+    - name: Build sdist and wheel
+      run: |
+        uv build
+
+    - name: Check distribution metadata
+      run: |
+        uvx twine check dist/*
 
   test:
     runs-on: ubuntu-latest

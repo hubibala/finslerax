@@ -1,0 +1,26 @@
+name: Feature request
+description: A metric, manifold, solver, or capability that is missing.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What is missing
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: What would you use it for
+      description: A concrete use case helps far more than a general one.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reference
+    attributes:
+      label: Reference
+      description: >
+        For new geometry, a paper or textbook reference for the definition and
+        its conventions. Sign and coordinate conventions matter here.
