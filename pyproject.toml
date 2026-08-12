@@ -42,7 +42,7 @@ dev = [
 viz = [
     # ham.vis: matplotlib/plotly are imported at module level.
     "matplotlib>=3.5",
-    "plotly>=5.0",
+    "plotly>=6.9.0",
 ]
 gpu = [
     # Install CUDA 12 accelerated jaxlib. Requires NVIDIA GPU + CUDA 12 drivers.
