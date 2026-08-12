@@ -6,7 +6,7 @@
 
 ## Abstract
 
-This document defines the mathematical specifications for `HAMTools`, a differentiable geometry library designed for Finslerian representation learning. We construct a strict hierarchy of geometric spaces—Euclidean, Riemannian, and Randers—unified under the energy-based formalism. We rigorously derive the *Geodesic Spray* coefficients using the Euler-Lagrange equations. Crucially, we adopt the **Berwald Connection** for parallel transport, as it is the unique connection directly induced by the geodesic spray, providing a natural framework for analyzing path stability and parallel vector fields without enforcing artificial metric compatibility.
+This document defines the mathematical specification of HAM, a differentiable geometry library for Finslerian representation learning. It sets out a hierarchy of geometric spaces — Euclidean, Riemannian, Randers — unified under the energy-based formalism, and derives the *geodesic spray* coefficients from the Euler-Lagrange equations. Parallel transport uses the **Berwald connection**, the unique connection induced directly by the geodesic spray, which allows path stability and parallel vector fields to be analysed without imposing metric compatibility.
 
 ---
 
@@ -117,8 +117,8 @@ We verify that our implementation generalizes standard geometries.
 | **Hyperboloid** | Minkowskian $\sqrt{\langle v, v\rangle_L}$ | Quadratic in $v$ | Levi-Civita equivalent |
 
 ### 4.1. Surface Formulations and Instabilities
-`HAMTools` provides strict analytical sub-manifolds (e.g., `Sphere`, `Hyperboloid`, `Torus`, `Paraboloid`). The Hyperboloid models the upper sheet in Minkowski space and features exact $\cosh$/$\sinh$ exponential and logarithmic maps.
-*Critical Note:* Integrating these exact geometric maps (especially for the Sphere and Hyperboloid) with deep neural learning loops inside the VAE currently causes severe numerical instability resulting in solver collapse.
+HAM provides exact analytical sub-manifolds (`Sphere`, `Hyperboloid`, `Torus`, `Paraboloid`). The Hyperboloid models the upper sheet in Minkowski space, with exact $\cosh$/$\sinh$ exponential and logarithmic maps.
+*Limitation:* combining these exact maps with a deep learning loop inside a generative model is numerically fragile; the strongly curved cases (Sphere, Hyperboloid) can drive the solver to collapse. A flat `EuclideanSpace` latent is the recommended default.
 
 ---
 
@@ -161,10 +161,11 @@ requested wind of, say, $r=0.5$ is returned as $0.5$ (to $\sim 10^{-6}$), and be
 is confined to a shell of width $\sim 1/\kappa$ around the causal boundary, where it
 is unavoidable. The stiffness $\kappa$ defaults to `ham.utils.WIND_STIFFNESS`.
 
-> **Historical note.** Earlier versions used $s = (1-\varepsilon)\tanh(r)/r$. Because
-> $\tanh$ has slope $<1$ at the origin, that map bent *every* wind — e.g.
-> $0.5 \mapsto 0.46$ — silently distorting valid currents. The smooth-min above
-> removes this distortion while retaining $C^\infty$ regularity and the strict bound.
+> **Why not $\tanh$.** The obvious alternative $s = (1-\varepsilon)\tanh(r)/r$ also
+> enforces the bound smoothly, but $\tanh$ has slope $<1$ at the origin, so it bends
+> *every* wind — $0.5 \mapsto 0.46$ — silently distorting fields that were already
+> causal. The smooth-min above is $C^\infty$ and strictly bounded without that
+> distortion.
 
 For **trusted, prescribed** fields (e.g. a known ocean current already satisfying
 $\|W\|_h < 1$), `Randers(..., wind_mode="raw")` bypasses the clamp entirely and passes

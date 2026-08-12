@@ -1,4 +1,4 @@
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import equinox as eqx
 import jax
@@ -32,9 +32,9 @@ class GeodesicLearningSolver(eqx.Module):
         p_start: jax.Array,
         p_end: jax.Array,
         n_steps: int = 10,
-        constraints: Optional[list[Callable[[jax.Array], jax.Array]]] = None,
+        constraints: list[Callable[[jax.Array], jax.Array]] | None = None,
         train_mode: bool = True,
-        key: Optional[jax.Array] = None,
+        key: jax.Array | None = None,
     ) -> Trajectory:
         if constraints is not None and len(constraints) > 0:
             raise NotImplementedError(

@@ -4,19 +4,17 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![JAX](https://img.shields.io/badge/backend-JAX-green.svg)](https://github.com/google/jax)
 
-**HAM** (*Holonomic Association Model*) is a JAX-native library for **learnable
-Finsler geometry**. You define a
-cost function $F(x, v)$ — the price of moving through point $x$ in direction $v$ —
-and HAM auto-differentiates everything that follows: geodesics, the geodesic
-spray, curvature, and parallel transport. Because metrics are
-[Equinox](https://github.com/patrick-kidger/equinox) modules, $F$ can be a neural
-network, and the whole pipeline is differentiable end-to-end.
+**HAM** (*Holonomic Association Model*) is a JAX-native library for learnable
+Finsler geometry. You supply a cost function $F(x, v)$ — the price of moving
+through point $x$ in direction $v$ — and the library derives what follows:
+geodesics, the geodesic spray, curvature, and parallel transport. Metrics are
+[Equinox](https://github.com/patrick-kidger/equinox) modules, so $F$ may be a
+neural network and the whole pipeline stays differentiable end to end.
 
-Finsler geometry generalizes Riemannian geometry by dropping the requirement
-that cost be symmetric: travelling **east** can be cheaper than travelling
-**west**. That single relaxation is what lets HAM model wind, ocean currents,
-cell-differentiation arrows, and wildfire spread as *geometry* rather than as
-bolted-on vector fields.
+Finsler geometry drops the Riemannian requirement that cost be symmetric.
+Travelling east can be cheaper than travelling west, which is what makes wind,
+ocean currents, gravity in a robot's joint space, and spreading fronts
+expressible as geometry.
 
 ```python
 from ham.geometry import Randers, EuclideanSpace
@@ -39,33 +37,31 @@ print(metric.arc_length(traj.xs),          # downwind cost  ≈ 1.19
 
 ## Features
 
-- **Metric-first design.** Define $F(x, v)$; the geodesic spray, fundamental
-  tensor $g_{ij}$, Berwald connection, and flag curvature follow from
-  `jax.grad` / `jax.hessian`, without hand-coding Christoffel symbols.
-- **Implicit dynamics.** The Euler–Lagrange equations are solved as a small
-  linear system per step, avoiding the $O(N^3)$ cost of explicit connection
-  coefficients.
-- **Asymmetric (Randers) metrics.** A built-in Zermelo parameterization keeps
-  the wind field causal ($\|W\|_h < 1$) and the metric strongly convex, using a
-  $C^1$ squashing function at the boundary.
-- **Four ways to find a geodesic.** Shoot from initial conditions
-  (`ExponentialMap`), relax a boundary-value path locally (`AVBDSolver`) or
-  globally (`GaussNewtonGeodesic`), or solve the arrival-time PDE on a grid/mesh
-  (`EikonalSolver` family).
-- **Learnable metrics.** Neural Riemannian/Randers metrics, decoder-pullback
-  metrics for latent spaces, energy-based and kernel wind fields — all trainable.
-- **A declarative training pipeline.** Compose multi-phase schedules with
-  per-phase parameter freezing and a library of geometry-aware losses.
+- Define $F(x, v)$ and the geodesic spray, fundamental tensor $g_{ij}$, Berwald
+  connection and flag curvature follow from `jax.grad` and `jax.hessian`. No
+  hand-coded Christoffel symbols.
+- The Euler–Lagrange equations are solved as a small linear system per step,
+  avoiding the $O(N^3)$ cost of forming connection coefficients explicitly.
+- Randers metrics carry a Zermelo parameterization that keeps the wind causal
+  ($\|W\|_h < 1$) and the metric strongly convex, using a $C^1$ squashing
+  function at the boundary.
+- Four routes to a geodesic: shoot from initial conditions (`ExponentialMap`),
+  relax a boundary-value path locally (`AVBDSolver`) or globally
+  (`GaussNewtonGeodesic`), or solve the arrival-time PDE on a grid or mesh
+  (the `EikonalSolver` family).
+- Neural Riemannian and Randers metrics, decoder-pullback metrics for latent
+  spaces, and energy-based and kernel wind fields are all trainable.
+- Multi-phase training schedules with per-phase parameter freezing compose from
+  a library of geometry-aware losses.
 
-### Why "Holonomic Association Model"?
+### Why "Holonomic Association Model"
 
-The name records the program behind the library: represent context as
-geometry. Parallel transport moves a representation between contexts along a
-path, and holonomy — the path dependence of that transport — is what the
-geometry "remembers"; associations between states become geodesics of a
-learned, possibly asymmetric, metric. The library is useful far beyond that
-program (navigation, robotics, spreading fronts), but the transport-and-holonomy
-machinery it required is why every piece here exists.
+The name records the research program the library grew out of: representing
+context as geometry. Parallel transport moves a representation between contexts
+along a path, and holonomy — the path dependence of that transport — is what the
+geometry remembers. Associations between states become geodesics of a learned,
+possibly asymmetric, metric. The library is useful well beyond that program, but
+the transport and holonomy machinery it needed is why every piece here exists.
 
 ---
 
@@ -80,45 +76,30 @@ pip install -e ".[viz]"          # core + plotting (matplotlib, plotly) for ham.
 
 The distribution is named **`hamtools`**; you import it as **`ham`**.
 
-```python
-import ham
-ham.__version__   # '1.0.0'
-```
-
-Optional extras:
-
 | Extra | Installs | For |
 | :--- | :--- | :--- |
-| `dev` | pytest, ruff, mypy, matplotlib, jupyter, plotly | development & examples |
+| `dev` | pytest, ruff, mypy, matplotlib, jupyter, plotly | development and examples |
 | `viz` | matplotlib, plotly | the `ham.vis` plotting helpers |
 | `gpu` | `jax[cuda12]` | NVIDIA GPU acceleration |
 
-> The core install carries only the geometry/solver stack (JAX, Equinox, Optax,
-> NumPy, SciPy).
-
-> **Requires JAX ≥ 0.4.** For GPU/TPU builds, follow the
-> [JAX installation guide](https://jax.readthedocs.io/en/latest/installation.html);
-> the `gpu` extra covers the common CUDA 12 case.
+The core install carries only the geometry and solver stack: JAX, Equinox,
+Optax, NumPy, SciPy. JAX ≥ 0.4 is required; for GPU and TPU builds follow the
+[JAX installation guide](https://jax.readthedocs.io/en/latest/installation.html),
+of which the `gpu` extra covers the common CUDA 12 case.
 
 ---
 
-## Numerical precision (float32 / float64)
+## Numerical precision
 
-HAM follows the **JAX-native** precision convention: precision is governed by
-JAX's own `jax_enable_x64` flag, and HAM simply reads it. **The default is
-`float32`** (best GPU/TPU throughput).
-
-To run everything in **`float64`** (double precision), set JAX's standard
-environment variable *before* Python starts — JAX reads it during `import jax`,
-before any array exists, so there are **no import-ordering pitfalls**:
+Precision is governed by JAX's own `jax_enable_x64` flag, which HAM reads. The
+default is **float32**. To run in float64, set the standard environment variable
+before Python starts:
 
 ```bash
-JAX_ENABLE_X64=1 python your_script.py      # float64 everywhere
-# or, e.g. for a notebook kernel / CI job:
-export JAX_ENABLE_X64=1
+JAX_ENABLE_X64=1 python your_script.py
 ```
 
-Equivalently, programmatically at startup *before the first array is created*:
+Equivalently, in-process before the first array is created:
 
 ```python
 import jax
@@ -126,29 +107,19 @@ jax.config.update("jax_enable_x64", True)
 import ham   # now float64
 ```
 
-That single switch flips the whole stack — core geometry, solvers, and
-examples — because precision is decided at the data-construction boundary and
-the solvers are dtype-following. Query or use it via `ham.utils.config`:
+That switch flips the whole stack, because precision is decided at the
+data-construction boundary and the solvers follow the dtype they are given.
+Stability floors (`GRAD_EPS`, `PSD_EPS`, `TAYLOR_EPS`, …) scale with it. Query
+the active setting through `ham.utils.config`:
 
 ```python
 from ham.utils.config import x64_enabled, default_dtype, default_np_dtype
-x64_enabled()        # False by default, True under JAX_ENABLE_X64=1
-default_dtype()      # jnp float32 / float64 for the active precision
-default_np_dtype()   # numpy float32 / float64
 ```
 
-Precision-sensitive stability floors (`GRAD_EPS`, `PSD_EPS`, `TAYLOR_EPS`, …)
-scale automatically — the historical float32 values in `float32`, tightened
-values in `float64`.
-
-**When to reach for `float64`:** stiff / ill-conditioned solves — long AVBD
-geodesics, fine eikonal grids, curvature/transport cancellation, tight gradient
-(VJP) checks. **Caveat:** consumer NVIDIA GPUs throttle FP64 to ~1/32–1/64 of
-FP32 throughput, so keep `float32` as the default and opt into `float64`
-deliberately.
-
-> The test suite is **dual-mode**: it passes under both `JAX_ENABLE_X64=0` and
-> `=1`, and CI runs it both ways so float64 support cannot silently regress.
+Reach for float64 on stiff or ill-conditioned solves: long AVBD geodesics, fine
+eikonal grids, curvature and transport cancellation, tight VJP checks. Consumer
+NVIDIA GPUs throttle FP64 to roughly 1/32–1/64 of FP32 throughput, so float32
+remains the default and float64 is opt-in.
 
 ---
 
@@ -156,9 +127,9 @@ deliberately.
 
 ### 1. Shoot a geodesic on a sphere
 
-Integrate the geodesic spray ODE from an initial position and velocity (the
-*exponential map*). Starting at the equator and shooting north for a quarter
-turn lands on the pole:
+Integrate the geodesic spray ODE from an initial position and velocity — the
+exponential map. Starting at the equator and shooting north for a quarter turn
+lands on the pole:
 
 ```python
 import jax.numpy as jnp
@@ -176,8 +147,8 @@ x_final = shooter.shoot(metric, x0, v0, t_max=jnp.pi / 2)
 # x_final ≈ [0, 0, 1]  — the north pole (arc length |v0|·t_max = π/2)
 ```
 
-> A unit-speed geodesic travels `t_max` radians along a great circle, so
-> reaching the pole from the equator needs `t_max = π/2`, not `1.0`.
+A unit-speed geodesic travels `t_max` radians along a great circle, so reaching
+the pole from the equator needs `t_max = π/2`, not `1.0`.
 
 ### 2. An asymmetric Randers metric
 
@@ -205,10 +176,10 @@ print(f"downwind: {L_fwd:.4f}, upwind: {L_bwd:.4f}")
 
 ### 3. Learn a metric from data
 
-A neural metric is an `eqx.Module`, so you train it with a standard Equinox +
-Optax loop. Minimizing the Finsler energy of observed `(position, velocity)`
-pairs teaches the metric to make the directions data actually moves in *cheap* —
-i.e. it recovers the underlying wind/drift:
+A neural metric is an `eqx.Module`, so it trains in a standard Equinox and Optax
+loop. Minimizing the Finsler energy of observed `(position, velocity)` pairs
+makes the directions the data actually moves in cheap, which recovers the
+underlying drift:
 
 ```python
 import jax, jax.numpy as jnp, optax, equinox as eqx
@@ -228,53 +199,48 @@ def step(m, X, V, state):                          # X: (B, 8) points, V: (B, 8)
     loss, grads = eqx.filter_value_and_grad(loss_fn)(m)
     updates, state = opt.update(grads, state, m)
     return eqx.apply_updates(m, updates), state, loss
-
-# for X, V in batches:
-#     metric, opt_state, loss = step(metric, X, V, opt_state)
 ```
 
-See [`examples/demo_learned_wind.py`](examples/demo_learned_wind.py) for a full
-runnable version (recovering a Rossby–Haurwitz wind on the sphere, with
-smoothness regularization).
+[`examples/demo_learned_wind.py`](examples/demo_learned_wind.py) has a full
+runnable version that recovers a Rossby–Haurwitz wind on the sphere with
+smoothness regularization.
 
-> **Higher-level pipeline.** For *generative* latent-geometry models — a VAE
-> whose latent space carries a learned Randers metric — `ham.training.HAMPipeline`
-> orchestrates multi-phase training (per-phase parameter freezing, lineage-aware
-> batching, and a library of geometry-aware losses such as `ZermeloAlignmentLoss`
-> and `EulerLagrangeResidualLoss`). Those losses expect a model exposing
-> `encode` / `decode` / `metric`, not a bare metric — see
-> [`spec/ARCH_SPEC.md`](spec/ARCH_SPEC.md) § 6.
+For generative latent-geometry models — a VAE whose latent space carries a
+learned Randers metric — `ham.training.HAMPipeline` orchestrates multi-phase
+training with per-phase freezing and geometry-aware losses such as
+`ZermeloAlignmentLoss` and `EulerLagrangeResidualLoss`. Those losses expect a
+model exposing `encode`, `decode` and `metric` rather than a bare metric; see
+[`spec/ARCH_SPEC.md`](spec/ARCH_SPEC.md) § 6.
 
 ---
 
 ## Core concepts
 
-HAM separates **where** you are (topology) from **how costly** motion is
-(geometry), then layers solvers on top.
+HAM separates where you are (topology) from how costly motion is (geometry),
+then layers solvers on top.
 
 | Layer | Abstraction | Concrete types |
 | :--- | :--- | :--- |
-| **Topology** | `Manifold` | `EuclideanSpace`, `Sphere`, `Torus`, `Hyperboloid`, `Paraboloid`, `TriangularMesh` |
-| **Geometry** | `FinslerMetric` → `AsymmetricMetric` | `Euclidean`, `Riemannian`, `Randers`, `DiscreteRanders`, `SegmentQuadratureMetric` |
-| **Learnable geometry** | (subclasses of the above) | `NeuralRanders`, `NeuralRiemannian`, `PullbackRanders`, `PullbackRiemannian`, `KernelWindField`, … |
-| **Geodesics** | initial- and boundary-value solvers | `ExponentialMap`, `AVBDSolver`, `GaussNewtonGeodesic`, `GeodesicLearningSolver` |
-| **Arrival times** | anisotropic Eikonal PDE | `EikonalSolver` (grid), `MeshEikonalSolver`, `VolumetricEikonalSolver` (3D) |
-| **Transport & curvature** | derived geometry | `BerwaldConnection`, `sectional_curvature`, `flag_curvature_sample`, `riemann_curvature_tensor` |
+| Topology | `Manifold` | `EuclideanSpace`, `Sphere`, `Torus`, `Hyperboloid`, `Paraboloid`, `TriangularMesh` |
+| Geometry | `FinslerMetric` → `AsymmetricMetric` | `Euclidean`, `Riemannian`, `Randers`, `DiscreteRanders`, `SegmentQuadratureMetric` |
+| Learnable geometry | subclasses of the above | `NeuralRanders`, `NeuralRiemannian`, `PullbackRanders`, `PullbackRiemannian`, `KernelWindField`, … |
+| Geodesics | initial- and boundary-value solvers | `ExponentialMap`, `AVBDSolver`, `GaussNewtonGeodesic`, `GeodesicLearningSolver` |
+| Arrival times | anisotropic eikonal PDE | `EikonalSolver` (grid), `MeshEikonalSolver`, `VolumetricEikonalSolver` (3D) |
+| Transport and curvature | derived geometry | `BerwaldConnection`, `sectional_curvature`, `flag_curvature_sample`, `riemann_curvature_tensor` |
 
-Every `FinslerMetric` is an `eqx.Module` (a JAX PyTree), so any metric — even a
-neural one — can be passed straight through `jax.jit`, `jax.grad`, and `jax.vmap`.
+Every `FinslerMetric` is an `eqx.Module`, hence a JAX PyTree, so any metric —
+including a neural one — passes straight through `jax.jit`, `jax.grad` and
+`jax.vmap`.
 
-The two faces of a geodesic problem:
+A geodesic problem comes in two forms. **Shooting** takes a start point and
+velocity and integrates the spray ODE, via `ExponentialMap`. **Connecting**
+takes two endpoints and finds the minimizing path, via `AVBDSolver` (local block
+descent), `GaussNewtonGeodesic` (global and second-order, with an iteration
+count independent of path length), or the eikonal solvers, which return a full
+arrival-time field by fast sweeping.
 
-- **Shooting (IVP).** Given a start point and velocity, integrate the spray ODE
-  → `ExponentialMap`.
-- **Connecting (BVP).** Given two endpoints, find the minimizing path →
-  `AVBDSolver` (local block descent), `GaussNewtonGeodesic` (global, second-order,
-  iteration count independent of path length), or the Eikonal solvers (full
-  arrival-time field via fast sweeping).
-
-For the mathematics behind these, see [`spec/MATH_SPEC.md`](spec/MATH_SPEC.md);
-for the software design, [`spec/ARCH_SPEC.md`](spec/ARCH_SPEC.md).
+The mathematics is in [`spec/MATH_SPEC.md`](spec/MATH_SPEC.md); the software
+design is in [`spec/ARCH_SPEC.md`](spec/ARCH_SPEC.md).
 
 ---
 
@@ -282,41 +248,20 @@ for the software design, [`spec/ARCH_SPEC.md`](spec/ARCH_SPEC.md).
 
 ```text
 src/ham/
-├── geometry/
-│   ├── manifold.py          # Manifold ABC
-│   ├── manifolds/           # EuclideanSpace, Sphere, Torus, Hyperboloid, Paraboloid
-│   ├── mesh.py              # TriangularMesh manifold (+ mesh_adjacency.py)
-│   ├── metric.py            # FinslerMetric & AsymmetricMetric ABCs + auto-diff spray/energy
-│   ├── zoo/                 # Euclidean, Riemannian, Randers, DiscreteRanders, SegmentQuadrature
-│   ├── transport.py         # BerwaldConnection (parallel transport)
-│   └── curvature.py         # flag / sectional / Riemann curvature
-├── models/
-│   ├── learned.py           # Neural, pullback, energy-based & kernel metrics
-│   └── covariate.py         # CovariateConditionedRanders, terrain CNN
-├── nn/
-│   ├── networks.py          # VectorField, PSDMatrixField, RandomFourierFeatures
-│   ├── ebm.py               # ScalarEnergyField, QuadraticHead
-│   └── kde.py               # GaussianKDEEnergy
-├── solvers/
-│   ├── geodesic.py          # ExponentialMap (IVP, RK4)
-│   ├── avbd.py              # AVBDSolver (BVP, vertex block descent)
-│   ├── gauss_newton.py      # GaussNewtonGeodesic (global block-tridiagonal Newton)
-│   ├── geodesic_learning.py # GeodesicLearningSolver (full-path Adam)
-│   ├── eikonal.py           # EikonalSolver (2D grid fast sweeping)
-│   ├── mesh_eikonal.py      # MeshEikonalSolver (unstructured triangulations)
-│   ├── volumetric_eikonal.py# VolumetricEikonalSolver (3D grids)
-│   ├── continuation.py      # arc-length resampling, numerical continuation
-│   ├── graph_init.py        # kNN-graph geodesic warm-starts
-│   └── coloring.py          # graph colorings for parallel sweeps
-├── training/
-│   ├── pipeline.py          # HAMPipeline, TrainingPhase
-│   ├── losses.py            # geometry-aware loss components
-│   └── losses_ebm.py        # contrastive divergence, score matching
-├── sim/  utils/  vis/       # analytic fields, numerics, terrain, plotting
+├── geometry/     # Manifold and FinslerMetric ABCs, manifolds/, mesh, zoo/,
+│                 # transport (Berwald), curvature (flag/sectional/Riemann)
+├── models/       # learned.py: neural, pullback, energy-based, kernel metrics
+│                 # covariate.py: CovariateConditionedRanders, terrain CNN
+├── nn/           # VectorField, PSDMatrixField, RandomFourierFeatures, EBM, KDE
+├── solvers/      # geodesic (IVP), avbd + gauss_newton + geodesic_learning (BVP),
+│                 # eikonal / mesh_eikonal / volumetric_eikonal (arrival times),
+│                 # continuation, graph_init, coloring (warm-starts)
+├── training/     # HAMPipeline, TrainingPhase, geometry-aware losses
+└── sim/ utils/ vis/   # analytic fields, numerics, terrain, plotting
 
 examples/        # runnable demo scripts + Jupyter notebooks
 spec/            # MATH_SPEC.md, ARCH_SPEC.md
-tests/           # 348 tests across 36 modules, run in both precisions
+tests/           # 348 tests across 33 modules, run in both precisions
 ```
 
 ---
@@ -333,29 +278,27 @@ plots live in [`examples/notebooks/`](examples/notebooks/).
 | Vortex wind field | `demo_vortex.py` | `demo_vortex.ipynb` |
 | Learned wind from data | `demo_learned_wind.py` | `demo_learned_wind.ipynb` |
 | Discrete (mesh) Zermelo metric | `demo_discrete_zermelo.py` | `demo_discrete_zermelo.ipynb` |
-| Anisotropic Eikonal fronts | `demo_eikonal_fronts.py` | `demo_eikonal_fronts.ipynb` |
-| Parallel transport & holonomy | — | `demo_parallel_transport.ipynb` |
+| Anisotropic eikonal fronts | `demo_eikonal_fronts.py` | `demo_eikonal_fronts.ipynb` |
+| Parallel transport and holonomy | — | `demo_parallel_transport.ipynb` |
 | High-dimensional latent geodesics | — | `demo_high_dim_latent_geodesics.ipynb` |
 | Generic neural Finsler metric | — | `demo_generic_finsler.ipynb` |
 
-### Worked applications
+### Applications
 
-End-to-end applications live on their own branches, so that installing the
-library never drags in domain data loaders or their dependencies.
+End-to-end applications live on their own branches, so installing the library
+never pulls in domain data loaders or their dependencies.
 
-**Wildfire spread**
-([`app/wildfire`](https://github.com/hubibala/HAM/tree/app/wildfire)) models a
-fire front as the unit-time level sets of an anisotropic Randers metric:
-terrain and fuel set the symmetric part, wind the drift. Built on
+[**Wildfire spread**](https://github.com/hubibala/HAM/tree/app/wildfire) models a
+fire front as the unit-time level sets of an anisotropic Randers metric, with
+terrain and fuel setting the symmetric part and wind the drift. It builds on
 `CovariateConditionedRanders`, the differentiable `EikonalSolver`, and the
 covariate-encoder training loop.
 
-**Robot-arm geodesics**
-([`app/robot-arm`](https://github.com/hubibala/HAM/tree/app/robot-arm)) plans
-energy-optimal motion in configuration space: the arm's mass matrix is the
-Riemannian metric, gravity enters as a Randers drift, obstacles are folded into
-the metric, and task constraints are enforced via augmented Lagrangian terms.
-Built on `AVBDSolver`, `GaussNewtonGeodesic`, continuation, and the eikonal
+[**Robot-arm geodesics**](https://github.com/hubibala/HAM/tree/app/robot-arm)
+plans energy-optimal motion in configuration space. The arm's mass matrix is the
+Riemannian metric, gravity enters as a Randers drift, obstacles fold into the
+metric, and task constraints are enforced with augmented Lagrangian terms. It
+builds on `AVBDSolver`, `GaussNewtonGeodesic`, continuation, and the eikonal
 planners.
 
 ---
@@ -363,15 +306,16 @@ planners.
 ## Tests
 
 ```bash
-python -m pytest tests/ -q                       # full suite (float32, default)
-JAX_ENABLE_X64=1 python -m pytest tests/ -q      # same suite in float64
-python -m pytest tests/test_metric.py tests/test_geodesic.py -v
+python -m pytest tests/ -q                       # float32 (default)
+JAX_ENABLE_X64=1 python -m pytest tests/ -q      # float64
 ```
 
-The suite is **dual-mode**: every test passes under both precisions, and
-precision-sensitive tolerances/dtype checks adapt via `tests/_precision.py`
-(`tol()`, `assert_default_dtype`). The active precision is printed in the pytest
-header. CI runs the full matrix (`JAX_ENABLE_X64` ∈ {0, 1} × Python 3.10/3.11).
+Every test passes under both precisions. Precision-sensitive tolerances and
+dtype checks adapt through `tests/_precision.py` (`tol()`,
+`assert_default_dtype`), and the active precision is printed in the pytest
+header. CI runs the full matrix: `JAX_ENABLE_X64` ∈ {0, 1} × Python 3.10/3.11,
+on CPU. If you hit accelerator initialization in a CPU-only environment, set
+`JAX_PLATFORMS=cpu`.
 
 | Module | Covers |
 | :--- | :--- |
@@ -381,20 +325,18 @@ header. CI runs the full matrix (`JAX_ENABLE_X64` ∈ {0, 1} × Python 3.10/3.11
 | `test_eikonal_solver.py`, `test_mesh_eikonal.py`, `test_volumetric_eikonal.py` | arrival-time PDEs |
 | `test_transport.py`, `test_curvature.py` | Berwald transport, curvature |
 | `test_pipeline.py`, `test_learned_metric.py` | training pipeline, neural metrics |
-
-> CI runs on CPU. If you hit GPU/accelerator initialization in a CPU-only
-> environment, set `JAX_PLATFORMS=cpu`.
+| `test_invariants.py` | Finsler axioms and cross-cutting metric invariants |
 
 ---
 
 ## Development and AI disclosure
 
-HAM was developed with substantial assistance from AI coding tools
-(Anthropic's Claude), used for implementation, tests, and documentation
-throughout. All mathematics is validated against the published literature and
-a numerical test suite that runs in both float32 and float64, and every
-component has been human-reviewed. Responsibility for correctness rests with
-the author, not the tools — if you find an error, please open an issue.
+HAM was developed with substantial assistance from AI coding tools (Anthropic's
+Claude), used for implementation, tests and documentation throughout. The
+mathematics is validated against the published literature and a numerical test
+suite that runs in both float32 and float64, and every component has been
+human-reviewed. Responsibility for correctness rests with the author, not the
+tools. If you find an error, please open an issue.
 
 Contributions are welcome, including AI-assisted ones, under the disclosure
 policy in [CONTRIBUTING.md](CONTRIBUTING.md).

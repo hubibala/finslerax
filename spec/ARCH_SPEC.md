@@ -1,7 +1,5 @@
 # ARCH_SPEC.md — Software Architecture of HAM
 
-**Version:** 1.2.0
-**Date:** June 2026
 **Dependencies:** JAX, Equinox, Optax
 
 ## 1. Design Philosophy
@@ -274,10 +272,9 @@ tests/           # 36 test modules, dual-precision
 
 ## 6. Generative Modeling & Training
 
-The library's headline application is **latent-geometry representation
-learning**: a VAE whose latent space carries a *learned Finsler metric*, so that
-geodesics in latent space model directed processes (cell differentiation, fronts,
-flows).
+The training layer targets latent-geometry representation learning: a generative
+model whose latent space carries a learned Finsler metric, so that latent
+geodesics model directed processes such as flows and spreading fronts.
 
 ### 6.1 The generative model contract
 
@@ -308,7 +305,7 @@ library ships, among others:
 A declarative description of one stage: `name`, `epochs`, an
 `optax.GradientTransformation`, a list of losses, a `filter_spec` (a PyTree mask
 marking trainable vs. frozen leaves, consumed by `eqx.partition`), and
-`requires_pairs` (lineage pair/triple batching).
+`requires_pairs`, which switches on paired or tripled batching.
 
 ### 6.4 `HAMPipeline`
 
@@ -317,27 +314,28 @@ Executes phases in sequence. For each phase it partitions the model via
 mini-batch gradient descent (`fit(dataset, phases, batch_size, …)`), and
 recombines for the next phase. The model is mutated in place; the returned model
 and `self.model` are the same object. Phases with `requires_pairs=True` are
-skipped (with a printed notice) when no lineage data is present.
+skipped, with a printed notice, when the dataset supplies neither
+`pair_indices` nor `triple_indices`.
 
 ---
 
-## 7. Implementation Status
+## 7. Coverage and limitations
 
-### Completed & validated
+### What the library covers
 
-1. **Geometry core** — `metric.py`, `zoo/`, `manifolds/`, `mesh.py`: complete and
-   exercised by the test suite (333 tests / 32 modules). `FinslerMetric`
-   auto-differentiates the energy to the spray; `Randers` / `DiscreteRanders`
-   implement Zermelo navigation; curvature and Berwald transport are validated on
-   `Sphere`, `Torus`, `Hyperboloid`, and triangular meshes.
+1. **Geometry core** — `metric.py`, `zoo/`, `manifolds/`, `mesh.py`, exercised by
+   the test suite in both precisions. `FinslerMetric` auto-differentiates the
+   energy to the spray; `Randers` / `DiscreteRanders` implement Zermelo
+   navigation; curvature and Berwald transport are validated on `Sphere`,
+   `Torus`, `Hyperboloid`, and triangular meshes.
 2. **Geodesic solvers** — `ExponentialMap` (IVP), `AVBDSolver` (BVP, with
    parallel + implicit-diff modes), and `GaussNewtonGeodesic` (global BVP).
 3. **Eikonal solvers** — grid, volumetric (3-D), and mesh arrival-time PDEs with
    implicit gradients; used inside arrival-time training losses.
 4. **Parallel transport** — Berwald connection verified for norm preservation on
    the sphere and non-trivial Randers holonomy.
-5. **Training pipeline** — `HAMPipeline` with per-phase freezing, lineage-triple
-   batching, and the modular loss library above.
+5. **Training pipeline** — `HAMPipeline` with per-phase freezing, paired and
+   tripled batching, and the modular loss library above.
 6. **Applications.** Worked end-to-end applications are developed on their own
    branches so that the framework itself stays dependency-light:
    - *Wildfire spread* (`app/wildfire`) — front propagation with
@@ -347,9 +345,8 @@ skipped (with a printed notice) when no lineage data is present.
 
 ### Known limitations
 
-7. **Curved-manifold VAEs.** Joint training of the full generative pipeline on
-   strongly curved latent manifolds (`Sphere`, `Hyperboloid`) remains numerically
-   sensitive; the flat `EuclideanSpace` latent is the recommended default.
-   Integrating exact `cosh`/`sinh` maps with deep
-   learning loops can still trigger solver collapse (see `spec/MATH_SPEC.md`
-   § 4.1).
+**Strongly curved latent manifolds.** Joint training of the full generative
+pipeline on `Sphere` or `Hyperboloid` latents is numerically sensitive:
+combining the exact `cosh`/`sinh` maps with a deep learning loop can drive the
+solver to collapse. Use the flat `EuclideanSpace` latent unless curvature is
+essential to the model (see `spec/MATH_SPEC.md` § 4.1).

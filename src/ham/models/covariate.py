@@ -24,7 +24,6 @@ See Also:
     ham.models.learned       : NeuralRanders (position-conditioned variant).
 """
 
-from typing import Optional
 
 import equinox as eqx
 import jax
@@ -104,8 +103,8 @@ def project_b_norm(
     smooth, identity-preserving causal clamp :func:`ham.utils.causal_wind_scale`:
     a drift already within bound passes through essentially unchanged, while one
     exceeding the bound is smoothly (``C^infinity``) pulled below ``max_norm``.
-    This replaces the earlier hard ``min(1, max_norm/||b||)`` clamp, which had a
-    ``C^1`` kink at the boundary.
+    A hard ``min(1, max_norm/||b||)`` clamp would be ``C^0`` at the boundary and
+    is not used, since the kink shows up in gradients.
 
     Args:
         b:         (2,) drift vector.
@@ -291,25 +290,25 @@ class CovariateConditionedRanders(AsymmetricMetric):
 
     # Per-step precomputed local metric parameter field; set by precompute_metric_field().
     # None in the unbound model; (H, W, 5) float64 after precomputation.
-    metric_field: Optional[jax.Array]  # (H, W, 5) float64 local raw params
+    metric_field: jax.Array | None  # (H, W, 5) float64 local raw params
 
     # Baked-in scene covariates (None until bind_scene is called)
-    elev_raster: Optional[jax.Array]  # (H, W) float64
-    slope_raster: Optional[jax.Array]  # (H, W) float64
-    aspect_raster: Optional[jax.Array]  # (H, W) float64
-    canopy_raster: Optional[jax.Array]  # (H, W) float64
-    fuel_code_raster: Optional[jax.Array]  # (H, W) int32
-    weather_vec: Optional[jax.Array]  # (4,) [T_air, humidity, sin_wind, cos_wind]
+    elev_raster: jax.Array | None  # (H, W) float64
+    slope_raster: jax.Array | None  # (H, W) float64
+    aspect_raster: jax.Array | None  # (H, W) float64
+    canopy_raster: jax.Array | None  # (H, W) float64
+    fuel_code_raster: jax.Array | None  # (H, W) int32
+    weather_vec: jax.Array | None  # (4,) [T_air, humidity, sin_wind, cos_wind]
     # Raw (unnormalised) mean wind VELOCITY in model (x, y) coordinates. Kept
     # separate from weather_vec because the encoder input is standardised
     # (mean-centred), which would corrupt the physical wind direction that the
     # "coupled" drift mode depends on.
-    measured_wind: Optional[jax.Array]  # (2,) [w_x, w_y], model coords
+    measured_wind: jax.Array | None  # (2,) [w_x, w_y], model coords
     # Stored as a regular JAX leaf (not static) so eqx.tree_at can update it in
     # bind_scene. Inside metric computations it is wrapped in stop_gradient to
     # prevent unintended gradient flow through the grid resolution.
     pixel_spacing_m: jax.Array  # scalar float64, metres per pixel
-    scene_origin_xy: Optional[jax.Array]  # (2,) world coords of pixel (0,0) in metres
+    scene_origin_xy: jax.Array | None  # (2,) world coords of pixel (0,0) in metres
 
     # Configuration constants (static — known at JIT compile time)
     eps_G: float = eqx.field(static=True)
@@ -517,7 +516,7 @@ class CovariateConditionedRanders(AsymmetricMetric):
     def bind_weather(
         self,
         weather_vec: jax.Array,
-        measured_wind: Optional[jax.Array] = None,
+        measured_wind: jax.Array | None = None,
     ) -> "CovariateConditionedRanders":
         """Return a new instance with only the per-fire weather updated.
 

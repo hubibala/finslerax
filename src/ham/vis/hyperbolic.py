@@ -1,4 +1,3 @@
-from typing import Optional
 
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
@@ -39,8 +38,8 @@ def project_vector_to_poincare(x: jnp.ndarray, v: jnp.ndarray) -> jnp.ndarray:
 def plot_poincare_disk(
     points: np.ndarray,
     colors=None,
-    vectors: Optional[np.ndarray] = None,
-    pair_indices: Optional[np.ndarray] = None,
+    vectors: np.ndarray | None = None,
+    pair_indices: np.ndarray | None = None,
     title: str = "Hyperbolic Embedding (Poincaré Disk)",
     ax=None,
 ):

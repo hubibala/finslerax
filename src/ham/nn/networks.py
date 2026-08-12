@@ -7,7 +7,6 @@ learned metric classes in ham.models.learned.
 All modules are compatible with JAX transforms (jit, vmap, grad).
 """
 
-from typing import Optional
 
 import equinox as eqx
 import jax
@@ -82,7 +81,7 @@ class VectorField(eqx.Module):
         ham.models.learned.NeuralRanders — primary consumer.
     """
 
-    embedding: Optional[RandomFourierFeatures]
+    embedding: RandomFourierFeatures | None
     mlp: eqx.nn.MLP
 
     def __init__(
@@ -164,7 +163,7 @@ class PSDMatrixField(eqx.Module):
         ham.utils.math.PSD_EPS — canonical epsilon constant.
     """
 
-    embedding: Optional[RandomFourierFeatures]
+    embedding: RandomFourierFeatures | None
     mlp: eqx.nn.MLP
     dim: int = eqx.field(static=True)
 
