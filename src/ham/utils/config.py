@@ -53,7 +53,9 @@ def x64_enabled() -> bool:
     was enabled (``JAX_ENABLE_X64`` env var, ``jax.config.update``, CLI flag, or
     a test fixture).
     """
-    return bool(jax.config.jax_enable_x64)
+    # config.read() is the typed accessor; the jax.config.jax_enable_x64
+    # attribute is installed dynamically and is invisible to type checkers.
+    return bool(jax.config.read("jax_enable_x64"))
 
 
 def default_dtype() -> jnp.dtype:
