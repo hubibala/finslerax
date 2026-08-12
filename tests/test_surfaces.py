@@ -10,6 +10,7 @@ from ham.geometry import EuclideanSpace, Hyperboloid, Paraboloid, Sphere, Torus
 
 class SurfaceTestMixin:
     """Common tests for all manifolds."""
+
     manifold = None
 
     def setUp(self):
@@ -27,8 +28,12 @@ class SurfaceTestMixin:
         jitted_project = jax.jit(self.manifold.project)
         jitted_exp = jax.jit(self.manifold.exp_map)
 
-        np.testing.assert_allclose(jitted_project(x), self.manifold.project(x), atol=1e-5)
-        np.testing.assert_allclose(jitted_exp(x, v), self.manifold.exp_map(x, v), atol=1e-5)
+        np.testing.assert_allclose(
+            jitted_project(x), self.manifold.project(x), atol=1e-5
+        )
+        np.testing.assert_allclose(
+            jitted_exp(x, v), self.manifold.exp_map(x, v), atol=1e-5
+        )
 
     def test_vmap_compatibility(self):
         keys = jax.random.split(self.key, 5)
@@ -53,6 +58,7 @@ class SurfaceTestMixin:
         v = jax.random.normal(k2, pts.shape)
         v_tan = self.manifold.to_tangent(pts, v)
         self.assertEqual(v_tan.shape, pts.shape)
+
 
 class TestSphere(SurfaceTestMixin, unittest.TestCase):
     def setUp(self):
@@ -91,7 +97,9 @@ class TestSphere(SurfaceTestMixin, unittest.TestCase):
         # Check tangency at y
         np.testing.assert_allclose(jnp.sum(y * v_trans, axis=-1), 0.0, atol=1e-5)
         # Check norm preservation
-        np.testing.assert_allclose(jnp.linalg.norm(v_trans), jnp.linalg.norm(v), atol=1e-5)
+        np.testing.assert_allclose(
+            jnp.linalg.norm(v_trans), jnp.linalg.norm(v), atol=1e-5
+        )
 
     def test_sphere_zero_tangent(self):
         x = self.manifold.random_sample(self.key, ())
@@ -110,6 +118,7 @@ class TestSphere(SurfaceTestMixin, unittest.TestCase):
         v_log = self.manifold.log_map(x, y)
         y_rec = self.manifold.exp_map(x, v_log)
         np.testing.assert_allclose(y_rec, y, atol=1e-3)
+
 
 class TestTorus(SurfaceTestMixin, unittest.TestCase):
     def setUp(self):
@@ -132,6 +141,7 @@ class TestTorus(SurfaceTestMixin, unittest.TestCase):
         # For very small v, the approximation should be decent
         np.testing.assert_allclose(v_rec, v, atol=1e-4)
 
+
 class TestParaboloid(SurfaceTestMixin, unittest.TestCase):
     def setUp(self):
         super().setUp()
@@ -139,7 +149,7 @@ class TestParaboloid(SurfaceTestMixin, unittest.TestCase):
 
     def test_paraboloid_constraints(self):
         pts = self.manifold.random_sample(self.key, (10,))
-        expected_z = pts[..., 0]**2 + pts[..., 1]**2
+        expected_z = pts[..., 0] ** 2 + pts[..., 1] ** 2
         np.testing.assert_allclose(pts[..., 2], expected_z, atol=1e-5)
 
     def test_paraboloid_tangent(self):
@@ -148,10 +158,11 @@ class TestParaboloid(SurfaceTestMixin, unittest.TestCase):
         v_tan = self.manifold.to_tangent(x, v)
 
         # Normal vector to z = x^2 + y^2 is (-2x, -2y, 1)
-        n = jnp.array([-2*x[0], -2*x[1], 1.0])
+        n = jnp.array([-2 * x[0], -2 * x[1], 1.0])
         n = n / jnp.linalg.norm(n)
         dot = jnp.sum(n * v_tan, axis=-1)
         np.testing.assert_allclose(dot, 0.0, atol=1e-5)
+
 
 class TestHyperboloid(SurfaceTestMixin, unittest.TestCase):
     def setUp(self):
@@ -190,6 +201,7 @@ class TestHyperboloid(SurfaceTestMixin, unittest.TestCase):
         norm_trans = jnp.sqrt(jnp.maximum(self.minkowski_dot(v_trans, v_trans), 0.0))
         np.testing.assert_allclose(norm_trans, norm_v, atol=1e-5)
 
+
 class TestEuclideanSpace(SurfaceTestMixin, unittest.TestCase):
     def setUp(self):
         super().setUp()
@@ -204,11 +216,14 @@ class TestEuclideanSpace(SurfaceTestMixin, unittest.TestCase):
         np.testing.assert_allclose(self.manifold.to_tangent(x, v), v, atol=1e-5)
         np.testing.assert_allclose(self.manifold.exp_map(x, v), y, atol=1e-5)
         np.testing.assert_allclose(self.manifold.log_map(x, y), v, atol=1e-5)
-        np.testing.assert_allclose(self.manifold.parallel_transport(x, y, v), v, atol=1e-5)
+        np.testing.assert_allclose(
+            self.manifold.parallel_transport(x, y, v), v, atol=1e-5
+        )
 
     def test_euclidean_random(self):
         pts = self.manifold.random_sample(self.key, (10,))
         self.assertEqual(pts.shape, (10, 3))
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

@@ -4,7 +4,6 @@ Provides the ScalarEnergyField, which maps states in the ambient space to a
 scalar energy value E(x); the induced density is ``p(x) \\propto exp(-E(x))``.
 """
 
-
 import equinox as eqx
 import jax
 import jax.numpy as jnp

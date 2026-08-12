@@ -22,6 +22,7 @@ from ham.training.losses import ArrivalTimeLoss
 # Shared fixtures
 # ---------------------------------------------------------------------------
 
+
 def _flat_identity_metric():
     """Euclidean R^2 with G=I — geodesics are straight lines."""
     manifold = EuclideanSpace(2)
@@ -44,6 +45,7 @@ def _make_solvers(iterations=30):
 # ---------------------------------------------------------------------------
 # 1. Forward correctness
 # ---------------------------------------------------------------------------
+
 
 class TestImplicitForward:
     """The IFT wrapper must not change the converged path."""
@@ -94,6 +96,7 @@ class TestImplicitForward:
 # 2. Gradient finiteness and non-triviality
 # ---------------------------------------------------------------------------
 
+
 class TestImplicitGradients:
     """Gradients from IFT backward pass must be finite and non-zero."""
 
@@ -105,8 +108,8 @@ class TestImplicitGradients:
         loss_fn = ArrivalTimeLoss(solver=implicit, solver_steps=8)
 
         source = jnp.array([0.0, 0.0])
-        x_obs  = jnp.array([[0.5, 0.0], [0.0, 0.5], [0.4, 0.4]])
-        t_obs  = jnp.array([0.5, 0.5, jnp.sqrt(0.32)])
+        x_obs = jnp.array([[0.5, 0.0], [0.0, 0.5], [0.4, 0.4]])
+        t_obs = jnp.array([0.5, 0.5, jnp.sqrt(0.32)])
 
         @eqx.filter_jit
         def compute(m):
@@ -115,7 +118,7 @@ class TestImplicitGradients:
         grads = eqx.filter_grad(compute)(metric)
         leaves = jax.tree_util.tree_leaves(grads)
         for leaf in leaves:
-            if hasattr(leaf, 'shape'):
+            if hasattr(leaf, "shape"):
                 assert jnp.all(jnp.isfinite(leaf)), "Non-finite gradient leaf"
 
     def test_gradients_nonzero(self):
@@ -126,16 +129,19 @@ class TestImplicitGradients:
         loss_fn = ArrivalTimeLoss(solver=implicit, solver_steps=8)
 
         source = jnp.array([0.0, 0.0])
-        x_obs  = jnp.array([[0.6, 0.2]])
-        t_obs  = jnp.array([0.4])  # deliberately wrong
+        x_obs = jnp.array([[0.6, 0.2]])
+        t_obs = jnp.array([0.4])  # deliberately wrong
 
         @eqx.filter_jit
         def compute(m):
             return loss_fn(m, source, x_obs, t_obs)
 
         grads = eqx.filter_grad(compute)(metric)
-        leaves = [l for l in jax.tree_util.tree_leaves(grads)
-                  if hasattr(l, 'shape') and l.size > 0]
+        leaves = [
+            l
+            for l in jax.tree_util.tree_leaves(grads)
+            if hasattr(l, "shape") and l.size > 0
+        ]
         nonzero = any(jnp.any(l != 0) for l in leaves)
         assert nonzero, "All gradients are zero — no learning signal"
 
@@ -143,6 +149,7 @@ class TestImplicitGradients:
 # ---------------------------------------------------------------------------
 # 3. Gradient direction consistency (finite-difference check)
 # ---------------------------------------------------------------------------
+
 
 class TestGradientConsistency:
     """IFT gradient direction must agree with finite differences."""
@@ -187,6 +194,7 @@ class TestGradientConsistency:
 # 4. End-to-end with ArrivalTimeLoss
 # ---------------------------------------------------------------------------
 
+
 class TestArrivalTimeLossImplicit:
     """ArrivalTimeLoss must work identically with both solver modes."""
 
@@ -198,8 +206,8 @@ class TestArrivalTimeLossImplicit:
         loss_fn = ArrivalTimeLoss(solver=implicit, solver_steps=8)
 
         source = jnp.array([0.0, 0.0])
-        x_obs  = jnp.array([[1.0, 0.0], [0.0, 1.0]])
-        t_obs  = jnp.array([1.0, 1.0])
+        x_obs = jnp.array([[1.0, 0.0], [0.0, 1.0]])
+        t_obs = jnp.array([1.0, 1.0])
 
         loss = loss_fn(metric, source, x_obs, t_obs)
         assert jnp.isfinite(loss), f"Loss is not finite: {loss}"
@@ -211,10 +219,10 @@ class TestArrivalTimeLossImplicit:
         loss_fn = ArrivalTimeLoss(solver=implicit, solver_steps=12)
 
         source = jnp.array([0.0, 0.0])
-        x_obs  = jnp.array([[1.0, 0.0]])
+        x_obs = jnp.array([[1.0, 0.0]])
 
         loss_correct = loss_fn(metric, source, x_obs, jnp.array([1.0]))
-        loss_wrong   = loss_fn(metric, source, x_obs, jnp.array([5.0]))
+        loss_wrong = loss_fn(metric, source, x_obs, jnp.array([5.0]))
 
         assert loss_wrong > loss_correct, (
             f"Wrong-time loss ({float(loss_wrong):.4f}) should exceed "
@@ -231,8 +239,8 @@ class TestArrivalTimeLossImplicit:
         loss_i = ArrivalTimeLoss(solver=implicit, solver_steps=10)
 
         source = jnp.array([0.0, 0.0])
-        x_obs  = jnp.array([[0.5, 0.5]])
-        t_obs  = jnp.array([0.7])
+        x_obs = jnp.array([[0.5, 0.5]])
+        t_obs = jnp.array([0.7])
 
         l_u = float(loss_u(metric, source, x_obs, t_obs))
         l_i = float(loss_i(metric, source, x_obs, t_obs))
@@ -240,7 +248,7 @@ class TestArrivalTimeLossImplicit:
         rel = abs(l_u - l_i) / (abs(l_u) + 1e-8)
         assert rel < 0.10, (
             f"Unrolled loss {l_u:.4f} vs implicit loss {l_i:.4f} "
-            f"differ by {rel*100:.1f}% — solver may not have converged"
+            f"differ by {rel * 100:.1f}% — solver may not have converged"
         )
 
 
@@ -359,7 +367,10 @@ class TestConstrainedAndCurvedGradients:
         constraints = [lambda x: x[1] - 0.1]
 
         solver = AVBDSolver(
-            step_size=0.05, beta=1.2, iterations=300, energy_tol=1e-12,
+            step_size=0.05,
+            beta=1.2,
+            iterations=300,
+            energy_tol=1e-12,
             implicit_diff=False,
         )
         traj = solver.solve(

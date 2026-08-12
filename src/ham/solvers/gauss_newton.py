@@ -34,7 +34,6 @@ Reference:
     calculus (Rumpf-Wirth) and trajectory-optimisation Riccati/LQR structure.
 """
 
-
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -237,9 +236,7 @@ class GaussNewtonGeodesic(eqx.Module):
             )
 
         if train_mode:
-            final = jax.lax.fori_loop(
-                0, self.iterations, lambda _i, s: step(s), state
-            )
+            final = jax.lax.fori_loop(0, self.iterations, lambda _i, s: step(s), state)
         else:
             # Early-stop on the projected-gradient norm. Prime with one step so
             # grad_norm is populated, then loop until convergence or the cap.
@@ -253,9 +250,7 @@ class GaussNewtonGeodesic(eqx.Module):
 
             final, _ = jax.lax.while_loop(cond, body, (step(state), 1))
 
-        full_xs = jnp.concatenate(
-            [p_start[None], final.interior, p_end[None]], axis=0
-        )
+        full_xs = jnp.concatenate([p_start[None], final.interior, p_end[None]], axis=0)
         full_vs = jax.vmap(metric.manifold.log_map)(full_xs[:-1], full_xs[1:])
         return Trajectory(
             xs=full_xs,

@@ -19,7 +19,6 @@ from ham.geometry.zoo import Euclidean, Randers, Riemannian
 
 
 class TestTransport(unittest.TestCase):
-
     def setUp(self):
         # Use real manifold implementations from surfaces.py
         self.plane = EuclideanSpace(dim=2)
@@ -34,7 +33,7 @@ class TestTransport(unittest.TestCase):
         metric = Euclidean(self.plane)
 
         # Path: Circle in the plane
-        t = jnp.linspace(0, 2*jnp.pi, 50)
+        t = jnp.linspace(0, 2 * jnp.pi, 50)
         path_x = jnp.stack([jnp.cos(t), jnp.sin(t)], axis=1)
         path_v = jnp.stack([-jnp.sin(t), jnp.cos(t)], axis=1)
 
@@ -76,14 +75,13 @@ class TestTransport(unittest.TestCase):
         # 3. grad check (differentiability w.r.t vec_start)
         def transport_loss(v0):
             vecs = conn.parallel_transport(x_batch, v_batch, v0)
-            return jnp.sum(vecs[-1]**2)
+            return jnp.sum(vecs[-1] ** 2)
 
         grad_fn = jax.grad(transport_loss)
         g = grad_fn(vec_start)
         self.assertFalse(jnp.any(jnp.isnan(g)))
         # For Euclidean, d/dv0 ||v0||^2 = 2*v0
         np.testing.assert_allclose(g, 2.0 * vec_start, atol=1e-5)
-
 
     def test_christoffel_zero_velocity(self):
         """Ensure connection coefficients do not NaN at v=0."""
@@ -108,7 +106,6 @@ class TestTransport(unittest.TestCase):
         vecs = BerwaldConnection(metric).parallel_transport(path_x, path_v, vec_start)
         self.assertEqual(vecs.shape, (1, 2))
         np.testing.assert_allclose(vecs[0], vec_start)
-
 
     def test_christoffel_torsion_free(self):
         """
@@ -142,7 +139,7 @@ class TestTransport(unittest.TestCase):
         class DiagMetric(FinslerMetric):
             def metric_fn(self, x, v):
                 # g = diag(1, 1 + x[0]^2)
-                g_diag = jnp.array([1.0, 1.0 + x[0]**2])
+                g_diag = jnp.array([1.0, 1.0 + x[0] ** 2])
                 return jnp.sqrt(jnp.sum(g_diag * v**2))
 
         metric = DiagMetric(self.plane)
@@ -155,12 +152,14 @@ class TestTransport(unittest.TestCase):
 
         # The tensor should be non-trivially non-zero
         max_abs = jnp.max(jnp.abs(gamma))
-        self.assertGreater(float(max_abs), 1e-4,
-                           "Christoffel symbols should be non-zero for position-dependent metric")
+        self.assertGreater(
+            float(max_abs),
+            1e-4,
+            "Christoffel symbols should be non-zero for position-dependent metric",
+        )
 
         # Still torsion-free
         np.testing.assert_allclose(gamma, jnp.transpose(gamma, (0, 2, 1)), atol=1e-5)
-
 
     def test_riemannian_sphere_isometry(self):
         """
@@ -171,13 +170,20 @@ class TestTransport(unittest.TestCase):
         orthogonal to the path plane, forcing the projection to do
         real work at each step.
         """
-        def identity_metric(x): return jnp.eye(3)
+
+        def identity_metric(x):
+            return jnp.eye(3)
+
         metric = Riemannian(self.sphere, identity_metric)
 
         # Path: Quarter circle (North Pole -> Equator) in xz-plane
-        theta = jnp.linspace(0, jnp.pi/2, 40)
-        path_x = jnp.stack([jnp.sin(theta), jnp.zeros_like(theta), jnp.cos(theta)], axis=1)
-        path_v = jnp.stack([jnp.cos(theta), jnp.zeros_like(theta), -jnp.sin(theta)], axis=1)
+        theta = jnp.linspace(0, jnp.pi / 2, 40)
+        path_x = jnp.stack(
+            [jnp.sin(theta), jnp.zeros_like(theta), jnp.cos(theta)], axis=1
+        )
+        path_v = jnp.stack(
+            [jnp.cos(theta), jnp.zeros_like(theta), -jnp.sin(theta)], axis=1
+        )
 
         # Non-degenerate vector: lies IN the path plane, requires projection
         vec_start = jnp.array([1.0, 0.0, 0.0])
@@ -193,7 +199,6 @@ class TestTransport(unittest.TestCase):
         # 2. Tangency: <v, x> = 0 at each point
         dots = jnp.sum(vecs * path_x, axis=1)
         np.testing.assert_allclose(dots, jnp.zeros_like(dots), atol=1e-3)
-
 
     def test_randers_norm_drift(self):
         """
@@ -255,8 +260,11 @@ class TestTransport(unittest.TestCase):
 
         # The Randers difference should strictly exceed the Riemannian difference
         # because Gamma(x, v) genuinely depends on v for Randers
-        self.assertGreater(float(diff_randers), float(diff_riem) + 1e-4,
-                           "Randers velocity dependence should exceed Riemannian dt-artifact")
+        self.assertGreater(
+            float(diff_randers),
+            float(diff_riem) + 1e-4,
+            "Randers velocity dependence should exceed Riemannian dt-artifact",
+        )
 
     def test_sphere_holonomy(self):
         """
@@ -269,23 +277,32 @@ class TestTransport(unittest.TestCase):
         complement of the standard solid-angle formula 2*pi*(1-cos(theta)).
         Both are equivalent modulo 2*pi (cos(a) = cos(2*pi - a)).
         """
-        def identity_metric(x): return jnp.eye(3)
+
+        def identity_metric(x):
+            return jnp.eye(3)
+
         metric = Riemannian(self.sphere, identity_metric)
 
         theta = jnp.pi / 4.0
-        t = jnp.linspace(0, 2*jnp.pi, 200)
+        t = jnp.linspace(0, 2 * jnp.pi, 200)
 
-        path_x = jnp.stack([
-            jnp.sin(theta) * jnp.cos(t),
-            jnp.sin(theta) * jnp.sin(t),
-            jnp.full_like(t, jnp.cos(theta))
-        ], axis=1)
+        path_x = jnp.stack(
+            [
+                jnp.sin(theta) * jnp.cos(t),
+                jnp.sin(theta) * jnp.sin(t),
+                jnp.full_like(t, jnp.cos(theta)),
+            ],
+            axis=1,
+        )
 
-        path_v = jnp.stack([
-            -jnp.sin(theta) * jnp.sin(t),
-             jnp.sin(theta) * jnp.cos(t),
-             jnp.zeros_like(t)
-        ], axis=1)
+        path_v = jnp.stack(
+            [
+                -jnp.sin(theta) * jnp.sin(t),
+                jnp.sin(theta) * jnp.cos(t),
+                jnp.zeros_like(t),
+            ],
+            axis=1,
+        )
 
         vec_start = jnp.array([0.0, 1.0, 0.0])
 
@@ -307,12 +324,14 @@ class TestTransport(unittest.TestCase):
         # Use cosine comparison to avoid sign/wrapping ambiguities
         np.testing.assert_allclose(jnp.cos(angle), jnp.cos(expected_angle), atol=1e-2)
 
-
     def test_integrator_convergence_order(self):
         """
         Test that the integrator converges at O(1/N) rate (1st-order forward Euler).
         """
-        def identity_metric(x): return jnp.eye(3)
+
+        def identity_metric(x):
+            return jnp.eye(3)
+
         metric = Riemannian(self.sphere, identity_metric)
         conn = BerwaldConnection(metric)
 
@@ -326,17 +345,23 @@ class TestTransport(unittest.TestCase):
         theta_hat = jnp.array([jnp.cos(theta), 0.0, -jnp.sin(theta)])
 
         def run_transport(N):
-            t = jnp.linspace(0, 2*jnp.pi, N)
-            path_x = jnp.stack([
-                jnp.sin(theta) * jnp.cos(t),
-                jnp.sin(theta) * jnp.sin(t),
-                jnp.full_like(t, jnp.cos(theta))
-            ], axis=1)
-            path_v = jnp.stack([
-                -jnp.sin(theta) * jnp.sin(t),
-                 jnp.sin(theta) * jnp.cos(t),
-                 jnp.zeros_like(t)
-            ], axis=1)
+            t = jnp.linspace(0, 2 * jnp.pi, N)
+            path_x = jnp.stack(
+                [
+                    jnp.sin(theta) * jnp.cos(t),
+                    jnp.sin(theta) * jnp.sin(t),
+                    jnp.full_like(t, jnp.cos(theta)),
+                ],
+                axis=1,
+            )
+            path_v = jnp.stack(
+                [
+                    -jnp.sin(theta) * jnp.sin(t),
+                    jnp.sin(theta) * jnp.cos(t),
+                    jnp.zeros_like(t),
+                ],
+                axis=1,
+            )
 
             vec_end = conn.parallel_transport(path_x, path_v, vec_start)[-1]
 
@@ -348,7 +373,9 @@ class TestTransport(unittest.TestCase):
             exact_theta = jnp.sin(expected_angle)
 
             # Euclidean error in tangent plane
-            return jnp.sqrt((v_end_phi - exact_phi)**2 + (v_end_theta - exact_theta)**2)
+            return jnp.sqrt(
+                (v_end_phi - exact_phi) ** 2 + (v_end_theta - exact_theta) ** 2
+            )
 
         error_20 = run_transport(20)
         error_40 = run_transport(40)
@@ -358,9 +385,14 @@ class TestTransport(unittest.TestCase):
         ratio_20_40 = error_20 / error_40
         ratio_40_80 = error_40 / error_80
 
-        self.assertTrue(1.5 < ratio_20_40 < 2.5, f"1st-order ratio expected near 2, got {ratio_20_40}")
-        self.assertTrue(1.5 < ratio_40_80 < 2.5, f"1st-order ratio expected near 2, got {ratio_40_80}")
-
+        self.assertTrue(
+            1.5 < ratio_20_40 < 2.5,
+            f"1st-order ratio expected near 2, got {ratio_20_40}",
+        )
+        self.assertTrue(
+            1.5 < ratio_40_80 < 2.5,
+            f"1st-order ratio expected near 2, got {ratio_40_80}",
+        )
 
     def test_poincare_half_plane_transport(self):
         """
@@ -395,6 +427,7 @@ class TestTransport(unittest.TestCase):
 
         class PoincareMetric(FinslerMetric):
             """Poincaré half-plane metric: F(x, v) = ||v|| / y."""
+
             def metric_fn(self, x, v):
                 y = jnp.maximum(x[1], 1e-10)  # Ensure y > 0
                 return safe_norm(v) / y
@@ -411,10 +444,16 @@ class TestTransport(unittest.TestCase):
         y_val = 2.0
         # Expected: Gamma^1_12 = Gamma^1_21 = -1/y, Gamma^2_11 = 1/y, Gamma^2_22 = -1/y
         # Note: tolerance is 1e-3 due to Tikhonov regularization in spray (spray_reg)
-        np.testing.assert_allclose(gamma[0, 0, 1], -1.0/y_val, atol=1e-3)  # Gamma^1_12
-        np.testing.assert_allclose(gamma[0, 1, 0], -1.0/y_val, atol=1e-3)  # Gamma^1_21
-        np.testing.assert_allclose(gamma[1, 0, 0],  1.0/y_val, atol=1e-3)  # Gamma^2_11
-        np.testing.assert_allclose(gamma[1, 1, 1], -1.0/y_val, atol=1e-3)  # Gamma^2_22
+        np.testing.assert_allclose(
+            gamma[0, 0, 1], -1.0 / y_val, atol=1e-3
+        )  # Gamma^1_12
+        np.testing.assert_allclose(
+            gamma[0, 1, 0], -1.0 / y_val, atol=1e-3
+        )  # Gamma^1_21
+        np.testing.assert_allclose(gamma[1, 0, 0], 1.0 / y_val, atol=1e-3)  # Gamma^2_11
+        np.testing.assert_allclose(
+            gamma[1, 1, 1], -1.0 / y_val, atol=1e-3
+        )  # Gamma^2_22
 
         # --- 2. Transport along vertical geodesic ---
         N = 200
@@ -443,9 +482,12 @@ class TestTransport(unittest.TestCase):
         # If Gamma were 0, the vector would stay at (1, 0)
         # and the norm at the end would be 1/e ≈ 0.368, not 1.0
         naive_norm = metric.metric_fn(path_x[-1], vec_start)  # ||[1,0]||/e
-        self.assertLess(float(naive_norm), 0.5,
-                        "Sanity check: without transport, norm should drop significantly")
+        self.assertLess(
+            float(naive_norm),
+            0.5,
+            "Sanity check: without transport, norm should drop significantly",
+        )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

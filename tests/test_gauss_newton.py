@@ -75,7 +75,10 @@ class TestGaussNewtonGeodesic(unittest.TestCase):
             warm += np.random.RandomState(0).randn(N + 1, D).astype(np.float32) * 0.03
             solver = GaussNewtonGeodesic(iterations=25, mu0=1e-3)
             traj = solver.solve(
-                metric, ring_pt(0, D), ring_pt(th, D), n_steps=N,
+                metric,
+                ring_pt(0, D),
+                ring_pt(th, D),
+                n_steps=N,
                 init_path=jnp.asarray(warm),
             )
             rmses.append(arc_rmse(traj.xs, 0, th, D))
@@ -87,9 +90,7 @@ class TestGaussNewtonGeodesic(unittest.TestCase):
         D = 4
         metric = ring_metric(D, 2.0, 0.4)
         solver = GaussNewtonGeodesic(iterations=10)
-        jit_solve = jax.jit(
-            lambda a, b: solver.solve(metric, a, b, n_steps=8)
-        )
+        jit_solve = jax.jit(lambda a, b: solver.solve(metric, a, b, n_steps=8))
         traj = jit_solve(ring_pt(0.0, D), ring_pt(0.5, D))
         self.assertEqual(traj.xs.shape, (9, D))
         self.assertTrue(np.all(np.isfinite(np.array(traj.xs))))
@@ -114,15 +115,16 @@ class TestGaussNewtonGeodesic(unittest.TestCase):
 
         H = np.zeros((n * D, n * D))
         for k in range(n):
-            H[k * D:(k + 1) * D, k * D:(k + 1) * D] = B[k]
+            H[k * D : (k + 1) * D, k * D : (k + 1) * D] = B[k]
             if k > 0:
-                H[k * D:(k + 1) * D, (k - 1) * D:k * D] = A[k]
-                H[(k - 1) * D:k * D, k * D:(k + 1) * D] = C[k - 1]
+                H[k * D : (k + 1) * D, (k - 1) * D : k * D] = A[k]
+                H[(k - 1) * D : k * D, k * D : (k + 1) * D] = C[k - 1]
         x_dense = np.linalg.solve(H, rhs.reshape(-1)).reshape(n, D)
 
         x_bt = np.asarray(
-            _block_thomas(jnp.asarray(A), jnp.asarray(B), jnp.asarray(C),
-                          jnp.asarray(rhs), 0.0)
+            _block_thomas(
+                jnp.asarray(A), jnp.asarray(B), jnp.asarray(C), jnp.asarray(rhs), 0.0
+            )
         )
         self.assertLess(float(np.max(np.abs(x_bt - x_dense))), 1e-5)
 
@@ -154,16 +156,27 @@ class TestContinuation(unittest.TestCase):
             ring_metric(D, 8.0, w), ring_pt(0, D), ring_pt(th, D), n_steps=32
         )
         cold_E = float(cold_traj.energy)
-        self.assertTrue(not np.isfinite(cold_E) or cold_E > 1.0)  # diverged / far from arc
+        self.assertTrue(
+            not np.isfinite(cold_E) or cold_E > 1.0
+        )  # diverged / far from arc
 
         # Continuation recipe recovers the arc.
         stages = [
-            (AVBDSolver(step_size=0.05, iterations=300, grad_clip=10.0),
-             ring_metric(D, 2.0, w), 8),
-            (AVBDSolver(step_size=0.05, iterations=300, grad_clip=10.0),
-             ring_metric(D, 4.0, w), 16),
-            (AVBDSolver(step_size=0.05, iterations=500, grad_clip=10.0),
-             ring_metric(D, 8.0, w), 32),
+            (
+                AVBDSolver(step_size=0.05, iterations=300, grad_clip=10.0),
+                ring_metric(D, 2.0, w),
+                8,
+            ),
+            (
+                AVBDSolver(step_size=0.05, iterations=300, grad_clip=10.0),
+                ring_metric(D, 4.0, w),
+                16,
+            ),
+            (
+                AVBDSolver(step_size=0.05, iterations=500, grad_clip=10.0),
+                ring_metric(D, 8.0, w),
+                32,
+            ),
         ]
         traj = solve_continuation(stages, ring_pt(0, D), ring_pt(th, D))
         self.assertLess(arc_rmse(traj.xs, 0, th, D), 0.05)
@@ -172,10 +185,12 @@ class TestContinuation(unittest.TestCase):
         """Continuation accepts a GaussNewtonGeodesic polishing stage."""
         D, th, w = 32, np.deg2rad(130), 0.33
         stages = [
-            (AVBDSolver(step_size=0.05, iterations=300, grad_clip=10.0),
-             ring_metric(D, 2.0, w), 12),
-            (GaussNewtonGeodesic(iterations=30, mu0=1e-2),
-             ring_metric(D, 5.0, w), 24),
+            (
+                AVBDSolver(step_size=0.05, iterations=300, grad_clip=10.0),
+                ring_metric(D, 2.0, w),
+                12,
+            ),
+            (GaussNewtonGeodesic(iterations=30, mu0=1e-2), ring_metric(D, 5.0, w), 24),
         ]
         traj = solve_continuation(stages, ring_pt(0, D), ring_pt(th, D))
         self.assertLess(arc_rmse(traj.xs, 0, th, D), 0.06)

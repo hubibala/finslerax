@@ -9,6 +9,7 @@ from ham.solvers.mesh_eikonal import MeshEikonalSolver, _fast_mesh_solve
 
 class DummyRandersMetric(AsymmetricMetric):
     wind_scale: float = eqx.field(static=True)
+
     def __init__(self, dim: int, wind_scale: float = 0.0):
         self.manifold = EuclideanSpace(dim)
         self.wind_scale = float(wind_scale)
@@ -23,19 +24,15 @@ class DummyRandersMetric(AsymmetricMetric):
         lam = 1.0 - w_norm_sq
         return H, W, lam
 
+
 def _create_simple_mesh():
     # A simple planar mesh (a square with two triangles)
-    vertices = jnp.array([
-        [0.0, 0.0],
-        [1.0, 0.0],
-        [0.0, 1.0],
-        [1.0, 1.0]
-    ], dtype=jnp.float32)
-    faces = jnp.array([
-        [0, 1, 2],
-        [1, 3, 2]
-    ], dtype=jnp.int32)
+    vertices = jnp.array(
+        [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]], dtype=jnp.float32
+    )
+    faces = jnp.array([[0, 1, 2], [1, 3, 2]], dtype=jnp.int32)
     return vertices, faces
+
 
 def test_mesh_solver_forward():
     vertices, faces = _create_simple_mesh()
@@ -55,6 +52,7 @@ def test_mesh_solver_forward():
     max_error = jnp.max(jnp.abs(T - T_analytical))
     assert max_error < 0.35, f"Max error {max_error} too large"
 
+
 def test_mesh_sweeping_gradients():
     from jax.test_util import check_grads
 
@@ -73,12 +71,17 @@ def test_mesh_sweeping_gradients():
         g_tensor = jnp.asarray(g_tensor)
         b_tensor = jnp.asarray(b_tensor)
         return _fast_mesh_solve(
-            g_tensor, b_tensor, source_mask,
-            mesh_adj.sweep_orderings, mesh_adj.vertex_adjacency,
-            vertices, 50, 1e-6
+            g_tensor,
+            b_tensor,
+            source_mask,
+            mesh_adj.sweep_orderings,
+            mesh_adj.vertex_adjacency,
+            vertices,
+            50,
+            1e-6,
         )
 
-    check_grads(fwd, (G_faces, B_faces), order=1, modes=['rev'], eps=1e-3)
+    check_grads(fwd, (G_faces, B_faces), order=1, modes=["rev"], eps=1e-3)
 
 
 # ---------------------------------------------------------------------------
@@ -138,8 +141,9 @@ def test_mesh_constant_wind_directional():
     mesh_adj = MeshAdjacency.build(verts, faces, num_ref_points=2)
 
     solver = MeshEikonalSolver(max_iters=100, tol=1e-6)
-    T = solver.solve(ConstWindMetric(w), mesh_adj, verts, faces,
-                     jnp.array([[0.0, 0.0]]))
+    T = solver.solve(
+        ConstWindMetric(w), mesh_adj, verts, faces, jnp.array([[0.0, 0.0]])
+    )
     Tg = np.array(T).reshape(nm, nm)
 
     ic = nm // 2

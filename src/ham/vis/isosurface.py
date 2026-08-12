@@ -7,7 +7,6 @@ isosurfaces from volumetric arrival time fields while ensuring that geometric
 coordinates remain differentiable with respect to the input grid.
 """
 
-
 import jax
 import jax.numpy as jnp
 

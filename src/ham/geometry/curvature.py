@@ -224,5 +224,3 @@ def flag_curvature_sample(
     t2 = t2 / jnp.maximum(jnp.sqrt(jnp.maximum(g_t2_t2, 0.0)), NORM_EPS)
 
     return sectional_curvature(metric, x, t1, t2)
-
-

@@ -1,4 +1,3 @@
-
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
@@ -75,7 +74,9 @@ def plot_poincare_disk(
 
     # 4. Draw Vectors (Wind)
     if vectors is not None:
-        vectors_p = np.array(project_vector_to_poincare(jnp.array(points), jnp.array(vectors)))
+        vectors_p = np.array(
+            project_vector_to_poincare(jnp.array(points), jnp.array(vectors))
+        )
         # Subsample for clarity if too many
         if len(points) > 500:
             idx = np.random.choice(len(points), 500, replace=False)

@@ -24,7 +24,6 @@ See Also:
     ham.models.learned       : NeuralRanders (position-conditioned variant).
 """
 
-
 import equinox as eqx
 import jax
 import jax.numpy as jnp

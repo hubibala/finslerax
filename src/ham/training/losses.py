@@ -674,9 +674,7 @@ class ArrivalTimeLoss(eqx.Module):
             # per-source geodesic arc lengths — the geodesic analogue of the
             # multi-ignition (union) eikonal field.
             def single_arrival_time(x_target):
-                return jnp.min(
-                    jax.vmap(lambda s: arrival_from(s, x_target))(source)
-                )
+                return jnp.min(jax.vmap(lambda s: arrival_from(s, x_target))(source))
         else:
 
             def single_arrival_time(x_target):

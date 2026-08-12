@@ -23,19 +23,29 @@ from ham.models.learned import (
 
 class MockManifold(Manifold):
     """Trivial R^3 manifold for testing."""
+
     @property
-    def ambient_dim(self): return 3
+    def ambient_dim(self):
+        return 3
+
     @property
-    def intrinsic_dim(self): return 3
-    def project(self, x): return x
-    def to_tangent(self, x, v): return v
-    def retract(self, x, v): return x + v
+    def intrinsic_dim(self):
+        return 3
+
+    def project(self, x):
+        return x
+
+    def to_tangent(self, x, v):
+        return v
+
+    def retract(self, x, v):
+        return x + v
+
     def random_sample(self, key, shape):
         return jax.random.normal(key, (*shape, 3))
 
 
 class TestNeuralRanders(unittest.TestCase):
-
     def setUp(self):
         self.key = jax.random.PRNGKey(0)
         self.manifold = MockManifold()
@@ -48,14 +58,16 @@ class TestNeuralRanders(unittest.TestCase):
         huge_w_net = eqx.tree_at(
             lambda m: m.mlp.layers[-1].weight,
             self.metric.w_net,
-            jnp.ones_like(self.metric.w_net.mlp.layers[-1].weight) * 1000.0
+            jnp.ones_like(self.metric.w_net.mlp.layers[-1].weight) * 1000.0,
         )
         broken_metric = eqx.tree_at(lambda m: m.w_net, self.metric, huge_w_net)
 
         H, W, lam = broken_metric.zermelo_data(x)
         w_norm = jnp.sqrt(jnp.dot(W, jnp.dot(H, W)))
 
-        self.assertLess(float(w_norm), 1.0, "Wind vector violated convexity constraint!")
+        self.assertLess(
+            float(w_norm), 1.0, "Wind vector violated convexity constraint!"
+        )
         self.assertGreater(float(lam), 0.0, "Lambda became non-positive!")
 
     def test_gradients_exist(self):
@@ -76,12 +88,14 @@ class TestNeuralRanders(unittest.TestCase):
 
         # Check gradient flow to both H and W nets
         w_grad = grads.w_net.mlp.layers[0].weight
-        self.assertGreater(float(jnp.abs(w_grad).max()), 1e-10,
-                           "No gradient flow to Wind Network")
+        self.assertGreater(
+            float(jnp.abs(w_grad).max()), 1e-10, "No gradient flow to Wind Network"
+        )
 
         h_grad = grads.h_net.mlp.layers[0].weight
-        self.assertGreater(float(jnp.abs(h_grad).max()), 1e-10,
-                           "No gradient flow to H Network")
+        self.assertGreater(
+            float(jnp.abs(h_grad).max()), 1e-10, "No gradient flow to H Network"
+        )
 
     def test_jit_compatible(self):
         """metric_fn and energy must work under jit."""
@@ -90,7 +104,9 @@ class TestNeuralRanders(unittest.TestCase):
         jit_energy = eqx.filter_jit(self.metric.energy)
         result = jit_energy(x, v)
         self.assertTrue(jnp.isfinite(result))
-        np.testing.assert_allclose(float(result), float(self.metric.energy(x, v)), atol=1e-5)
+        np.testing.assert_allclose(
+            float(result), float(self.metric.energy(x, v)), atol=1e-5
+        )
 
     def test_vmap_compatible(self):
         """Energy must work under vmap for batch evaluation."""
@@ -105,7 +121,9 @@ class TestNeuralRanders(unittest.TestCase):
         x = jnp.array([0.1, 0.2, 0.3])
         v = jnp.array([1.0, 0.5, -0.3])
         self.assertGreaterEqual(float(self.metric.metric_fn(x, v)), 0.0)
-        self.assertAlmostEqual(float(self.metric.metric_fn(x, jnp.zeros(3))), 0.0, places=4)
+        self.assertAlmostEqual(
+            float(self.metric.metric_fn(x, jnp.zeros(3))), 0.0, places=4
+        )
 
 
 class TestNeuralRiemannian(unittest.TestCase):
@@ -113,7 +131,9 @@ class TestNeuralRiemannian(unittest.TestCase):
 
     def setUp(self):
         self.manifold = MockManifold()
-        self.metric = NeuralRiemannian(self.manifold, jax.random.PRNGKey(1), hidden_dim=16)
+        self.metric = NeuralRiemannian(
+            self.manifold, jax.random.PRNGKey(1), hidden_dim=16
+        )
 
     def test_metric_fn_positive(self):
         x = jnp.array([0.1, 0.2, 0.3])
@@ -210,7 +230,9 @@ class TestKernelWindField(unittest.TestCase):
         w = self.kwf(z)
         # Should be dominated by [1.0, 0.0] — use generous tolerance
         # since other anchors contribute
-        self.assertGreater(float(w[0]), 0.5, "Wind should point mostly in anchor direction")
+        self.assertGreater(
+            float(w[0]), 0.5, "Wind should point mostly in anchor direction"
+        )
 
     def test_jit_compatible(self):
         z = jnp.array([0.5, 0.5])
@@ -224,5 +246,5 @@ class TestKernelWindField(unittest.TestCase):
         self.assertTrue(jnp.all(jnp.isfinite(result)))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

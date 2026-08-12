@@ -20,17 +20,30 @@ from ham.solvers.geodesic import ExponentialMap
 def solver():
     return ExponentialMap(step_size=0.0005, max_steps=2000)
 
+
 class Plane(Manifold):
     """Mock manifold for flat space tests."""
+
     @property
-    def ambient_dim(self) -> int: return 2
+    def ambient_dim(self) -> int:
+        return 2
+
     @property
-    def intrinsic_dim(self) -> int: return 2
-    def project(self, x): return x
-    def to_tangent(self, x, v): return v
-    def retract(self, x, v): return x + v
+    def intrinsic_dim(self) -> int:
+        return 2
+
+    def project(self, x):
+        return x
+
+    def to_tangent(self, x, v):
+        return v
+
+    def retract(self, x, v):
+        return x + v
+
     def random_sample(self, key, shape):
         return jax.random.normal(key, (*shape, 2))
+
 
 def test_euclidean_ballistic(solver):
     """In flat space, a geodesic is a straight line x(t) = x0 + v0*t."""
@@ -41,6 +54,7 @@ def test_euclidean_ballistic(solver):
     x_final = solver.shoot(metric, x0, v0)
     expected = x0 + v0
     np.testing.assert_allclose(x_final, expected, atol=1e-4)
+
 
 def test_sphere_great_circle(solver):
     """On a Unit Sphere, geodesics are great circles."""
@@ -55,12 +69,18 @@ def test_sphere_great_circle(solver):
     expected = jnp.array([0.0, 0.0, 1.0])
     np.testing.assert_allclose(x_final, expected, atol=1e-3)
 
+
 def test_energy_conservation(solver):
     """Energy E(x, v) must be constant along a geodesic flow."""
     sphere = Sphere(radius=1.0)
+
     # Use Randers wind which is non-trivial but conserves energy
-    def w_net(x): return 0.2 * jnp.array([-x[1], x[0], 0.0])
-    def h_net(x): return jnp.eye(3)
+    def w_net(x):
+        return 0.2 * jnp.array([-x[1], x[0], 0.0])
+
+    def h_net(x):
+        return jnp.eye(3)
+
     metric = Randers(sphere, h_net, w_net)
 
     x0 = jnp.array([1.0, 0.0, 0.0])
@@ -76,6 +96,7 @@ def test_energy_conservation(solver):
     # Tolerance 1e-3 is safe for regularized Randers
     assert max_rel_err < 1e-3
 
+
 def test_zero_velocity(solver):
     """Geodesic with zero velocity should remain stationary."""
     sphere = Sphere(radius=1.0)
@@ -84,6 +105,7 @@ def test_zero_velocity(solver):
     v0 = jnp.zeros(3)
     xf = solver.shoot(metric, x0, v0)
     np.testing.assert_allclose(xf, x0, atol=1e-5)
+
 
 def test_jit_and_vmap_compatibility(solver):
     """Verify solver works under JAX transforms."""
@@ -97,6 +119,7 @@ def test_jit_and_vmap_compatibility(solver):
     xf2 = solver.shoot(metric, x0, v0)
     np.testing.assert_allclose(xf1, xf2)
 
+
 def test_differentiability(solver):
     """Verify gradient flow through the IVP solver."""
     sphere = Sphere(radius=1.0)
@@ -104,10 +127,15 @@ def test_differentiability(solver):
     v0 = sphere.to_tangent(x0, jnp.array([0.0, 1.0, 1.0]))
 
     target = jnp.array([0.0, 0.0, 1.0])
+
     def loss(wind_scale):
         # Scale the wind in a Randers metric
-        def w_net(x): return wind_scale * jnp.array([-x[1], x[0], 0.0])
-        def h_net(x): return jnp.eye(3)
+        def w_net(x):
+            return wind_scale * jnp.array([-x[1], x[0], 0.0])
+
+        def h_net(x):
+            return jnp.eye(3)
+
         metric = Randers(sphere, h_net, w_net)
         xf = solver.shoot(metric, x0, v0)
         return jnp.sum(xf * target)

@@ -16,7 +16,6 @@ Reference:
 See also: spec/ARCH_SPEC.md § 4.2.
 """
 
-
 import jax.numpy as jnp
 import numpy as np
 

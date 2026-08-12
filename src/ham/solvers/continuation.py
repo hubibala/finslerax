@@ -82,8 +82,11 @@ def reparametrize_arclength(path: jax.Array, n_steps: int | None = None) -> jax.
     s = jnp.concatenate([jnp.zeros(1), jnp.cumsum(seg)])
     total = s[-1]
     # Guard a degenerate (zero-length) path: fall back to index parametrisation.
-    src_t = jnp.where(total > 0, s / jnp.where(total > 0, total, 1.0),
-                      jnp.linspace(0.0, 1.0, path.shape[0]))
+    src_t = jnp.where(
+        total > 0,
+        s / jnp.where(total > 0, total, 1.0),
+        jnp.linspace(0.0, 1.0, path.shape[0]),
+    )
     dst_t = jnp.linspace(0.0, 1.0, n_steps + 1)
     return jax.vmap(lambda col: jnp.interp(dst_t, src_t, col), in_axes=1, out_axes=1)(
         path
@@ -136,9 +139,7 @@ def solve_continuation(
     for solver, metric, n_steps in stages:
         if path is not None and path.shape[0] != n_steps + 1:
             path = resample_path(path, n_steps, project=metric.manifold.project)
-        traj = solver.solve(
-            metric, p_start, p_end, n_steps=n_steps, init_path=path
-        )
+        traj = solver.solve(metric, p_start, p_end, n_steps=n_steps, init_path=path)
         path = traj.xs
         history.append(traj)
 

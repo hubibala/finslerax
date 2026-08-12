@@ -34,8 +34,10 @@ from ham.utils.math import safe_norm
 # Synthetic data helpers
 # ──────────────────────────────────────────────────────────
 
+
 class SyntheticDataset(NamedTuple):
     """Pairs of (start, end) points on a manifold."""
+
     starts: jnp.ndarray
     ends: jnp.ndarray
 
@@ -87,6 +89,7 @@ def generate_sphere_vortex(n: int = 400, noise: float = 0.0):
     ends = jax.vmap(step)(starts, noise_keys)
     return SyntheticDataset(starts, ends), true_wind
 
+
 def generate_hyperboloid_vortex(n: int = 400, noise: float = 0.0):
     """Rotational flow on H^2 (upper sheet of two-sheeted hyperboloid).
 
@@ -127,6 +130,7 @@ def generate_hyperboloid_vortex(n: int = 400, noise: float = 0.0):
 # Modular losses for direct wind alignment
 # ──────────────────────────────────────────────────────────
 
+
 class DirectWindAlignmentLoss(LossComponent):
     """
     Aligns W(start) with the log_map displacement (start → end).
@@ -134,6 +138,7 @@ class DirectWindAlignmentLoss(LossComponent):
     This is the core learning signal: the wind should point from
     start to end with the correct magnitude.
     """
+
     def __init__(self, weight: float = 1.0):
         super().__init__(weight, "WindAlign")
 
@@ -147,20 +152,24 @@ class DirectWindAlignmentLoss(LossComponent):
 
 class WindRegularizationLoss(LossComponent):
     """Light Jacobian penalty to encourage spatial smoothness of W."""
+
     def __init__(self, weight: float = 0.01):
         super().__init__(weight, "WindReg")
 
     def __call__(self, model, batch, key):
         start = batch[0]
+
         def get_w(pt):
             _, W, _ = model.zermelo_data(pt)
             return W
+
         jac = jax.jacfwd(get_w)(start)
-        return jnp.mean(jac ** 2) * self.weight
+        return jnp.mean(jac**2) * self.weight
 
 
 class MetricIdentityLoss(LossComponent):
     """Anchors H(x) near Identity to prevent degenerate metric collapse."""
+
     def __init__(self, weight: float = 1.0):
         super().__init__(weight, "H_Id")
 
@@ -175,8 +184,10 @@ class MetricIdentityLoss(LossComponent):
 # Adapter: wraps NeuralRanders as a pipeline-compatible model
 # ──────────────────────────────────────────────────────────
 
+
 class MetricModel(eqx.Module):
     """Thin wrapper so the pipeline can treat the metric as a model."""
+
     metric: NeuralRanders
     manifold: object  # for LossComponent API compatibility
 
@@ -194,6 +205,7 @@ class MetricModel(eqx.Module):
 
 class PairDataset:
     """Minimal dataset wrapper compatible with HAMPipeline."""
+
     def __init__(self, starts, ends):
         self.X = starts
         self.V = ends  # V slot stores the "end" points for these tests
@@ -221,9 +233,15 @@ def cosine_similarity(a, b):
 # Training helper
 # ──────────────────────────────────────────────────────────
 
-def train_wind_field(manifold, dataset: SyntheticDataset,
-                     epochs: int = 80, lr: float = 5e-3,
-                     batch_size: int = 64, seed: int = 2025):
+
+def train_wind_field(
+    manifold,
+    dataset: SyntheticDataset,
+    epochs: int = 80,
+    lr: float = 5e-3,
+    batch_size: int = 64,
+    seed: int = 2025,
+):
     """
     Train a NeuralRanders metric to recover the wind field from pair data.
 
@@ -257,6 +275,7 @@ def train_wind_field(manifold, dataset: SyntheticDataset,
 # Test Suite
 # ──────────────────────────────────────────────────────────
 
+
 class TestGeodesicLearning(unittest.TestCase):
     """
     Integration tests verifying that NeuralRanders can recover known
@@ -270,11 +289,14 @@ class TestGeodesicLearning(unittest.TestCase):
         trained = train_wind_field(manifold, dataset, epochs=60, lr=5e-3)
 
         # Evaluate on a grid
-        eval_pts = jax.random.uniform(jax.random.PRNGKey(99), (100, 2),
-                                      minval=-1.5, maxval=1.5)
+        eval_pts = jax.random.uniform(
+            jax.random.PRNGKey(99), (100, 2), minval=-1.5, maxval=1.5
+        )
+
         def get_w(pt):
             _, W, _ = trained.zermelo_data(pt)
             return W
+
         W_pred = jax.vmap(get_w)(eval_pts)
 
         # True flow is [1, 0] * 0.5
@@ -282,8 +304,11 @@ class TestGeodesicLearning(unittest.TestCase):
         cos_sim = cosine_similarity(true_W, W_pred)
 
         print(f"[River] Cosine similarity: {cos_sim:.4f}")
-        self.assertGreater(cos_sim, 0.85,
-                           f"River wind should be aligned rightward, got cos={cos_sim:.3f}")
+        self.assertGreater(
+            cos_sim,
+            0.85,
+            f"River wind should be aligned rightward, got cos={cos_sim:.3f}",
+        )
 
     def test_vortex_direction(self):
         """Rotational flow: learned W should capture CCW rotation."""
@@ -302,8 +327,9 @@ class TestGeodesicLearning(unittest.TestCase):
         cos_sim = cosine_similarity(true_disp, pred_disp)
 
         print(f"[Vortex] Cosine similarity: {cos_sim:.4f}")
-        self.assertGreater(cos_sim, 0.80,
-                           f"Vortex wind should capture rotation, got cos={cos_sim:.3f}")
+        self.assertGreater(
+            cos_sim, 0.80, f"Vortex wind should capture rotation, got cos={cos_sim:.3f}"
+        )
 
     def test_hyperboloid_vortex_direction(self):
         """Rotational flow on H^2: learned W should match tangent wind."""
@@ -314,16 +340,21 @@ class TestGeodesicLearning(unittest.TestCase):
         eval_pts = jax.vmap(manifold.random_sample, in_axes=(0, None))(
             jax.random.split(jax.random.PRNGKey(999), 200), ()
         )
+
         def get_w(pt):
             _, W, _ = trained.zermelo_data(pt)
             return W
+
         W_pred = jax.vmap(get_w)(eval_pts)
         W_true = jax.vmap(true_wind_fn)(eval_pts)
         cos_sim = cosine_similarity(W_true, W_pred)
 
         print(f"[Hyperboloid] Cosine similarity: {cos_sim:.4f}")
-        self.assertGreater(cos_sim, 0.60,
-                           f"Hyperboloid wind should match true vortex, got cos={cos_sim:.3f}")
+        self.assertGreater(
+            cos_sim,
+            0.60,
+            f"Hyperboloid wind should match true vortex, got cos={cos_sim:.3f}",
+        )
 
     def test_sphere_vortex_direction(self):
         """Rotational flow on S^2: learned W should match true tangent wind."""
@@ -335,9 +366,11 @@ class TestGeodesicLearning(unittest.TestCase):
         eval_pts = jax.vmap(manifold.random_sample, in_axes=(0, None))(
             jax.random.split(jax.random.PRNGKey(999), 200), ()
         )
+
         def get_w(pt):
             _, W, _ = trained.zermelo_data(pt)
             return W
+
         W_pred = jax.vmap(get_w)(eval_pts)
         W_true = jax.vmap(true_wind_fn)(eval_pts)
 
@@ -345,8 +378,11 @@ class TestGeodesicLearning(unittest.TestCase):
         cos_sim = cosine_similarity(W_true, W_pred)
 
         print(f"[Sphere] Cosine similarity: {cos_sim:.4f}")
-        self.assertGreater(cos_sim, 0.70,
-                           f"Sphere wind should match true vortex, got cos={cos_sim:.3f}")
+        self.assertGreater(
+            cos_sim,
+            0.70,
+            f"Sphere wind should match true vortex, got cos={cos_sim:.3f}",
+        )
 
     def test_loss_decreases(self):
         """Sanity: training loss should monotonically decrease (on average)."""
@@ -363,6 +399,7 @@ class TestGeodesicLearning(unittest.TestCase):
         def eval_loss(m, starts, ends):
             def per_sample(s, e):
                 return loss_fn(m, (s, e), jax.random.PRNGKey(0))
+
             return jnp.mean(jax.vmap(per_sample)(starts, ends))
 
         initial_loss = float(eval_loss(model, dataset.starts, dataset.ends))
@@ -372,8 +409,11 @@ class TestGeodesicLearning(unittest.TestCase):
         final_loss = float(eval_loss(trained, dataset.starts, dataset.ends))
 
         print(f"[LossCheck] Initial: {initial_loss:.4f} -> Final: {final_loss:.4f}")
-        self.assertLess(final_loss, initial_loss * 0.5,
-                        "Loss should decrease significantly during training")
+        self.assertLess(
+            final_loss,
+            initial_loss * 0.5,
+            "Loss should decrease significantly during training",
+        )
 
 
 if __name__ == "__main__":

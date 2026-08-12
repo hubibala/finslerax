@@ -42,7 +42,6 @@ class TestRandomFourierFeatures(unittest.TestCase):
 
 
 class TestNetworks(unittest.TestCase):
-
     def setUp(self):
         self.key = jax.random.PRNGKey(42)
         self.dim = 3
@@ -67,7 +66,7 @@ class TestNetworks(unittest.TestCase):
 
         # 3. Grad (Differentiate w.r.t model parameters)
         def loss(model, val):
-            return jnp.sum(model(val)**2)
+            return jnp.sum(model(val) ** 2)
 
         grad_fn = eqx.filter_grad(loss)
         g_model = grad_fn(vf, x)
@@ -106,8 +105,11 @@ class TestNetworks(unittest.TestCase):
             # Positive Definite: minimum eigenvalue >= PSD_EPS floor
             eigs = jnp.linalg.eigvalsh(G)
             min_eig = float(jnp.min(eigs))
-            self.assertGreaterEqual(min_eig, 0.9 * PSD_EPS,
-                                    f"Min eigenvalue {min_eig} below regularisation floor")
+            self.assertGreaterEqual(
+                min_eig,
+                0.9 * PSD_EPS,
+                f"Min eigenvalue {min_eig} below regularisation floor",
+            )
 
     def test_psd_jit_vmap_grad(self):
         """PSDMatrixField must work under jit, vmap, and grad."""
@@ -127,14 +129,16 @@ class TestNetworks(unittest.TestCase):
         # Grad (through trace of G)
         def scalar_fn(model, v):
             return jnp.trace(model(v))
+
         grad_model = eqx.filter_grad(scalar_fn)(psd_net, x)
         leaves = jax.tree_util.tree_leaves(grad_model.mlp)
         self.assertTrue(all(jnp.all(jnp.isfinite(l)) for l in leaves))
 
     def test_psd_with_fourier(self):
         """PSDMatrixField with use_fourier=True should still be SPD."""
-        psd_net = PSDMatrixField(dim=self.dim, hidden_dim=16, depth=2,
-                                 key=self.key, use_fourier=True)
+        psd_net = PSDMatrixField(
+            dim=self.dim, hidden_dim=16, depth=2, key=self.key, use_fourier=True
+        )
         x = jnp.array([0.1, 0.2, 0.3])
         G = psd_net(x)
         self.assertEqual(G.shape, (self.dim, self.dim))
@@ -151,8 +155,10 @@ class TestNetworks(unittest.TestCase):
         out_four = vf_four(x)
 
         # They should differ significantly due to frequency mapping
-        self.assertFalse(jnp.allclose(out_base, out_four),
-                         "Fourier and non-Fourier outputs should differ")
+        self.assertFalse(
+            jnp.allclose(out_base, out_four),
+            "Fourier and non-Fourier outputs should differ",
+        )
 
     def test_even_hidden_dim_assertion(self):
         """VectorField with odd hidden_dim and use_fourier=True should raise."""
@@ -160,5 +166,5 @@ class TestNetworks(unittest.TestCase):
             VectorField(3, 33, 2, self.key, use_fourier=True)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
