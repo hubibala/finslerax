@@ -88,9 +88,9 @@ DEFAULT_NP_DTYPE: np.dtype = default_np_dtype()
 #
 # Stability epsilons must scale with the working precision.
 #
-# The float32 branch reproduces the legacy constants *exactly* so that
-# default-mode behaviour is unchanged. The float64 branch is derived from the
-# double-precision machine epsilon ``finfo(float64).eps ≈ 2.22e-16``:
+# The float32 values are empirical floors tuned against the single-precision
+# solvers. The float64 branch is derived from the double-precision machine
+# epsilon ``finfo(float64).eps ≈ 2.22e-16``:
 #
 #   - "grad" / "psd" / "norm" are additive floors -> scale ~ machine epsilon.
 #   - "taylor" is a cancellation crossover (naive sin(x)/x etc. loses precision
@@ -136,8 +136,8 @@ def eps(kind: EpsKind) -> float:
             string with the same value is also accepted and coerced).
 
     Returns:
-        The float32 historical value when x64 is off, or the tightened
-        float64 value when x64 is on.
+        The float32 floor when x64 is off, or the tightened float64 floor
+        when x64 is on.
 
     Raises:
         ValueError: If ``kind`` is not a recognised :class:`EpsKind`.

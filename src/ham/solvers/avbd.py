@@ -27,7 +27,8 @@ Classes:
 See also: spec/ARCH_SPEC.md § 4.2.
 """
 
-from typing import Callable, NamedTuple, Optional
+from collections.abc import Callable
+from typing import NamedTuple
 
 import equinox as eqx
 import jax
@@ -425,10 +426,10 @@ class AVBDSolver(eqx.Module):
         p_start: jax.Array,
         p_end: jax.Array,
         n_steps: int = 10,
-        constraints: Optional[list[Callable[[jax.Array], jax.Array]]] = None,
+        constraints: list[Callable[[jax.Array], jax.Array]] | None = None,
         train_mode: bool = True,
-        key: Optional[jax.Array] = None,
-        init_path: Optional[jax.Array] = None,
+        key: jax.Array | None = None,
+        init_path: jax.Array | None = None,
     ) -> Trajectory:
         """Finds the energy-minimizing geodesic between two points.
 
@@ -502,10 +503,10 @@ class AVBDSolver(eqx.Module):
         p_start: jax.Array,
         p_end: jax.Array,
         n_steps: int = 10,
-        constraints: Optional[list[Callable[[jax.Array], jax.Array]]] = None,
+        constraints: list[Callable[[jax.Array], jax.Array]] | None = None,
         train_mode: bool = True,
-        key: Optional[jax.Array] = None,
-        init_path: Optional[jax.Array] = None,
+        key: jax.Array | None = None,
+        init_path: jax.Array | None = None,
     ) -> Trajectory:
         """Core iterative AVBD solver (unrolled backprop).
 

@@ -181,7 +181,7 @@ def plot_wavefront_isosurfaces(ax, levels):
     """Nested arrival-time isosurfaces via differentiable marching cubes."""
     cmap = plt.get_cmap("turbo")
     t_max = max(levels)
-    for t_iso, alpha in zip(levels, (0.55, 0.40, 0.22)):
+    for t_iso, alpha in zip(levels, (0.55, 0.40, 0.22), strict=True):
         tris, valid = differentiable_marching_cubes(T_vol, float(t_iso), EXTENT)
         tris_np = np.asarray(tris).reshape(-1, 3, 3)
         mask = np.asarray(valid).reshape(-1)

@@ -1,6 +1,7 @@
 """Riemannian metric implementation."""
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import jax
 import jax.numpy as jnp

@@ -34,7 +34,6 @@ Reference:
     calculus (Rumpf-Wirth) and trajectory-optimisation Riccati/LQR structure.
 """
 
-from typing import Optional
 
 import equinox as eqx
 import jax
@@ -155,7 +154,7 @@ class GaussNewtonGeodesic(eqx.Module):
         p_start: jax.Array,
         p_end: jax.Array,
         n_steps: int = 10,
-        init_path: Optional[jax.Array] = None,
+        init_path: jax.Array | None = None,
         train_mode: bool = True,
     ) -> Trajectory:
         """Find the energy-minimising geodesic between two points.

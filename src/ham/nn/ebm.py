@@ -4,7 +4,6 @@ Provides the ScalarEnergyField, which maps states in the ambient space to a
 scalar energy value E(x); the induced density is ``p(x) \\propto exp(-E(x))``.
 """
 
-from typing import Optional
 
 import equinox as eqx
 import jax
@@ -44,7 +43,7 @@ class ScalarEnergyField(eqx.Module):
     Uses SiLU (Swish) activation for smooth, non-monotonic gradients.
     """
 
-    embedding: Optional[RandomFourierFeatures]
+    embedding: RandomFourierFeatures | None
     mlp: eqx.nn.MLP
     energy_out: eqx.nn.Linear
 

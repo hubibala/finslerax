@@ -22,7 +22,6 @@ The graph build uses NumPy + :func:`scipy.sparse.csgraph.dijkstra` (SciPy is a
 hard dependency); no extra packages are required.
 """
 
-from typing import Optional
 
 import jax
 import jax.numpy as jnp
@@ -71,7 +70,7 @@ def geodesic_graph_init(
     n_steps: int,
     *,
     k: int = 8,
-    graph: Optional[csr_matrix] = None,
+    graph: csr_matrix | None = None,
 ) -> jax.Array:
     """Global warm-start path for a geodesic BVP via a kNN-graph shortest path.
 

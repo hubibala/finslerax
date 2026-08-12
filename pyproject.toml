@@ -78,10 +78,8 @@ line-length = 88
 # linted); their cells follow notebook idiom (top-of-cell imports after path
 # bootstrap, exploratory names), so they are excluded from the gate.
 extend-exclude = ["*.ipynb"]
-# Kept at py39 deliberately: bumping to py310 triggers a large unrelated
-# pyupgrade sweep (Optional[X] -> X | None, collections.abc imports). Modernise
-# in a dedicated pass. (Package support is float-tested at >=3.10; see CI.)
-target-version = "py39"
+# Matches requires-python: the package supports 3.10+.
+target-version = "py310"
 
 [tool.ruff.lint]
 select = [

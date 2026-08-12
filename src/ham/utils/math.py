@@ -27,9 +27,8 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 # These floors scale with the working precision (see ham.utils.config.eps):
-# the float32 values below are the legacy defaults; under HAM_X64 they
-# tighten to float64-appropriate values. They are module-level constants because
-# precision is fixed at import time.
+# the values below hold in float32 and tighten under JAX_ENABLE_X64. They are
+# module-level constants because precision is fixed at import time.
 
 GRAD_EPS = _eps(_EpsKind.GRAD)
 """Guard for ``jnp.sqrt`` backward pass at zero.

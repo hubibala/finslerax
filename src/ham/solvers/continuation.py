@@ -23,7 +23,6 @@ previous (resampled) path carried forward. Any solver exposing that signature
 """
 
 from collections.abc import Iterable
-from typing import Optional
 
 import jax
 import jax.numpy as jnp
@@ -58,7 +57,7 @@ def resample_path(path: jax.Array, n_steps: int, project=None) -> jax.Array:
     return out
 
 
-def reparametrize_arclength(path: jax.Array, n_steps: Optional[int] = None) -> jax.Array:
+def reparametrize_arclength(path: jax.Array, n_steps: int | None = None) -> jax.Array:
     """Resample a path to uniform **arc length** (vs uniform parameter index).
 
     Energy-minimising geodesics are constant-*Finsler*-speed, so their vertices
@@ -96,7 +95,7 @@ def solve_continuation(
     p_start: jax.Array,
     p_end: jax.Array,
     *,
-    init_path: Optional[jax.Array] = None,
+    init_path: jax.Array | None = None,
     return_history: bool = False,
 ):
     """Run a geodesic solve as a sequence of warm-started continuation stages.

@@ -3,6 +3,22 @@
 Thank you for your interest in HAM. Bug reports, mathematical corrections,
 new metrics/manifolds/solvers, and documentation improvements are all welcome.
 
+## Branch model
+
+`main` is the framework: geometry, solvers, training, and the examples. It has
+no domain-specific code and no application data dependencies.
+
+Worked applications live on their own branches, each of which is `main` plus one
+application subtree:
+
+| Branch | Contains |
+| :--- | :--- |
+| `app/wildfire` | `experiments/wildfire/`, the `ham.data` raster loaders, the `wildfire` extra |
+| `app/robot-arm` | `experiments/arm/` and its Stage-D theory note |
+
+Send library changes to `main`, and application changes to the relevant `app/*`
+branch. When `main` moves, the application branches rebase onto it.
+
 ## Getting started
 
 ```bash
@@ -35,9 +51,6 @@ just its test file — the full suite takes several minutes.
 - **New geometry** (metrics, manifolds, solvers): implement against the
   `FinslerMetric` / `Manifold` interfaces, validate against a known closed-form
   case where one exists, and add an entry to the API docs.
-- **Experiments**: follow the existing structure (`medium.py`, staged
-  `run_stage_*.py` scripts, `evaluate.py`, a README with conventions and data
-  prerequisites, and a test file under `tests/`).
 
 ## Style
 

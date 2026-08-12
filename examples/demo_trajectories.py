@@ -1,4 +1,5 @@
-from typing import Callable, NamedTuple, Union
+from collections.abc import Callable
+from typing import NamedTuple, Union
 
 import jax
 import jax.numpy as jnp

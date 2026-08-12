@@ -8,7 +8,7 @@ All factory functions in this module return a closure `flow(x) -> v` that
 operates on a single point `x`. Use `jax.vmap` to evaluate on batched inputs.
 """
 
-from typing import Callable
+from collections.abc import Callable
 
 import jax
 import jax.numpy as jnp

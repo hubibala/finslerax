@@ -9,8 +9,9 @@ See also:
     ham.training.losses -- Modular loss components.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 import equinox as eqx
 import jax

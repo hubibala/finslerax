@@ -83,7 +83,7 @@ class SegmentQuadratureMetric(FinslerMetric):
         """Quadrature energy ``Σ_k w_k · base.energy(x + s_k v, v)``."""
         nodes, weights = self._quadrature()
         total = 0.0
-        for s, w in zip(nodes, weights):
+        for s, w in zip(nodes, weights, strict=True):
             total = total + w * self.base.energy(x + s * v, v)
         return total
 

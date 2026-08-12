@@ -1,14 +1,17 @@
-"""Regression tests added during the 2026-06-13 deep src/ham review.
+"""Cross-cutting invariants that every metric and manifold must satisfy.
 
-Covers findings that previously had no direct test:
+These hold across the whole geometry layer rather than for one class, so they
+live here instead of in a per-module test file:
 
-* W-RAND: the Randers/DiscreteRanders wind squash must be continuous (and in
-  fact C^1) -- the old ``where(w_norm < 0.5, 1.0, ...)`` gate left a jump
-  discontinuity at the 0.5 boundary.
-* W-MK: every manifold exposes a generic ``tangent_dot`` / ``tangent_norm`` so
-  downstream code never reaches for hyperboloid-private ``_minkowski_dot``.
 * Finsler axioms: positive 1-homogeneity F(x, c v) = c F(x, v) and positive
   definiteness of the fundamental tensor g_ij = d^2 E / dv^i dv^j.
+* Wind squashing in Randers/DiscreteRanders is C^1 everywhere, including across
+  the causality boundary -- a gate of the form ``where(w_norm < 0.5, 1.0, ...)``
+  would leave a jump discontinuity there.
+* Every manifold exposes generic ``tangent_dot`` / ``tangent_norm``, so
+  downstream code never reaches for hyperboloid-private ``_minkowski_dot``.
+* ``zermelo_data`` reconstructs the same metric as ``metric_fn``, so the eikonal
+  and AVBD solver families cannot optimize different geometries.
 """
 
 import unittest
@@ -239,8 +242,9 @@ class TestAlignmentLossesManifoldAgnostic(unittest.TestCase):
         loss = ZermeloAlignmentLoss(weight=1.0)
         x = jnp.array([0.1, -0.2])
         v = jnp.array([1.0, 0.5])
-        # Previously raised AttributeError (manifold._minkowski_norm) on a
-        # EuclideanSpace; must now return a finite scalar.
+        # Must go through the generic tangent-space API, not a manifold-private
+        # one (_minkowski_norm exists only on Hyperboloid), and return a finite
+        # scalar on any manifold.
         val = float(loss(model, (x, v), jax.random.PRNGKey(2)))
         self.assertTrue(np.isfinite(val))
 
