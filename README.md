@@ -292,7 +292,7 @@ src/ham/
 │   └── curvature.py         # flag / sectional / Riemann curvature
 ├── models/
 │   ├── learned.py           # Neural, pullback, energy-based & kernel metrics
-│   └── wildfire.py          # CovariateConditionedRanders, terrain CNN
+│   └── covariate.py         # CovariateConditionedRanders, terrain CNN
 ├── nn/
 │   ├── networks.py          # VectorField, PSDMatrixField, RandomFourierFeatures
 │   ├── ebm.py               # ScalarEnergyField, QuadraticHead
@@ -312,12 +312,11 @@ src/ham/
 │   ├── pipeline.py          # HAMPipeline, TrainingPhase
 │   ├── losses.py            # geometry-aware loss components
 │   └── losses_ebm.py        # contrastive divergence, score matching
-├── data/  sim/  utils/  vis/  # loaders, analytic fields, numerics, plotting
+├── sim/  utils/  vis/       # analytic fields, numerics, terrain, plotting
 
 examples/        # runnable demo scripts + Jupyter notebooks
-experiments/     # larger applications (wildfire spread, robot-arm geodesics)
-spec/            # MATH_SPEC.md, ARCH_SPEC.md, theory notes
-tests/           # 425 tests across 36 modules
+spec/            # MATH_SPEC.md, ARCH_SPEC.md
+tests/           # 348 tests across 36 modules, run in both precisions
 ```
 
 ---
@@ -341,32 +340,23 @@ plots live in [`examples/notebooks/`](examples/notebooks/).
 
 ### Worked applications
 
-Two end-to-end applications ship with the library; two more (marine navigation
-and UAV energy modeling) are in preparation on the `wip/marine-uav` branch.
+End-to-end applications live on their own branches, so that installing the
+library never drags in domain data loaders or their dependencies.
 
-**Wildfire spread** ([`experiments/wildfire/`](experiments/wildfire/README.md))
-models a fire front as the unit-time level sets of an anisotropic Randers
-metric: terrain and fuel set the symmetric part, wind the drift. It is a
-companion study to [Gahtan, Shpund & Bronstein
-(2026)](https://arxiv.org/abs/2603.00035), decomposing their cross-scene
-generalization collapse with an identifiability analysis (a low-dimensional
-scene gauge plus wind parity/coverage) and repairing most of it with a
-two-parameter few-shot recalibration and measured-wind coupling. Built on
+**Wildfire spread**
+([`app/wildfire`](https://github.com/hubibala/HAM/tree/app/wildfire)) models a
+fire front as the unit-time level sets of an anisotropic Randers metric:
+terrain and fuel set the symmetric part, wind the drift. Built on
 `CovariateConditionedRanders`, the differentiable `EikonalSolver`, and the
-covariate-encoder training loop; runs in four staged scripts (W-A–W-D) with
-per-stage gate ledgers.
+covariate-encoder training loop.
 
-**Robot-arm geodesics** ([`experiments/arm/`](experiments/arm/README.md))
-plans energy-optimal motion in configuration space: the arm's mass matrix is
-the Riemannian metric, gravity enters as a Randers drift, obstacles are folded
-into the metric, and task constraints are enforced exactly via augmented
-Lagrangian terms. Stage D studies the inverse problem — exact drift is
-provably invisible in path *shapes* (projective invariance) and is recovered
-from the timing/asymmetry channel instead; the theory note ships in
-[`spec/exact_drift_gauge_equivalence.md`](spec/exact_drift_gauge_equivalence.md).
+**Robot-arm geodesics**
+([`app/robot-arm`](https://github.com/hubibala/HAM/tree/app/robot-arm)) plans
+energy-optimal motion in configuration space: the arm's mass matrix is the
+Riemannian metric, gravity enters as a Randers drift, obstacles are folded into
+the metric, and task constraints are enforced via augmented Lagrangian terms.
 Built on `AVBDSolver`, `GaussNewtonGeodesic`, continuation, and the eikonal
-planners; runs in four staged scripts (A–D) against a validation ladder in
-`tests/test_arm.py`.
+planners.
 
 ---
 
