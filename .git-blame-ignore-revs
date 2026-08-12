@@ -1,0 +1,6 @@
+# Revisions that only moved whitespace. GitHub honours this file automatically;
+# locally, enable it once with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# Normalize formatting with ruff format (50 files, no behaviour change)
+cf2ab426f3bb8bcc8ba5b6ce410e95861ff272af

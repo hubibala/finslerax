@@ -1,0 +1,20 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "ci"
+
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    commit-message:
+      prefix: "deps"
+    # JAX pins the numerical behaviour of the whole stack; review those bumps
+    # by hand rather than letting a bot open them.
+    ignore:
+      - dependency-name: "jax"
+      - dependency-name: "jaxlib"

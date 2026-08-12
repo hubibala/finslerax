@@ -1,0 +1,15 @@
+cff-version: 1.2.0
+message: "If you use HAM in your research, please cite it as below."
+title: "HAM: Differentiable Finsler Geometry in JAX"
+abstract: "A JAX-native library for learnable Finsler geometry: metrics are neural-network-friendly Equinox modules, and geodesics, curvature and parallel transport follow by automatic differentiation."
+type: software
+authors:
+  - family-names: "Hubicska"
+    given-names: "Balázs Attila"
+repository-code: "https://github.com/hubibala/HAM"
+license: MIT
+keywords:
+  - Finsler geometry
+  - Randers metric
+  - differentiable programming
+  - JAX
