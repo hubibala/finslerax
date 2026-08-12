@@ -41,7 +41,7 @@ dev = [
 ]
 viz = [
     # ham.vis: matplotlib/plotly are imported at module level.
-    "matplotlib>=3.5",
+    "matplotlib>=3.10.9",
     "plotly>=5.0",
 ]
 gpu = [
