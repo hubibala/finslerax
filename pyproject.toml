@@ -22,7 +22,7 @@ classifiers = [
 dependencies = [
     "jax>=0.4.0",
     "jaxlib>=0.4.0",
-    "equinox>=0.10.0",
+    "equinox>=0.13.8",
     "optax>=0.1.0",
     "numpy",
     "scipy",
