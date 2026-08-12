@@ -1,4 +1,4 @@
-"""Tests for CovariateConditionedRanders wildfire Finsler metric.
+"""Tests for the CovariateConditionedRanders Finsler metric.
 
 Covers:
   - project_spd: eigenvalue clamping correctness
@@ -15,7 +15,7 @@ import pytest
 from _precision import assert_default_dtype
 
 from ham.geometry.manifolds import EuclideanSpace
-from ham.models.wildfire import (
+from ham.models.covariate import (
     CovariateConditionedRanders,
     LocalTerrainCNN,
     project_b_norm,

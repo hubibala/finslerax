@@ -265,7 +265,7 @@ class TestZermeloDataConsistency(unittest.TestCase):
     """
 
     def test_covariate_conditioned_randers(self):
-        from ham.models.wildfire import CovariateConditionedRanders
+        from ham.models.covariate import CovariateConditionedRanders
 
         m = CovariateConditionedRanders(
             EuclideanSpace(2), jax.random.PRNGKey(0),
@@ -284,7 +284,7 @@ class TestZermeloDataConsistency(unittest.TestCase):
                 _zermelo_reconstruct(m, x, v),
                 float(m.metric_fn(x, v)),
                 rtol=1e-4,
-                err_msg="wildfire zermelo_data inconsistent with metric_fn",
+                err_msg="covariate zermelo_data inconsistent with metric_fn",
             )
 
     def test_covariate_mesh_randers(self):

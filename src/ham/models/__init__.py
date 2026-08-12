@@ -1,5 +1,11 @@
 """Learnable metric implementations: neural, pullback, and data-driven."""
 
+from ham.models.covariate import (
+    CovariateConditionedRanders,
+    LocalTerrainCNN,
+    project_b_norm,
+    project_spd,
+)
 from ham.models.learned import (
     KernelWindField,
     NeuralRanders,
@@ -7,12 +13,6 @@ from ham.models.learned import (
     PullbackGNet,
     PullbackRanders,
     PullbackRiemannian,
-)
-from ham.models.wildfire import (
-    CovariateConditionedRanders,
-    LocalTerrainCNN,
-    project_b_norm,
-    project_spd,
 )
 
 __all__ = [

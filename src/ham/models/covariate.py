@@ -1,10 +1,15 @@
-"""Wildfire spread Finsler metric conditioned on terrain and weather covariates.
+"""Randers metric conditioned on a field of spatial covariates.
 
 Provides :class:`CovariateConditionedRanders`, a Randers-type Finsler metric
-whose geometry is a function of terrain (elevation, slope, aspect, canopy, fuel
-type) and weather (temperature, humidity, wind direction).  Scene rasters are
-"baked in" via :meth:`~CovariateConditionedRanders.bind_scene`, leaving the
-model's MLP weights as the only trainable parameters.
+whose sea and drift are functions of per-pixel covariates rather than of
+position alone: a static raster stack (scalar fields plus a categorical class
+map) sets the local geometry, and a global vector conditions it further.  The
+rasters are "baked in" via :meth:`~CovariateConditionedRanders.bind_scene`,
+leaving the model's MLP weights as the only trainable parameters.
+
+The covariates are domain-agnostic. In the spread-modelling application they
+carry terrain and weather (elevation, slope, aspect, canopy, fuel class;
+temperature, humidity, wind), which is where the parameter names come from.
 
 Standalone helpers :func:`project_spd` and :func:`project_b_norm` project raw
 network outputs to valid Randers data (SPD metric tensor + causality-bounded
