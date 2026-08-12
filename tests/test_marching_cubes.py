@@ -17,10 +17,10 @@ def test_marching_cubes_gradients():
     x = jnp.linspace(0, 1, nx)
     y = jnp.linspace(0, 1, ny)
     z = jnp.linspace(0, 1, nz)
-    X, Y, Z = jnp.meshgrid(x, y, z, indexing='ij')
+    X, Y, Z = jnp.meshgrid(x, y, z, indexing="ij")
 
     # Distance from center
-    volume = jnp.sqrt((X - 0.5)**2 + (Y - 0.5)**2 + (Z - 0.5)**2)
+    volume = jnp.sqrt((X - 0.5) ** 2 + (Y - 0.5) ** 2 + (Z - 0.5) ** 2)
 
     grad_volume = jax.grad(loss_fn)(volume)
 
@@ -28,13 +28,14 @@ def test_marching_cubes_gradients():
     # Gradients should not be completely zero if the surface intersects the volume
     assert jnp.any(jnp.abs(grad_volume) > 1e-6)
 
+
 def test_analytical_normals():
     grid_extent = (0.0, 1.0, 0.0, 1.0, 0.0, 1.0)
     nx, ny, nz = 5, 5, 5
     x = jnp.linspace(0, 1, nx)
     y = jnp.linspace(0, 1, ny)
     z = jnp.linspace(0, 1, nz)
-    X, _Y, _Z = jnp.meshgrid(x, y, z, indexing='ij')
+    X, _Y, _Z = jnp.meshgrid(x, y, z, indexing="ij")
 
     # Simple linear field in X: normals should be (1, 0, 0)
     volume = X

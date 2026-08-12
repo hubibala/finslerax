@@ -6,7 +6,6 @@ by the Godunov upwind Hamiltonian. It also computes multi-reference
 topological sweep orderings for mesh-based fast sweeping methods.
 """
 
-
 import equinox as eqx
 import jax
 import jax.numpy as jnp

@@ -8,6 +8,7 @@ Covers:
   - Pipeline skips phases when pairs are missing
   - Gradient flow through unfrozen parameters only
 """
+
 import unittest
 
 import equinox as eqx
@@ -21,6 +22,7 @@ from ham.training.pipeline import HAMPipeline, TrainingPhase
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 class DummyModel(eqx.Module):
     layer1: eqx.nn.Linear
@@ -37,6 +39,7 @@ class DummyModel(eqx.Module):
 
 class MSELoss(LossComponent):
     """Supervised MSE loss for testing."""
+
     def __init__(self, weight=1.0):
         super().__init__(weight, "MSE")
 
@@ -48,6 +51,7 @@ class MSELoss(LossComponent):
 
 class ConstantLoss(LossComponent):
     """Always returns a fixed value — useful for verifying multi-loss summation."""
+
     value: float
 
     def __init__(self, value=1.0, weight=1.0, name="Const"):
@@ -93,12 +97,15 @@ def _filter_layer2(model):
 
 def _filter_all(model):
     """Unfreeze everything."""
-    return jax.tree_util.tree_map(lambda leaf: True if eqx.is_array(leaf) else False, model)
+    return jax.tree_util.tree_map(
+        lambda leaf: True if eqx.is_array(leaf) else False, model
+    )
 
 
 # ---------------------------------------------------------------------------
 # Test Cases
 # ---------------------------------------------------------------------------
+
 
 class TestParameterFreezing(unittest.TestCase):
     """Verify eqx.partition-based freezing works correctly."""
@@ -120,10 +127,12 @@ class TestParameterFreezing(unittest.TestCase):
 
         trained = HAMPipeline(model).fit(DummyDataset(), [phase], batch_size=5)
 
-        self.assertFalse(jnp.allclose(trained.layer1.weight, w1_init),
-                         "layer1 should update")
-        self.assertTrue(jnp.allclose(trained.layer2.weight, w2_init),
-                        "layer2 should stay frozen")
+        self.assertFalse(
+            jnp.allclose(trained.layer1.weight, w1_init), "layer1 should update"
+        )
+        self.assertTrue(
+            jnp.allclose(trained.layer2.weight, w2_init), "layer2 should stay frozen"
+        )
 
     def test_freeze_layer1_update_layer2(self):
         key = jax.random.PRNGKey(0)
@@ -142,10 +151,12 @@ class TestParameterFreezing(unittest.TestCase):
 
         trained = HAMPipeline(model).fit(DummyDataset(), [phase], batch_size=5)
 
-        self.assertTrue(jnp.allclose(trained.layer1.weight, w1_init),
-                        "layer1 should stay frozen")
-        self.assertFalse(jnp.allclose(trained.layer2.weight, w2_init),
-                         "layer2 should update")
+        self.assertTrue(
+            jnp.allclose(trained.layer1.weight, w1_init), "layer1 should stay frozen"
+        )
+        self.assertFalse(
+            jnp.allclose(trained.layer2.weight, w2_init), "layer2 should update"
+        )
 
     def test_unfreeze_all(self):
         key = jax.random.PRNGKey(0)
@@ -196,7 +207,9 @@ class TestLossComponents(unittest.TestCase):
         l1 = ConstantLoss(value=2.0, weight=1.0, name="C1")
         l2 = ConstantLoss(value=3.0, weight=1.0, name="C2")
 
-        total = l1(model, (x, y), jax.random.PRNGKey(0)) + l2(model, (x, y), jax.random.PRNGKey(0))
+        total = l1(model, (x, y), jax.random.PRNGKey(0)) + l2(
+            model, (x, y), jax.random.PRNGKey(0)
+        )
         self.assertAlmostEqual(float(total), 5.0, places=5)
 
 
@@ -211,12 +224,18 @@ class TestMultiPhaseExecution(unittest.TestCase):
         w2_init = model.layer2.weight.copy()
 
         phase1 = TrainingPhase(
-            name="P1", epochs=2, optimizer=optax.sgd(0.1),
-            losses=[MSELoss()], filter_spec=_filter_layer1,
+            name="P1",
+            epochs=2,
+            optimizer=optax.sgd(0.1),
+            losses=[MSELoss()],
+            filter_spec=_filter_layer1,
         )
         phase2 = TrainingPhase(
-            name="P2", epochs=2, optimizer=optax.sgd(0.1),
-            losses=[MSELoss()], filter_spec=_filter_layer2,
+            name="P2",
+            epochs=2,
+            optimizer=optax.sgd(0.1),
+            losses=[MSELoss()],
+            filter_spec=_filter_layer2,
         )
 
         trained = HAMPipeline(model).fit(DummyDataset(), [phase1, phase2], batch_size=5)
@@ -232,15 +251,22 @@ class TestMultiPhaseExecution(unittest.TestCase):
         w_init = model.layer2.weight.copy()
 
         phase = TrainingPhase(
-            name="SkipMe", epochs=5, optimizer=optax.sgd(0.1),
-            losses=[MSELoss()], filter_spec=_filter_layer2,
+            name="SkipMe",
+            epochs=5,
+            optimizer=optax.sgd(0.1),
+            losses=[MSELoss()],
+            filter_spec=_filter_layer2,
             requires_pairs=True,
         )
 
-        trained = HAMPipeline(model).fit(DummyDataset(pair_indices=None), [phase], batch_size=5)
+        trained = HAMPipeline(model).fit(
+            DummyDataset(pair_indices=None), [phase], batch_size=5
+        )
 
-        self.assertTrue(jnp.allclose(trained.layer2.weight, w_init),
-                        "Phase should have been skipped, weights unchanged")
+        self.assertTrue(
+            jnp.allclose(trained.layer2.weight, w_init),
+            "Phase should have been skipped, weights unchanged",
+        )
 
     def test_loss_decreases_over_epochs(self):
         """Sanity check: loss should go down when training on a simple target."""
@@ -248,8 +274,11 @@ class TestMultiPhaseExecution(unittest.TestCase):
         model = DummyModel(key)
 
         phase = TrainingPhase(
-            name="Converge", epochs=50, optimizer=optax.adam(1e-2),
-            losses=[MSELoss()], filter_spec=_filter_all,
+            name="Converge",
+            epochs=50,
+            optimizer=optax.adam(1e-2),
+            losses=[MSELoss()],
+            filter_spec=_filter_all,
         )
 
         # Create a tiny dataset where targets are zeros
@@ -263,11 +292,12 @@ class TestMultiPhaseExecution(unittest.TestCase):
         initial_pred = jax.vmap(model)(x)
         final_pred = jax.vmap(trained)(x)
 
-        initial_loss = jnp.mean(initial_pred ** 2)
-        final_loss = jnp.mean(final_pred ** 2)
+        initial_loss = jnp.mean(initial_pred**2)
+        final_loss = jnp.mean(final_pred**2)
 
-        self.assertLess(float(final_loss), float(initial_loss),
-                        "Loss should decrease over training")
+        self.assertLess(
+            float(final_loss), float(initial_loss), "Loss should decrease over training"
+        )
 
     def test_requires_pairs_with_actual_pairs(self):
         """When requires_pairs=True and pair_indices exist, phase should execute."""
@@ -279,14 +309,19 @@ class TestMultiPhaseExecution(unittest.TestCase):
         ds = DummyDataset(n=10, pair_indices=pairs)
 
         phase = TrainingPhase(
-            name="PairPhase", epochs=3, optimizer=optax.sgd(0.1),
-            losses=[MSELoss()], filter_spec=_filter_all,
+            name="PairPhase",
+            epochs=3,
+            optimizer=optax.sgd(0.1),
+            losses=[MSELoss()],
+            filter_spec=_filter_all,
             requires_pairs=True,
         )
 
         trained = HAMPipeline(model).fit(ds, [phase], batch_size=5)
-        self.assertFalse(jnp.allclose(trained.layer2.weight, w_init),
-                         "Weights should update when pairs are provided")
+        self.assertFalse(
+            jnp.allclose(trained.layer2.weight, w_init),
+            "Weights should update when pairs are provided",
+        )
 
     def test_multi_loss_pipeline(self):
         """Multiple losses should be summed inside the pipeline."""
@@ -294,16 +329,23 @@ class TestMultiPhaseExecution(unittest.TestCase):
         model = DummyModel(key)
 
         phase = TrainingPhase(
-            name="MultiLoss", epochs=3, optimizer=optax.sgd(0.01),
-            losses=[MSELoss(weight=1.0), ConstantLoss(value=0.0, weight=1.0, name="Zero")],
+            name="MultiLoss",
+            epochs=3,
+            optimizer=optax.sgd(0.01),
+            losses=[
+                MSELoss(weight=1.0),
+                ConstantLoss(value=0.0, weight=1.0, name="Zero"),
+            ],
             filter_spec=_filter_all,
         )
 
         ds = DummyDataset(n=10)
         trained = HAMPipeline(model).fit(ds, [phase], batch_size=5)
         # Should complete without error and weights should update
-        self.assertFalse(jnp.allclose(trained.layer1.weight, model.layer1.weight),
-                         "Weights should change with multi-loss")
+        self.assertFalse(
+            jnp.allclose(trained.layer1.weight, model.layer1.weight),
+            "Weights should change with multi-loss",
+        )
 
     def test_mse_under_vmap(self):
         """Loss must work under vmap (as the pipeline does internally)."""

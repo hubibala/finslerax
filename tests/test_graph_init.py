@@ -33,7 +33,9 @@ class TestGeodesicGraphInit(unittest.TestCase):
         cloud = ring_cloud()
         p0 = jnp.array([1.0, 0.0])
         p1 = jnp.array([-1.0, 0.0])
-        path = np.asarray(geodesic_graph_init(jnp.asarray(cloud), p0, p1, n_steps=24, k=4))
+        path = np.asarray(
+            geodesic_graph_init(jnp.asarray(cloud), p0, p1, n_steps=24, k=4)
+        )
         closest_to_centre = float(np.min(np.linalg.norm(path, axis=1)))
         self.assertGreater(closest_to_centre, 0.7)
         # the straight chord, by contrast, passes through the origin

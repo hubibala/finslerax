@@ -9,7 +9,6 @@ Mathematical reference: spec/MATH_SPEC.md §§ 1–2, 5.
 Architecture reference: spec/ARCH_SPEC.md § 5.
 """
 
-
 import equinox as eqx
 import jax
 import jax.numpy as jnp

@@ -77,7 +77,9 @@ def main():
     )
 
     ax.legend()
-    plt.title("Solver Stiffness Comparison\nRelaxed solver (red) follows the vortex; stiff solver (gray) stays nearly straight")
+    plt.title(
+        "Solver Stiffness Comparison\nRelaxed solver (red) follows the vortex; stiff solver (gray) stays nearly straight"
+    )
     print(
         "Showing plot. The relaxed solver (red) curves with the vortex; the stiff solver (gray) stays nearly straight."
     )

@@ -8,14 +8,13 @@ from ham.geometry.mesh import TriangularMesh
 
 
 class TestMeshManifold(unittest.TestCase):
-
     def setUp(self):
         self.key = jax.random.PRNGKey(42)
 
     def test_standard_3d_tetrahedron(self):
         """Standard 3D test case."""
-        verts = jnp.array([[0,0,0], [1,0,0], [0,1,0], [0,0,1]], dtype=float)
-        faces = jnp.array([[0,1,2], [0,1,3], [0,2,3], [1,2,3]])
+        verts = jnp.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float)
+        faces = jnp.array([[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]])
         mesh = TriangularMesh(verts, faces)
 
         # Project off-surface point
@@ -25,19 +24,17 @@ class TestMeshManifold(unittest.TestCase):
         np.testing.assert_allclose(proj, expected, atol=1e-5)
 
         # Tangent vector projection
-        x = jnp.array([0.2, 0.2, 0.0]) # On XY face
-        v = jnp.array([1.0, 1.0, 1.0]) # Has Z component
+        x = jnp.array([0.2, 0.2, 0.0])  # On XY face
+        v = jnp.array([1.0, 1.0, 1.0])  # Has Z component
         v_tan = mesh.to_tangent(x, v)
         # Should remove Z component
         np.testing.assert_allclose(v_tan, jnp.array([1.0, 1.0, 0.0]), atol=1e-5)
 
     def test_high_dim_embedding(self):
         """Verify mesh logic works for a 2D triangle embedded in 4D."""
-        verts = jnp.array([
-            [0., 0., 0., 0.],
-            [1., 0., 0., 0.],
-            [0., 1., 0., 0.]
-        ])
+        verts = jnp.array(
+            [[0.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]]
+        )
         faces = jnp.array([[0, 1, 2]])
         mesh = TriangularMesh(verts, faces)
 
@@ -62,8 +59,8 @@ class TestMeshManifold(unittest.TestCase):
 
     def test_get_face_index(self):
         """Verify face indexing."""
-        verts = jnp.array([[0,0,0], [1,0,0], [0,1,0], [0,0,1]], dtype=float)
-        faces = jnp.array([[0,1,2], [0,1,3]]) # XY plane and XZ plane
+        verts = jnp.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float)
+        faces = jnp.array([[0, 1, 2], [0, 1, 3]])  # XY plane and XZ plane
         mesh = TriangularMesh(verts, faces)
 
         # Point near XY face
@@ -76,8 +73,8 @@ class TestMeshManifold(unittest.TestCase):
 
     def test_get_face_weights_differentiability(self):
         """Verify weights are differentiable."""
-        verts = jnp.array([[0,0,0], [1,0,0], [0,1,0], [0,0,1]], dtype=float)
-        faces = jnp.array([[0,1,2], [0,1,3]])
+        verts = jnp.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float)
+        faces = jnp.array([[0, 1, 2], [0, 1, 3]])
         mesh = TriangularMesh(verts, faces)
 
         def loss_fn(x):
@@ -90,8 +87,8 @@ class TestMeshManifold(unittest.TestCase):
 
     def test_retract(self):
         """Verify retraction moves point to surface."""
-        verts = jnp.array([[0,0,0], [1,0,0], [0,1,0]], dtype=float)
-        faces = jnp.array([[0,1,2]])
+        verts = jnp.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float)
+        faces = jnp.array([[0, 1, 2]])
         mesh = TriangularMesh(verts, faces)
 
         x = jnp.array([0.5, 0.5, 0.0])
@@ -106,8 +103,8 @@ class TestMeshManifold(unittest.TestCase):
     def test_degenerate_triangle(self):
         """Verify stability with degenerate triangles."""
         # Triangle with three points on a line
-        verts = jnp.array([[0,0,0], [1,0,0], [2,0,0]], dtype=float)
-        faces = jnp.array([[0,1,2]])
+        verts = jnp.array([[0, 0, 0], [1, 0, 0], [2, 0, 0]], dtype=float)
+        faces = jnp.array([[0, 1, 2]])
         mesh = TriangularMesh(verts, faces)
 
         # Project should still work (fallback to edge)
@@ -122,13 +119,14 @@ class TestMeshManifold(unittest.TestCase):
 
     def test_random_sample_jit_compatible(self):
         """Verify random_sample doesn't crash (even if not JIT'd itself, check n logic)."""
-        verts = jnp.array([[0,0,0], [1,0,0], [0,1,0]], dtype=float)
-        faces = jnp.array([[0,1,2]])
+        verts = jnp.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], dtype=float)
+        faces = jnp.array([[0, 1, 2]])
         mesh = TriangularMesh(verts, faces)
 
         # Should work with multi-dim shape
         samples = mesh.random_sample(self.key, (2, 3))
         self.assertEqual(samples.shape, (2, 3, 3))
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

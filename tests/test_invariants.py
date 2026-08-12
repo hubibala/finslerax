@@ -141,9 +141,7 @@ class TestGenericTangentDot(unittest.TestCase):
             atol=1e-6,
         )
         # On a spacelike tangent vector the Minkowski norm is the spatial norm.
-        np.testing.assert_allclose(
-            float(manifold.tangent_norm(x, u)), 1.0, atol=1e-6
-        )
+        np.testing.assert_allclose(float(manifold.tangent_norm(x, u)), 1.0, atol=1e-6)
 
 
 class TestFinslerAxioms(unittest.TestCase):
@@ -167,7 +165,9 @@ class TestFinslerAxioms(unittest.TestCase):
             for c in [0.25, 1.0, 3.0]:
                 f_cv = float(metric.metric_fn(x, c * v))
                 np.testing.assert_allclose(
-                    f_cv, c * f_v, rtol=1e-4,
+                    f_cv,
+                    c * f_v,
+                    rtol=1e-4,
                     err_msg=f"{name}: F(x,{c}v) != {c} F(x,v)",
                 )
 
@@ -182,7 +182,8 @@ class TestFinslerAxioms(unittest.TestCase):
                 g = 0.5 * (g + g.T)
                 eigs = np.linalg.eigvalsh(np.asarray(g))
                 self.assertGreater(
-                    float(eigs.min()), 0.0,
+                    float(eigs.min()),
+                    0.0,
                     f"{name}: fundamental tensor not PD (min eig {eigs.min():.3e})",
                 )
 
@@ -272,14 +273,23 @@ class TestZermeloDataConsistency(unittest.TestCase):
         from ham.models.covariate import CovariateConditionedRanders
 
         m = CovariateConditionedRanders(
-            EuclideanSpace(2), jax.random.PRNGKey(0),
-            hidden_dim=16, cnn_channels=8, use_wind=True,
+            EuclideanSpace(2),
+            jax.random.PRNGKey(0),
+            hidden_dim=16,
+            cnn_channels=8,
+            use_wind=True,
         )
         h, w = 8, 8
         z = jnp.zeros((h, w))
         m = m.bind_scene(
-            z, z, z, z, jnp.zeros((h, w), dtype=jnp.int32),
-            jnp.array([0.5, 0.5, 0.1, 0.9]), 1.0, jnp.zeros(2),
+            z,
+            z,
+            z,
+            z,
+            jnp.zeros((h, w), dtype=jnp.int32),
+            jnp.array([0.5, 0.5, 0.1, 0.9]),
+            1.0,
+            jnp.zeros(2),
         ).precompute_metric_field()
 
         for v in [jnp.array([1.0, 0.3]), jnp.array([-0.5, 1.2])]:

@@ -1,4 +1,5 @@
 """Tests for ham.utils.terrain."""
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -16,6 +17,7 @@ from ham.utils.terrain import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 def _flat_dem(H=5, W=5, elev=0.0):
     """Return a flat (H, W) DEM at constant elevation."""
     return jnp.full((H, W), elev, dtype=jnp.float32)
@@ -24,6 +26,7 @@ def _flat_dem(H=5, W=5, elev=0.0):
 # ---------------------------------------------------------------------------
 # pixel_to_world_3d
 # ---------------------------------------------------------------------------
+
 
 def test_pixel_to_world_3d():
     """Basic coordinate conversion at known pixel positions."""
@@ -41,6 +44,7 @@ def test_pixel_to_world_3d_origin():
 # ---------------------------------------------------------------------------
 # dem_to_mesh
 # ---------------------------------------------------------------------------
+
 
 def test_dem_to_mesh_shape():
     """5×5 DEM → 25 vertices, 32 faces."""
@@ -64,11 +68,17 @@ def test_dem_to_mesh_vertex_coords():
     # top-left (0,0)
     np.testing.assert_allclose(mesh.vertices[0], expected_vertex(0, 0), rtol=1e-5)
     # top-right (0, W-1)
-    np.testing.assert_allclose(mesh.vertices[W - 1], expected_vertex(0, W - 1), rtol=1e-5)
+    np.testing.assert_allclose(
+        mesh.vertices[W - 1], expected_vertex(0, W - 1), rtol=1e-5
+    )
     # bottom-left (H-1, 0)
-    np.testing.assert_allclose(mesh.vertices[(H - 1) * W], expected_vertex(H - 1, 0), rtol=1e-5)
+    np.testing.assert_allclose(
+        mesh.vertices[(H - 1) * W], expected_vertex(H - 1, 0), rtol=1e-5
+    )
     # bottom-right (H-1, W-1)
-    np.testing.assert_allclose(mesh.vertices[H * W - 1], expected_vertex(H - 1, W - 1), rtol=1e-5)
+    np.testing.assert_allclose(
+        mesh.vertices[H * W - 1], expected_vertex(H - 1, W - 1), rtol=1e-5
+    )
 
 
 def test_dem_to_mesh_face_dtype():
@@ -82,6 +92,7 @@ def test_dem_to_mesh_face_dtype():
 # compute_face_normals
 # ---------------------------------------------------------------------------
 
+
 def test_face_normals_flat():
     """A perfectly flat DEM → all face normals should point straight up (0,0,1)."""
     dem = _flat_dem(H=4, W=4, elev=0.0)
@@ -89,7 +100,9 @@ def test_face_normals_flat():
     normals = compute_face_normals(mesh)
     # All normals should be (0, 0, 1) or (0, 0, -1); cross product orientation
     # depends on winding. Check |n_z| ≈ 1.
-    np.testing.assert_allclose(jnp.abs(normals[:, 2]), jnp.ones(normals.shape[0]), atol=1e-5)
+    np.testing.assert_allclose(
+        jnp.abs(normals[:, 2]), jnp.ones(normals.shape[0]), atol=1e-5
+    )
     np.testing.assert_allclose(normals[:, 0], jnp.zeros(normals.shape[0]), atol=1e-5)
     np.testing.assert_allclose(normals[:, 1], jnp.zeros(normals.shape[0]), atol=1e-5)
 
@@ -97,19 +110,18 @@ def test_face_normals_flat():
 def test_face_normals_unit_length():
     """Normals should be unit vectors."""
     dem = jnp.array(
-        [[0.0, 0.0, 0.0],
-         [0.0, 5.0, 0.0],
-         [0.0, 0.0, 10.0]], dtype=jnp.float32
+        [[0.0, 0.0, 0.0], [0.0, 5.0, 0.0], [0.0, 0.0, 10.0]], dtype=jnp.float32
     )
     mesh = dem_to_mesh(dem, pixel_spacing_m=10.0)
     normals = compute_face_normals(mesh)
-    norms = jnp.sqrt(jnp.sum(normals ** 2, axis=-1))
+    norms = jnp.sqrt(jnp.sum(normals**2, axis=-1))
     np.testing.assert_allclose(norms, jnp.ones_like(norms), atol=1e-5)
 
 
 # ---------------------------------------------------------------------------
 # compute_face_slopes_aspects
 # ---------------------------------------------------------------------------
+
 
 def test_face_slopes_flat():
     """Flat DEM → slope = 0 for all faces."""
@@ -122,6 +134,7 @@ def test_face_slopes_flat():
 # ---------------------------------------------------------------------------
 # interpolate_covariates_to_vertices
 # ---------------------------------------------------------------------------
+
 
 def test_interpolate_covariates():
     """Covariate values should be correctly mapped to vertex indices."""
@@ -158,12 +171,15 @@ def test_interpolate_covariates_multi_channel():
 # CovariateMeshRanders
 # ---------------------------------------------------------------------------
 
+
 def _make_metric(use_wind=True, H=4, W=4):
     """Build a CovariateMeshRanders on a small flat mesh with random scene."""
     dem = _flat_dem(H=H, W=W, elev=0.0)
     mesh = dem_to_mesh(dem, pixel_spacing_m=10.0)
     key = jax.random.PRNGKey(42)
-    metric = CovariateMeshRanders(mesh, key, hidden_dim=16, fuel_emb_dim=4, use_wind=use_wind)
+    metric = CovariateMeshRanders(
+        mesh, key, hidden_dim=16, fuel_emb_dim=4, use_wind=use_wind
+    )
 
     F = mesh.faces.shape[0]
     feat_dim = 5 + metric.fuel_emb_dim
@@ -202,8 +218,12 @@ def test_covariate_mesh_randers_homogeneous():
     f1 = metric.metric_fn(x, v)
     f_lam = metric.metric_fn(x, lam * v)
 
-    np.testing.assert_allclose(float(f_lam), lam * float(f1), rtol=1e-4,
-                                err_msg=f"Homogeneity failed: F(x,λv)={f_lam} vs λF(x,v)={lam*f1}")
+    np.testing.assert_allclose(
+        float(f_lam),
+        lam * float(f1),
+        rtol=1e-4,
+        err_msg=f"Homogeneity failed: F(x,λv)={f_lam} vs λF(x,v)={lam * f1}",
+    )
 
 
 def test_covariate_mesh_randers_no_wind():

@@ -73,13 +73,7 @@ def compute_three_point_update(
     r3 = Q13 * (T_cand * v1 - c1) + Q23 * (T_cand * v2 - c2) + Q33 * (T_cand * v3 - c3)
     upwind = (v1 * r1 >= 0) & (v2 * r2 >= 0) & (v3 * r3 >= 0)
 
-    causal = (
-        (desc >= 0)
-        & (T_cand >= T1)
-        & (T_cand >= T2)
-        & (T_cand >= T3)
-        & upwind
-    )
+    causal = (desc >= 0) & (T_cand >= T1) & (T_cand >= T2) & (T_cand >= T3) & upwind
     return jnp.where(causal, T_cand, T_INF)
 
 

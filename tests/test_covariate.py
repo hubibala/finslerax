@@ -57,8 +57,15 @@ def _make_model(use_wind=True, key=None):
     k = _KEY if key is None else key
     manifold = EuclideanSpace(2)
     return CovariateConditionedRanders(
-        manifold, k, hidden_dim=16, fuel_emb_dim=4, cnn_channels=8,
-        eps_G=0.1, max_G=10.0, max_b_norm=0.9, use_wind=use_wind,
+        manifold,
+        k,
+        hidden_dim=16,
+        fuel_emb_dim=4,
+        cnn_channels=8,
+        eps_G=0.1,
+        max_G=10.0,
+        max_b_norm=0.9,
+        use_wind=use_wind,
     )
 
 
@@ -73,6 +80,7 @@ def _bound_model(use_wind=True):
 # ---------------------------------------------------------------------------
 # project_spd
 # ---------------------------------------------------------------------------
+
 
 class TestProjectSPD:
     """project_spd: output eigenvalues must lie in [eps_min, eps_max]."""
@@ -91,8 +99,12 @@ class TestProjectSPD:
         for mat in mats:
             out = project_spd(mat, eps_min, eps_max)
             eigs = self._eigs(out)
-            assert np.all(eigs >= eps_min - 1e-5), f"min eigenvalue {eigs.min()} < {eps_min}"
-            assert np.all(eigs <= eps_max + 1e-5), f"max eigenvalue {eigs.max()} > {eps_max}"
+            assert np.all(eigs >= eps_min - 1e-5), (
+                f"min eigenvalue {eigs.min()} < {eps_min}"
+            )
+            assert np.all(eigs <= eps_max + 1e-5), (
+                f"max eigenvalue {eigs.max()} > {eps_max}"
+            )
 
     def test_already_spd_unchanged(self):
         """Identity-like matrix should be unchanged up to the discriminant epsilon (~1e-8)."""
@@ -119,6 +131,7 @@ class TestProjectSPD:
 # project_b_norm
 # ---------------------------------------------------------------------------
 
+
 class TestProjectBNorm:
     """project_b_norm: result must satisfy the G^{-1}-norm constraint."""
 
@@ -138,7 +151,9 @@ class TestProjectBNorm:
             b_raw = jax.random.normal(k, (2,)) * 3.0
             b = project_b_norm(b_raw, G, max_norm)
             norm = self._ginv_norm(b, G)
-            assert norm < max_norm + 1e-5, f"G^{{-1}}-norm {norm} exceeds max {max_norm}"
+            assert norm < max_norm + 1e-5, (
+                f"G^{{-1}}-norm {norm} exceeds max {max_norm}"
+            )
 
     def test_already_within_bound_unchanged(self):
         """A drift vector already below max_norm should not be scaled down."""
@@ -159,6 +174,7 @@ class TestProjectBNorm:
 # Shared scene fixture
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="module")
 def bound_model():
     return _bound_model(use_wind=True)
@@ -172,6 +188,7 @@ def riemannian_model():
 # ---------------------------------------------------------------------------
 # metric_fn: positivity
 # ---------------------------------------------------------------------------
+
 
 def test_metric_fn_positive(bound_model):
     """F(x, v) > 0 for all nonzero v."""
@@ -190,6 +207,7 @@ def test_metric_fn_positive(bound_model):
 # metric_fn: 1-homogeneity
 # ---------------------------------------------------------------------------
 
+
 def test_metric_fn_homogeneous(bound_model):
     """F(x, λv) = λ F(x, v) for λ > 0."""
     x = jnp.array([150.0, 150.0])
@@ -199,7 +217,8 @@ def test_metric_fn_homogeneous(bound_model):
         f_v = bound_model.metric_fn(x, v)
         f_lv = bound_model.metric_fn(x, lam * v)
         np.testing.assert_allclose(
-            float(f_lv), lam * float(f_v),
+            float(f_lv),
+            lam * float(f_v),
             rtol=1e-6,
             err_msg=f"Homogeneity violated at λ={lam}",
         )
@@ -208,6 +227,7 @@ def test_metric_fn_homogeneous(bound_model):
 # ---------------------------------------------------------------------------
 # metric_fn: Riemannian limit (use_wind=False)
 # ---------------------------------------------------------------------------
+
 
 def test_metric_fn_riemannian_limit(riemannian_model):
     """With use_wind=False the metric is symmetric: F(x,v) = F(x,-v)."""
@@ -219,7 +239,9 @@ def test_metric_fn_riemannian_limit(riemannian_model):
         f_pos = riemannian_model.metric_fn(x, v)
         f_neg = riemannian_model.metric_fn(x, -v)
         np.testing.assert_allclose(
-            float(f_pos), float(f_neg), rtol=1e-6,
+            float(f_pos),
+            float(f_neg),
+            rtol=1e-6,
             err_msg="Riemannian limit should be symmetric in v",
         )
 
@@ -239,6 +261,7 @@ def test_metric_fn_riemannian_matches_sqrt_Gv(riemannian_model):
 # ---------------------------------------------------------------------------
 # bind_scene: JIT and vmap
 # ---------------------------------------------------------------------------
+
 
 def test_bind_scene_jit(bound_model):
     """metric_fn is jit-compilable and vmappable after bind_scene."""
@@ -266,6 +289,7 @@ def test_bind_scene_jit(bound_model):
 # ---------------------------------------------------------------------------
 # Gradients: no NaN
 # ---------------------------------------------------------------------------
+
 
 def test_gradients_wrt_v(bound_model):
     """jax.grad of metric_fn w.r.t. v must not produce NaN."""
@@ -324,6 +348,7 @@ def test_fuel_embedding_gradient():
 # LocalTerrainCNN and precompute_metric_field
 # ---------------------------------------------------------------------------
 
+
 class TestLocalTerrainCNN:
     """Basic shape, dtype, and differentiability tests for LocalTerrainCNN."""
 
@@ -361,13 +386,16 @@ class TestLocalTerrainCNN:
         weather = jnp.array([20.0, 0.4, 0.5, 0.866])
 
         import equinox as eqx
+
         def loss_fn(c):
             return jnp.sum(c(raster, fuel, weather))
 
         grads = eqx.filter_grad(loss_fn)(cnn)
         # At least conv1 weight should have a nonzero gradient
         assert not jnp.any(jnp.isnan(grads.conv1.weight)), "NaN grad in conv1"
-        assert not jnp.all(grads.conv1.weight == 0), "All-zero grad in conv1 (unexpected)"
+        assert not jnp.all(grads.conv1.weight == 0), (
+            "All-zero grad in conv1 (unexpected)"
+        )
 
 
 class TestPrecomputeMetricField:
@@ -393,7 +421,9 @@ class TestPrecomputeMetricField:
         model = _make_model()
         scene = _make_scene()
         bound = model.bind_scene(**scene).precompute_metric_field()
-        assert jnp.all(jnp.isfinite(bound.metric_field)), "metric_field has non-finite values"
+        assert jnp.all(jnp.isfinite(bound.metric_field)), (
+            "metric_field has non-finite values"
+        )
 
     def test_grad_flows_to_cnn_weights(self):
         """Gradient of metric_fn w.r.t. CNN weights must be nonzero."""
@@ -411,9 +441,13 @@ class TestPrecomputeMetricField:
         grads = eqx.filter_grad(loss_fn)(model)
 
         # CNN weights should receive gradients
-        assert not jnp.any(jnp.isnan(grads.local_cnn.conv1.weight)), "NaN grad in local_cnn.conv1"
+        assert not jnp.any(jnp.isnan(grads.local_cnn.conv1.weight)), (
+            "NaN grad in local_cnn.conv1"
+        )
         # At random init the gradient should be nonzero
-        assert not jnp.all(grads.local_cnn.conv1.weight == 0), "Zero grad in local_cnn.conv1"
+        assert not jnp.all(grads.local_cnn.conv1.weight == 0), (
+            "Zero grad in local_cnn.conv1"
+        )
 
     def test_bind_scene_resets_field(self):
         """bind_scene must set metric_field to None (stale field invalidated)."""
@@ -474,6 +508,7 @@ class TestRasterStopGradient:
 # Coupled wind mode (wind_mode="coupled": b = -c * measured_wind)
 # ---------------------------------------------------------------------------
 
+
 class TestCoupledWindMode:
     """b is the measured wind velocity times one learned scalar coupling."""
 
@@ -483,9 +518,7 @@ class TestCoupledWindMode:
         import equinox as eqx
 
         model = _make_model(use_wind="coupled")
-        model = eqx.tree_at(
-            lambda m: m.wind_coupling, model, jnp.asarray(coupling)
-        )
+        model = eqx.tree_at(lambda m: m.wind_coupling, model, jnp.asarray(coupling))
         scene = _make_scene()
         bound = model.bind_scene(**scene).bind_weather(
             scene["weather_vec"], measured_wind=self._WIND
@@ -534,8 +567,9 @@ class TestCoupledWindMode:
             return m2.metric_fn(x, v)
 
         # Re-bind without the precomputed field so grads flow through precompute.
-        model = eqx.tree_at(lambda m: m.metric_field, bound, None,
-                            is_leaf=lambda x: x is None)
+        model = eqx.tree_at(
+            lambda m: m.metric_field, bound, None, is_leaf=lambda x: x is None
+        )
         grads = eqx.filter_grad(cost)(model)
         assert float(jnp.abs(grads.wind_coupling)) > 0.0
 

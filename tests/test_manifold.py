@@ -11,6 +11,7 @@ from ham.geometry.manifold import Manifold, _safe_norm_ratio
 
 class MockManifold(Manifold):
     """A minimal concrete manifold for testing default methods."""
+
     @property
     def ambient_dim(self) -> int:
         return 3
@@ -44,17 +45,21 @@ class TestManifold(unittest.TestCase):
 
     def test_safe_norm_ratio_primal(self):
         # Normal case
-        x = jnp.array([3.0, 4.0]) # norm 5
-        y = jnp.array([1.0, 0.0]) # norm 1
+        x = jnp.array([3.0, 4.0])  # norm 5
+        y = jnp.array([1.0, 0.0])  # norm 1
         np.testing.assert_allclose(_safe_norm_ratio(x, y), jnp.array([5.0]), atol=1e-5)
 
         # y is zero vector
         y_zero = jnp.array([0.0, 0.0])
-        np.testing.assert_allclose(_safe_norm_ratio(x, y_zero), jnp.array([1.0]), atol=1e-5)
+        np.testing.assert_allclose(
+            _safe_norm_ratio(x, y_zero), jnp.array([1.0]), atol=1e-5
+        )
 
         # Both zero
         x_zero = jnp.array([0.0, 0.0])
-        np.testing.assert_allclose(_safe_norm_ratio(x_zero, y_zero), jnp.array([1.0]), atol=1e-5)
+        np.testing.assert_allclose(
+            _safe_norm_ratio(x_zero, y_zero), jnp.array([1.0]), atol=1e-5
+        )
 
     def test_safe_norm_ratio_grad(self):
         # check_grads verifies the custom JVP against numerical differentiation.
@@ -63,7 +68,7 @@ class TestManifold(unittest.TestCase):
         y = jnp.array([4.0, 5.0, 6.0])
 
         # Test normal case
-        check_grads(_safe_norm_ratio, (x, y), order=1, modes=['fwd'])
+        check_grads(_safe_norm_ratio, (x, y), order=1, modes=["fwd"])
 
         # Test edge case x=0, y!=0
         x_zero = jnp.array([0.0, 0.0, 0.0])
@@ -118,5 +123,6 @@ class TestManifold(unittest.TestCase):
         projs = jax.vmap(self.manifold.to_tangent)(xs, vs)
         np.testing.assert_allclose(vs, projs, atol=1e-5)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

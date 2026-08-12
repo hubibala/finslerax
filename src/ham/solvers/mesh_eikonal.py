@@ -3,7 +3,6 @@
 Extends the Eulerian Fast Sweeping Method to unstructured triangulations.
 """
 
-
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -172,7 +171,14 @@ def _vertex_update(
     T0_final, _ = jax.lax.scan(
         process_face,
         T0,
-        (nbr1[v_idx], nbr2[v_idx], valid[v_idx], m_loc[v_idx], g_loc[v_idx], b_loc[v_idx]),
+        (
+            nbr1[v_idx],
+            nbr2[v_idx],
+            valid[v_idx],
+            m_loc[v_idx],
+            g_loc[v_idx],
+            b_loc[v_idx],
+        ),
     )
 
     # Enforce boundary condition: source nodes remain 0

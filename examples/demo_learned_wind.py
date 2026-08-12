@@ -13,7 +13,9 @@ from ham.vis import generate_icosphere, plot_sphere, plot_vector_field, setup_3d
 
 def main():
     print("--- HAM Metric Learning ---")
-    print("Fitting a wind field with Jacobian regularization for smooth vector lengths.")
+    print(
+        "Fitting a wind field with Jacobian regularization for smooth vector lengths."
+    )
 
     key = jax.random.PRNGKey(2025)
 

@@ -96,17 +96,21 @@ def plot_mesh_arrival(ax, T_vertex, title, n_bands=14):
     pc = Poly3DCollection(tris, facecolors=colors, edgecolors="none")
     ax.add_collection3d(pc)
 
-    ax.scatter(*(1.02 * np.asarray(source_pt[0])), color="white",
-               edgecolor="black", s=80, zorder=10, label="source")
+    ax.scatter(
+        *(1.02 * np.asarray(source_pt[0])),
+        color="white",
+        edgecolor="black",
+        s=80,
+        zorder=10,
+        label="source",
+    )
     ax.set_box_aspect((1, 1, 1))
     ax.set_xlim(-1, 1), ax.set_ylim(-1, 1), ax.set_zlim(-1, 1)
     ax.set_axis_off()
     ax.set_title(title)
     # Camera centered on the source so the front shapes are comparable
     ax.view_init(elev=18, azim=8)
-    return cm.ScalarMappable(
-        cmap=cmap, norm=plt.Normalize(0.0, float(T_face.max()))
-    )
+    return cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(0.0, float(T_face.max())))
 
 
 # =============================================================================
@@ -143,7 +147,9 @@ t0 = time.perf_counter()
 vol_solver = VolumetricEikonalSolver(max_iters=100, tol=1e-6)
 T_vol, _, _ = vol_solver.solve(metric_3d, SOURCE_3D, EXTENT, (N, N, N))
 T_vol.block_until_ready()
-print(f"  done in {time.perf_counter() - t0:.1f}s, T range [0, {float(T_vol.max()):.2f}]")
+print(
+    f"  done in {time.perf_counter() - t0:.1f}s, T range [0, {float(T_vol.max()):.2f}]"
+)
 T_np = np.asarray(T_vol)
 
 
@@ -160,15 +166,28 @@ def plot_volume_slice(ax):
     # Wind quiver (coarse)
     q = axis[::6]
     QX, QY = np.meshgrid(q, q, indexing="ij")
-    ax.quiver(QX, QY, -0.45 * QY, 0.45 * QX, color="white", alpha=0.85,
-              scale=12, width=0.004)
+    ax.quiver(
+        QX, QY, -0.45 * QY, 0.45 * QX, color="white", alpha=0.85, scale=12, width=0.004
+    )
 
-    lens = plt.Circle(np.asarray(LENS_CENTER[:2]), LENS_RADIUS, fill=False,
-                      color="black", linestyle="--", linewidth=1.5,
-                      label="slow lens (0.45x speed)")
+    lens = plt.Circle(
+        np.asarray(LENS_CENTER[:2]),
+        LENS_RADIUS,
+        fill=False,
+        color="black",
+        linestyle="--",
+        linewidth=1.5,
+        label="slow lens (0.45x speed)",
+    )
     ax.add_patch(lens)
-    ax.plot(*np.asarray(SOURCE_3D[0, :2]), "o", color="white",
-            markeredgecolor="black", markersize=9, label="source")
+    ax.plot(
+        *np.asarray(SOURCE_3D[0, :2]),
+        "o",
+        color="white",
+        markeredgecolor="black",
+        markersize=9,
+        label="source",
+    )
 
     ax.set_aspect("equal")
     ax.set_title("Volumetric Eikonal — z=0 slice\n(vortex wind + refractive lens)")
@@ -187,9 +206,7 @@ def plot_wavefront_isosurfaces(ax, levels):
         mask = np.asarray(valid).reshape(-1)
         tri_sel = tris_np[mask]
         color = cmap(0.15 + 0.8 * t_iso / t_max)
-        pc = Poly3DCollection(
-            tri_sel, facecolors=color, edgecolors="none", alpha=alpha
-        )
+        pc = Poly3DCollection(tri_sel, facecolors=color, edgecolors="none", alpha=alpha)
         ax.add_collection3d(pc)
         print(f"  isosurface T={t_iso:.2f}: {tri_sel.shape[0]} triangles")
 
@@ -200,7 +217,9 @@ def plot_wavefront_isosurfaces(ax, levels):
         cx + LENS_RADIUS * np.cos(u) * np.sin(v),
         cy + LENS_RADIUS * np.sin(u) * np.sin(v),
         cz + LENS_RADIUS * np.cos(v),
-        color="gray", linewidth=0.5, alpha=0.5,
+        color="gray",
+        linewidth=0.5,
+        alpha=0.5,
     )
 
     ax.scatter(*np.asarray(SOURCE_3D[0]), color="black", s=50, label="source")
@@ -220,19 +239,32 @@ print("Rendering figure...")
 fig = plt.figure(figsize=(13, 11))
 
 ax1 = fig.add_subplot(2, 2, 1, projection="3d")
-sm1 = plot_mesh_arrival(ax1, T_calm, "Mesh Eikonal on $S^2$ — calm\n(concentric great-circle fronts)")
+sm1 = plot_mesh_arrival(
+    ax1, T_calm, "Mesh Eikonal on $S^2$ — calm\n(concentric great-circle fronts)"
+)
 fig.colorbar(sm1, ax=ax1, shrink=0.6, label="arrival time T")
 
 ax2 = fig.add_subplot(2, 2, 2, projection="3d")
-sm2 = plot_mesh_arrival(ax2, T_wind, "Mesh Eikonal on $S^2$ — zonal jet\n(fronts skewed downwind)")
+sm2 = plot_mesh_arrival(
+    ax2, T_wind, "Mesh Eikonal on $S^2$ — zonal jet\n(fronts skewed downwind)"
+)
 fig.colorbar(sm2, ax=ax2, shrink=0.6, label="arrival time T")
 
 # Wind arrows on the equator for the jet panel
 theta = np.linspace(0, 2 * np.pi, 18, endpoint=False)
 eq = 1.04 * np.stack([np.cos(theta), np.sin(theta), np.zeros_like(theta)], axis=1)
 wind = 0.25 * np.stack([-eq[:, 1], eq[:, 0], np.zeros_like(theta)], axis=1)
-ax2.quiver(eq[:, 0], eq[:, 1], eq[:, 2], wind[:, 0], wind[:, 1], wind[:, 2],
-           color="black", alpha=0.7, arrow_length_ratio=0.35)
+ax2.quiver(
+    eq[:, 0],
+    eq[:, 1],
+    eq[:, 2],
+    wind[:, 0],
+    wind[:, 1],
+    wind[:, 2],
+    color="black",
+    alpha=0.7,
+    arrow_length_ratio=0.35,
+)
 
 ax3 = fig.add_subplot(2, 2, 3)
 cf = plot_volume_slice(ax3)

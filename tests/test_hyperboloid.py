@@ -9,7 +9,6 @@ from ham.geometry.manifolds import Hyperboloid
 
 
 class TestHyperboloid(unittest.TestCase):
-
     def setUp(self):
         self.dim = 2
         self.manifold = Hyperboloid(intrinsic_dim=self.dim)
@@ -48,7 +47,7 @@ class TestHyperboloid(unittest.TestCase):
 
     def test_projection_idempotence(self):
         """Projecting a valid point should not change it."""
-        x = jnp.array([1.0, 0.0, 0.0]) # The origin is definitely on the manifold
+        x = jnp.array([1.0, 0.0, 0.0])  # The origin is definitely on the manifold
         p = self.manifold.project(x)
         np.testing.assert_allclose(p, x, atol=1e-5)
 
@@ -118,7 +117,9 @@ class TestHyperboloid(unittest.TestCase):
         v_trans = self.manifold.parallel_transport(x, y, v)
 
         # Norm preserved
-        self.assertAlmostEqual(self.minkowski_dot(v_trans, v_trans), self.minkowski_dot(v, v), places=6)
+        self.assertAlmostEqual(
+            self.minkowski_dot(v_trans, v_trans), self.minkowski_dot(v, v), places=6
+        )
 
         # Orthogonal to y
         self.assertAlmostEqual(self.minkowski_dot(y, v_trans), 0.0, places=6)
@@ -127,13 +128,14 @@ class TestHyperboloid(unittest.TestCase):
         """
         Retracting a tangent vector should result in a valid point on the manifold.
         """
-        x = jnp.array([1.0, 0.0, 0.0]) # Origin
-        v = jnp.array([0.0, 0.5, 0.5]) # Valid tangent vector at origin (<x, v>_L = 0)
+        x = jnp.array([1.0, 0.0, 0.0])  # Origin
+        v = jnp.array([0.0, 0.5, 0.5])  # Valid tangent vector at origin (<x, v>_L = 0)
 
         new_x = self.manifold.retract(x, v)
 
         norm_sq = self.minkowski_dot(new_x, new_x)
         self.assertAlmostEqual(norm_sq, -1.0, places=6)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

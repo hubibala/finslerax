@@ -7,7 +7,6 @@ learned metric classes in ham.models.learned.
 All modules are compatible with JAX transforms (jit, vmap, grad).
 """
 
-
 import equinox as eqx
 import jax
 import jax.numpy as jnp

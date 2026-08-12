@@ -1,4 +1,5 @@
 """Tests for ArrivalTimeLoss used in metric recovery experiments."""
+
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -35,7 +36,7 @@ class TestArrivalTimeLoss:
         x_obs = jnp.array([[1.0, 0.0], [0.0, 1.0], [1.0, 1.0]])
         # True Euclidean distances, normalised to [0, 1] to match ArrivalTimeLoss
         t_raw = jnp.array([1.0, 1.0, jnp.sqrt(2.0)])
-        t_obs = t_raw / t_raw.max()   # [1/√2, 1/√2, 1.0]
+        t_obs = t_raw / t_raw.max()  # [1/√2, 1/√2, 1.0]
 
         loss = loss_fn(metric, source, x_obs, t_obs)
         # Loss should be near zero since predicted distances match after normalisation

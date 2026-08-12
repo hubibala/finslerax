@@ -7,7 +7,6 @@ DiscreteRanders (zoo.py) for anisotropic mesh-based metrics.
 See also: spec/ARCH_SPEC.md § 5 (Module Structure).
 """
 
-
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -246,6 +245,7 @@ class TriangularMesh(Manifold):
 
         def dist_fn(tri):
             return self._point_triangle_distance(x, tri)
+
         dists_sq, points = jax.vmap(dist_fn)(local_triangles)
 
         # Mask out dummy slots with infinite distance
@@ -293,8 +293,10 @@ class TriangularMesh(Manifold):
         all_indices = self._candidate_face_indices(x)
         safe_indices = jnp.maximum(all_indices, 0)
         local_triangles = self.triangles[safe_indices]
+
         def dist_fn(tri):
             return self._point_triangle_distance(x, tri)[0]
+
         dists_sq = jax.vmap(dist_fn)(local_triangles)
         is_valid = all_indices >= 0
         masked_dists = jnp.where(is_valid, dists_sq, jnp.inf)
@@ -323,8 +325,10 @@ class TriangularMesh(Manifold):
         Returns:
             Array of shape (F,) summing to 1, giving each face's weight.
         """
+
         def dist_fn(tri):
             return self._point_triangle_distance(x, tri)[0]
+
         dists_sq = jax.vmap(dist_fn)(self.triangles)
         return jax.nn.softmax(-dists_sq * temperature)
 

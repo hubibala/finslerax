@@ -11,7 +11,6 @@ from ham.solvers.coloring import chain_coloring, greedy_coloring, mesh_vertex_co
 
 
 class TestChainColoring(unittest.TestCase):
-
     def test_two_colors_cover_all_inner(self):
         """All inner vertices appear exactly once across both colors."""
         for n_inner in [1, 2, 5, 9, 10, 20]:
@@ -27,8 +26,9 @@ class TestChainColoring(unittest.TestCase):
             for group in [c0, c1]:
                 if len(group) > 1:
                     diffs = jnp.diff(group)
-                    self.assertTrue(jnp.all(diffs >= 2),
-                                    f"Adjacent vertices in same color: {group}")
+                    self.assertTrue(
+                        jnp.all(diffs >= 2), f"Adjacent vertices in same color: {group}"
+                    )
 
     def test_single_vertex(self):
         c0, c1 = chain_coloring(1)
@@ -38,7 +38,6 @@ class TestChainColoring(unittest.TestCase):
 
 
 class TestGreedyColoring(unittest.TestCase):
-
     def test_triangle(self):
         adj = {0: {1, 2}, 1: {0, 2}, 2: {0, 1}}
         groups = greedy_coloring(adj, 3)
@@ -70,7 +69,6 @@ class TestGreedyColoring(unittest.TestCase):
 
 
 class TestMeshVertexColoring(unittest.TestCase):
-
     def test_single_triangle(self):
         faces = jnp.array([[0, 1, 2]])
         groups = mesh_vertex_coloring(faces, 3)
@@ -94,13 +92,13 @@ class TestMeshVertexColoring(unittest.TestCase):
 
 
 class TestParallelAVBDSolver(unittest.TestCase):
-
     def setUp(self):
         self.key = jax.random.PRNGKey(42)
 
     def test_parallel_euclidean_straight_line(self):
         """Parallel solver should find a straight line in Euclidean space."""
         from ham.geometry.manifolds.euclidean_space import EuclideanSpace
+
         metric = Euclidean(EuclideanSpace(dim=2))
         solver = AVBDSolver(iterations=50, step_size=0.1, parallel=True)
 
@@ -133,8 +131,10 @@ class TestParallelAVBDSolver(unittest.TestCase):
 
         # Energies should be in the same ballpark (parallel may converge
         # slightly differently due to Jacobi-within-color vs pure Gauss-Seidel)
-        self.assertLess(abs(float(traj_par.energy) - float(traj_seq.energy)),
-                        0.5 * float(traj_seq.energy) + 0.1)
+        self.assertLess(
+            abs(float(traj_par.energy) - float(traj_seq.energy)),
+            0.5 * float(traj_seq.energy) + 0.1,
+        )
 
     def test_parallel_jit(self):
         """Parallel solver must be JIT-compilable."""
@@ -168,8 +168,12 @@ class TestParallelAVBDSolver(unittest.TestCase):
         sphere = Sphere(radius=1.0)
 
         def loss(wind_speed):
-            def h_net(x): return jnp.eye(3)
-            def w_net(x): return jnp.array([wind_speed, 0.0, 0.0])
+            def h_net(x):
+                return jnp.eye(3)
+
+            def w_net(x):
+                return jnp.array([wind_speed, 0.0, 0.0])
+
             metric = Randers(sphere, h_net, w_net)
             solver = AVBDSolver(iterations=20, step_size=0.05, parallel=True)
             p0 = jnp.array([1.0, 0.0, 0.0])
@@ -182,6 +186,7 @@ class TestParallelAVBDSolver(unittest.TestCase):
     def test_parallel_matches_sequential_energy_order(self):
         """Parallel solver energy should be within 2x of sequential."""
         from ham.geometry.manifolds.euclidean_space import EuclideanSpace
+
         metric = Euclidean(EuclideanSpace(dim=3))
         solver_seq = AVBDSolver(iterations=80, step_size=0.1, parallel=False)
         solver_par = AVBDSolver(iterations=80, step_size=0.1, parallel=True)

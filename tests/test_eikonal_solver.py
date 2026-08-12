@@ -10,6 +10,7 @@ from ham.solvers.eikonal import EikonalSolver, _fast_sweeping_solve
 
 class DummyRandersMetric(AsymmetricMetric):
     wind_scale: float = eqx.field(static=True)
+
     def __init__(self, dim: int, wind_scale: float = 0.0):
         self.manifold = EuclideanSpace(dim)
         self.wind_scale = float(wind_scale)
@@ -28,6 +29,7 @@ class DummyRandersMetric(AsymmetricMetric):
         lam = 1.0 - w_norm_sq
         return H, W, lam
 
+
 def test_eikonal_solver_forward_isotropic():
     solver = EikonalSolver(max_iters=100, tol=1e-5)
     # 0 wind gives a standard Euclidean metric
@@ -44,6 +46,7 @@ def test_eikonal_solver_forward_isotropic():
 
     max_error = jnp.max(jnp.abs(T - T_analytical))
     assert max_error < 0.1, f"Max error {max_error} too large for isotropic case"
+
 
 def test_fast_sweeping_gradients_anisotropic():
     # Test implicit differentiation gradients using jax.test_util.check_grads
@@ -76,7 +79,7 @@ def test_fast_sweeping_gradients_anisotropic():
     # tolerances are too tight at both ends (it fails f64 at rtol=1e-5), so we
     # set explicit floors above each precision's measured gap.
     atol, rtol = tol(atol32=5e-3, rtol32=5e-3, atol64=1e-3, rtol64=1e-3)
-    check_grads(fwd, (G, B), order=1, modes=['rev'], eps=1e-3, atol=atol, rtol=rtol)
+    check_grads(fwd, (G, B), order=1, modes=["rev"], eps=1e-3, atol=atol, rtol=rtol)
 
 
 # ---------------------------------------------------------------------------

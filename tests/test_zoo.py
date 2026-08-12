@@ -13,28 +13,52 @@ from ham.utils.math import PSD_EPS
 
 class FlatPlane(Manifold):
     @property
-    def ambient_dim(self): return 2
+    def ambient_dim(self):
+        return 2
+
     @property
-    def intrinsic_dim(self): return 2
-    def project(self, x): return x
-    def to_tangent(self, x, v): return v
-    def retract(self, x, delta): return x + delta
+    def intrinsic_dim(self):
+        return 2
+
+    def project(self, x):
+        return x
+
+    def to_tangent(self, x, v):
+        return v
+
+    def retract(self, x, delta):
+        return x + delta
+
     def random_sample(self, key, shape):
         return jax.random.normal(key, (*shape, 2))
 
+
 class MockMesh(Manifold):
     """Minimal mock for DiscreteRanders testing."""
+
     @property
-    def ambient_dim(self): return 2
+    def ambient_dim(self):
+        return 2
+
     @property
-    def intrinsic_dim(self): return 2
-    def project(self, x): return x
-    def to_tangent(self, x, v): return v
-    def retract(self, x, delta): return x + delta
+    def intrinsic_dim(self):
+        return 2
+
+    def project(self, x):
+        return x
+
+    def to_tangent(self, x, v):
+        return v
+
+    def retract(self, x, delta):
+        return x + delta
+
     def random_sample(self, key, shape):
         return jax.random.normal(key, (*shape, 2))
+
     def get_face_weights(self, x):
         return jnp.array([1.0, 0.0])
+
 
 class TestMetricZoo(unittest.TestCase):
     def setUp(self):
@@ -50,6 +74,7 @@ class TestMetricZoo(unittest.TestCase):
         cost = metric.metric_fn(jnp.zeros(2), jnp.zeros(2))
         self.assertEqual(float(cost), 0.0)
 
+
 class TestRiemannian(unittest.TestCase):
     def setUp(self):
         self.manifold = FlatPlane()
@@ -58,7 +83,9 @@ class TestRiemannian(unittest.TestCase):
         # g_net returns the metric tensor G directly (not a Cholesky factor).
         # PSDMatrixField handles the A @ A.T + PSD_EPS*I construction internally;
         # here we simulate a PSDMatrixField-like output for the closed-form check.
-        def g_net(x): return 4.0 * jnp.eye(2) @ (4.0 * jnp.eye(2)).T + PSD_EPS * jnp.eye(2)
+        def g_net(x):
+            return 4.0 * jnp.eye(2) @ (4.0 * jnp.eye(2)).T + PSD_EPS * jnp.eye(2)
+
         metric = Riemannian(self.manifold, g_net)
         cost = metric.metric_fn(jnp.zeros(2), jnp.array([1.0, 0.0]))
         # v^T G v = 1 * (16 + PSD_EPS) * 1 = 16 + PSD_EPS
@@ -66,10 +93,13 @@ class TestRiemannian(unittest.TestCase):
         np.testing.assert_allclose(float(cost), float(expected), atol=1e-5)
 
     def test_riemannian_zero(self):
-        def g_net(x): return jnp.eye(2)
+        def g_net(x):
+            return jnp.eye(2)
+
         metric = Riemannian(self.manifold, g_net)
         cost = metric.metric_fn(jnp.zeros(2), jnp.zeros(2))
         self.assertEqual(float(cost), 0.0)
+
 
 class TestRanders(unittest.TestCase):
     def setUp(self):
@@ -83,8 +113,12 @@ class TestRanders(unittest.TestCase):
         # squash (smooth max_speed*tanh(|W|)/|W|, applied at all magnitudes since
         # the W-RAND fix) contracts the raw wind slightly, so the analytical
         # reference must use the squashed wind to be exact.
-        def h_net(x): return jnp.eye(2)
-        def w_net(x): return jnp.array([-0.1, 0.0])
+        def h_net(x):
+            return jnp.eye(2)
+
+        def w_net(x):
+            return jnp.array([-0.1, 0.0])
+
         metric = Randers(self.manifold, h_net, w_net)
         x = jnp.zeros(2)
         v_east = jnp.array([1.0, 0.0])
@@ -99,15 +133,23 @@ class TestRanders(unittest.TestCase):
         np.testing.assert_allclose(float(cost_east), float(expected), atol=1e-5)
 
     def test_randers_zero_vector(self):
-        def h_net(x): return jnp.eye(2)
-        def w_net(x): return jnp.array([0.5, 0.0])
+        def h_net(x):
+            return jnp.eye(2)
+
+        def w_net(x):
+            return jnp.array([0.5, 0.0])
+
         metric = Randers(self.manifold, h_net, w_net)
         cost = metric.metric_fn(jnp.zeros(2), jnp.zeros(2))
         self.assertEqual(float(cost), 0.0)
 
     def test_randers_jax_transforms(self):
-        def h_net(x): return jnp.eye(2)
-        def w_net(x): return jnp.array([0.1, 0.1])
+        def h_net(x):
+            return jnp.eye(2)
+
+        def w_net(x):
+            return jnp.array([0.1, 0.1])
+
         metric = Randers(self.manifold, h_net, w_net)
         x = jnp.array([0.5, 0.5])
         v = jnp.array([1.0, 0.0])
@@ -118,9 +160,12 @@ class TestRanders(unittest.TestCase):
         vmapped = jax.vmap(metric.metric_fn)
         self.assertEqual(vmapped(jnp.tile(x, (5, 1)), jnp.tile(v, (5, 1))).shape, (5,))
 
-        def energy(x, v): return 0.5 * metric.metric_fn(x, v)**2
+        def energy(x, v):
+            return 0.5 * metric.metric_fn(x, v) ** 2
+
         grad_x = jax.grad(energy, argnums=0)(x, v)
         self.assertTrue(jnp.all(jnp.isfinite(grad_x)))
+
 
 class TestDiscreteRanders(unittest.TestCase):
     def test_discrete_randers_basic(self):
@@ -143,5 +188,6 @@ class TestDiscreteRanders(unittest.TestCase):
         cost = metric.metric_fn(jnp.zeros(2), jnp.zeros(2))
         self.assertEqual(float(cost), 0.0)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()

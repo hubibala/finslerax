@@ -22,7 +22,6 @@ The graph build uses NumPy + :func:`scipy.sparse.csgraph.dijkstra` (SciPy is a
 hard dependency); no extra packages are required.
 """
 
-
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -114,5 +113,7 @@ def geodesic_graph_init(
         chain.append(prev)
     chain.reverse()
 
-    waypoints = np.concatenate([z0[None], pts[chain], z1[None]], axis=0).astype(pts.dtype)
+    waypoints = np.concatenate([z0[None], pts[chain], z1[None]], axis=0).astype(
+        pts.dtype
+    )
     return resample_path(jnp.asarray(waypoints), n_steps)

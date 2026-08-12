@@ -24,22 +24,37 @@ ATOL = 1e-5
 
 # ---------- Module-Level Test Metrics ----------
 
+
 class MockManifold(Manifold):
     """A trivial R^3 manifold for testing."""
+
     @property
-    def ambient_dim(self): return 3
+    def ambient_dim(self):
+        return 3
+
     @property
-    def intrinsic_dim(self): return 3
-    def project(self, x): return x
-    def to_tangent(self, x, v): return v
-    def retract(self, x, delta): return x + delta
+    def intrinsic_dim(self):
+        return 3
+
+    def project(self, x):
+        return x
+
+    def to_tangent(self, x, v):
+        return v
+
+    def retract(self, x, delta):
+        return x + delta
+
     def random_sample(self, key, shape):
         return jax.random.normal(key, (*shape, 3))
 
+
 class EuclideanMetric(FinslerMetric):
     """F(x, v) = |v|. Batch-safe via axis=-1."""
+
     def metric_fn(self, x, v):
         return safe_norm(v, axis=-1)
+
 
 class CurvedMetric(FinslerMetric):
     """
@@ -47,6 +62,7 @@ class CurvedMetric(FinslerMetric):
     F(x, v) = sqrt(sum_i (1 + x_i^2) v_i^2).
     Produces non-trivial spray because g depends on x.
     """
+
     def metric_fn(self, x, v):
         g_diag = 1.0 + x**2
         sq_norm = jnp.sum(g_diag * v**2)
@@ -54,7 +70,6 @@ class CurvedMetric(FinslerMetric):
 
 
 class TestSprayAndAcceleration(unittest.TestCase):
-
     def setUp(self):
         self.manifold = MockManifold()
         self.euc = EuclideanMetric(self.manifold)
@@ -111,8 +126,11 @@ class TestSprayAndAcceleration(unittest.TestCase):
         acc = self.curved.geod_acceleration(x, v)
 
         # Spray should be non-zero for this metric
-        self.assertGreater(float(jnp.linalg.norm(spray)), 1e-6,
-                           "CurvedMetric spray should be non-trivial")
+        self.assertGreater(
+            float(jnp.linalg.norm(spray)),
+            1e-6,
+            "CurvedMetric spray should be non-trivial",
+        )
         np.testing.assert_allclose(acc, -2.0 * spray, atol=ATOL)
 
     def test_spray_jit_vmap(self):
@@ -142,7 +160,6 @@ class TestSprayAndAcceleration(unittest.TestCase):
 
 
 class TestEnergy(unittest.TestCase):
-
     def setUp(self):
         self.manifold = MockManifold()
         self.euc = EuclideanMetric(self.manifold)
@@ -178,7 +195,6 @@ class TestEnergy(unittest.TestCase):
 
 
 class TestInnerProduct(unittest.TestCase):
-
     def setUp(self):
         self.manifold = MockManifold()
         self.euc = EuclideanMetric(self.manifold)
@@ -221,12 +237,13 @@ class TestInnerProduct(unittest.TestCase):
         eigenvalues = jnp.linalg.eigvalsh(hess)
 
         # All eigenvalues must be strictly positive
-        self.assertTrue(jnp.all(eigenvalues > 0),
-                        f"Fundamental tensor must be positive definite; eigenvalues: {eigenvalues}")
+        self.assertTrue(
+            jnp.all(eigenvalues > 0),
+            f"Fundamental tensor must be positive definite; eigenvalues: {eigenvalues}",
+        )
 
 
 class TestArcLength(unittest.TestCase):
-
     def setUp(self):
         self.manifold = MockManifold()
         self.euc = EuclideanMetric(self.manifold)
@@ -281,8 +298,10 @@ class TestRandersMetric(unittest.TestCase):
         hess = jax.hessian(self.metric.energy, argnums=1)(x, v)
         eigenvalues = jnp.linalg.eigvalsh(hess)
 
-        self.assertTrue(jnp.all(eigenvalues > 0),
-                        f"Randers fundamental tensor must be PD; eigenvalues: {eigenvalues}")
+        self.assertTrue(
+            jnp.all(eigenvalues > 0),
+            f"Randers fundamental tensor must be PD; eigenvalues: {eigenvalues}",
+        )
 
     def test_randers_v_zero_finite(self):
         """Spray at v=0 must be finite (regularization prevents NaN)."""
@@ -352,5 +371,5 @@ class TestCausalWindClamp(unittest.TestCase):
         return lambda x: jnp.array([0.1, 0.0])
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

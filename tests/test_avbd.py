@@ -12,7 +12,6 @@ from ham.solvers.avbd import AVBDSolver
 
 
 class TestAVBDSolver(unittest.TestCase):
-
     def setUp(self):
         self.solver = AVBDSolver(iterations=50, step_size=0.1)
         self.key = jax.random.PRNGKey(42)
@@ -37,7 +36,9 @@ class TestAVBDSolver(unittest.TestCase):
         p0s = jnp.tile(jnp.array([1.0, 0.0, 0.0]), (4, 1))
         p1s = jnp.tile(jnp.array([0.0, 1.0, 0.0]), (4, 1))
 
-        batched_solve = jax.vmap(lambda p0, p1: self.solver.solve(metric, p0, p1, n_steps=10))
+        batched_solve = jax.vmap(
+            lambda p0, p1: self.solver.solve(metric, p0, p1, n_steps=10)
+        )
         trajs = batched_solve(p0s, p1s)
 
         self.assertEqual(trajs.xs.shape, (4, 11, 3))
@@ -48,8 +49,12 @@ class TestAVBDSolver(unittest.TestCase):
         sphere = Sphere(radius=1.0)
 
         def loss(p_start, wind_speed):
-            def h_net(x): return jnp.eye(3)
-            def w_net(x): return jnp.array([wind_speed, 0.0, 0.0])
+            def h_net(x):
+                return jnp.eye(3)
+
+            def w_net(x):
+                return jnp.array([wind_speed, 0.0, 0.0])
+
             metric = Randers(sphere, h_net, w_net)
 
             p_end = jnp.array([0.0, 1.0, 0.0])
@@ -67,17 +72,20 @@ class TestAVBDSolver(unittest.TestCase):
 
     def test_alm_constraint(self):
         """Verify Augmented Lagrangian Method (ALM) helps enforce constraints."""
+
         # Using a Paraboloid as an implicit constraint on a flat space
         # c(x) = z - (x^2 + y^2) = 0
-        def para_c(x): return x[2] - (x[0]**2 + x[1]**2)
+        def para_c(x):
+            return x[2] - (x[0] ** 2 + x[1] ** 2)
 
         # We'll use Euclidean metric on R^3 (not on the Paraboloid manifold)
         # to see if the constraint alone can pull the path to the surface.
         from ham.geometry.manifolds.euclidean_space import EuclideanSpace
+
         metric = Euclidean(EuclideanSpace(dim=3))
 
         p0 = jnp.array([-1.0, 0.0, 1.0])
-        p1 = jnp.array([ 1.0, 0.0, 1.0])
+        p1 = jnp.array([1.0, 0.0, 1.0])
 
         # Compare pure penalty (iterations=5) vs ALM (iterations=50)
         # Actually, let's just check that violation is tracked and small
@@ -88,7 +96,7 @@ class TestAVBDSolver(unittest.TestCase):
         # The path should dip towards the paraboloid
         # Midpoint of linear interpolation is (0, 0, 1).
         # On paraboloid it should be closer to (0, 0, 0).
-        self.assertLess(traj.xs[10, 2], 0.8) # Should at least start moving down
+        self.assertLess(traj.xs[10, 2], 0.8)  # Should at least start moving down
         self.assertLess(traj.constraint_violation, 1.0)
 
     def test_coincident_endpoints(self):
@@ -121,7 +129,8 @@ class TestAVBDSolver(unittest.TestCase):
         # We can't directly check the step count from Trajectory,
         # but if it finished 1000 iterations it would take much longer.
         # Actually, let's check the energy change.
-        self.assertLess(traj.energy, 10.0) # Sanity check
+        self.assertLess(traj.energy, 10.0)  # Sanity check
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()
