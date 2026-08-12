@@ -1,7 +1,7 @@
 """Global numerical-precision configuration for the HAM library.
 
 This module is the **single source of truth** for the floating-point precision
-used throughout HAM (core, experiments, examples, tests). HAM follows the
+used throughout HAM (core, examples, tests). HAM follows the
 JAX-native convention: precision is governed by JAX's own ``jax_enable_x64``
 flag, and HAM merely *reads* it.
 

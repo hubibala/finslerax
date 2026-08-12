@@ -124,7 +124,7 @@ Concrete metrics live in `ham.geometry.zoo`; learnable ones in `ham.models`.
 | `NeuralRanders`, `NeuralRiemannian` | `models.learned` | $H, W$ are neural networks |
 | `PullbackRanders`, `PullbackRiemannian` | `models.learned` | $H = J^\top J$ from a decoder Jacobian |
 | `KernelWindField` | `models.learned` | non-parametric kernel-smoothed wind from data |
-| `CovariateConditionedRanders` | `models.wildfire` | wind conditioned on local terrain covariates |
+| `CovariateConditionedRanders` | `models.covariate` | sea and wind conditioned on a per-pixel covariate raster |
 
 ### 3.1 The Randers specialization
 
@@ -245,7 +245,7 @@ src/ham/
 │   └── curvature.py         # flag / sectional / Riemann / scalar curvature
 ├── models/
 │   ├── learned.py           # Neural / pullback / energy-based / kernel metrics
-│   └── wildfire.py          # CovariateConditionedRanders, LocalTerrainCNN, SPD/‖B‖ projections
+│   └── covariate.py         # CovariateConditionedRanders, LocalTerrainCNN, SPD/‖B‖ projections
 ├── nn/
 │   ├── networks.py          # VectorField, PSDMatrixField, RandomFourierFeatures
 │   ├── ebm.py               # ScalarEnergyField, QuadraticHead
@@ -261,15 +261,13 @@ src/ham/
 │   ├── pipeline.py          # HAMPipeline, TrainingPhase
 │   ├── losses.py            # geometry-aware loss components
 │   └── losses_ebm.py        # contrastive divergence, denoising score matching
-├── data/                    # dataset loaders (sim2real, wildfire)
 ├── sim/                     # analytic vector fields (Rossby–Haurwitz, vortices)
-├── utils/                   # numerics (safe_norm, epsilons), device, config
+├── utils/                   # numerics (safe_norm, epsilons), device, config, terrain
 └── vis/                     # plotting, isosurfaces, marching cubes
 
 examples/        # runnable demo scripts + notebooks
-experiments/     # larger applications (marine navigation, …)
-spec/            # MATH_SPEC.md, ARCH_SPEC.md, solver studies
-tests/           # 333 tests across 32 modules
+spec/            # MATH_SPEC.md, ARCH_SPEC.md
+tests/           # 36 test modules, dual-precision
 ```
 
 ---
@@ -340,13 +338,11 @@ skipped (with a printed notice) when no lineage data is present.
    the sphere and non-trivial Randers holonomy.
 5. **Training pipeline** — `HAMPipeline` with per-phase freezing, lineage-triple
    batching, and the modular loss library above.
-6. **Applications** (`examples/`, `experiments/`):
-   - *Marine navigation* (`experiments/marine/`) — time-dependent Zermelo routing
-     for a 3-D underwater glider on a Randers metric + differentiable eikonal
-     solver.
-   - *Wildfire* (`models/wildfire.py`, `data/wildfire.py`) — front propagation
-     with terrain-covariate-conditioned Randers metrics.
-   - *Robot-arm geodesics* (`experiments/arm/`) — configuration-space geodesic
+6. **Applications.** Worked end-to-end applications are developed on their own
+   branches so that the framework itself stays dependency-light:
+   - *Wildfire spread* (`app/wildfire`) — front propagation with
+     covariate-conditioned Randers metrics and the differentiable eikonal solver.
+   - *Robot-arm geodesics* (`app/robot-arm`) — configuration-space geodesic
      motion planning with asymmetric (gravity-Randers) C-space cost.
 
 ### Known limitations

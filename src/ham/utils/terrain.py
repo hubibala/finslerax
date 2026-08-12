@@ -16,7 +16,7 @@ import jax.numpy as jnp
 
 from ham.geometry.mesh import TriangularMesh
 from ham.geometry.metric import AsymmetricMetric
-from ham.models.wildfire import project_b_norm, project_spd
+from ham.models.covariate import project_b_norm, project_spd
 from ham.utils.config import DEFAULT_JNP_DTYPE
 from ham.utils.math import GRAD_EPS, safe_norm
 
@@ -224,7 +224,7 @@ class CovariateMeshRanders(AsymmetricMetric):
     """Randers metric on a TriangularMesh with per-face covariate conditioning.
 
     Uses the same global/local MLP encoder architecture as
-    :class:`~ham.models.wildfire.CovariateConditionedRanders` but operates on
+    :class:`~ham.models.covariate.CovariateConditionedRanders` but operates on
     3D mesh faces.  Face Randers parameters ``(G_f, b_f)`` are computed from
     per-face covariate vectors via the shared encoder.
 

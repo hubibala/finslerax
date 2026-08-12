@@ -8,11 +8,11 @@ transport built on JAX and Equinox.
 Subpackages
 -----------
 geometry : Manifolds, metrics (Euclidean/Riemannian/Randers), transport, curvature
-models   : Neural and pullback metric implementations (learned, wildfire)
+models   : Neural, pullback, and covariate-conditioned metric implementations
 solvers  : Geodesic BVP (AVBD) and IVP (ExponentialMap); grid/mesh/volumetric eikonal
 training : Multi-phase training pipeline and modular losses
 nn       : Neural network building blocks (VectorField, PSDMatrixField, EBM, KDE)
-data, sim, utils, vis : Dataset loaders, analytical fields, numerics, visualization
+sim, utils, vis : Analytical fields, numerics, visualization
 """
 
 __version__ = "1.0.0"

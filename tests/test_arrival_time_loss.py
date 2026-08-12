@@ -24,8 +24,8 @@ class TestArrivalTimeLoss:
         """On flat R^2 with G=I, geodesic distance should equal Euclidean distance.
 
         ArrivalTimeLoss normalises t_pred to [0,1] by dividing by its maximum
-        before computing MSE, matching the wildfire data pipeline where t_obs
-        is pre-normalised to [0,1].  We therefore also normalise t_obs here.
+        before computing MSE, matching arrival-time observations that are
+        pre-normalised to [0,1].  We therefore also normalise t_obs here.
         """
         metric = _identity_metric()
         solver = AVBDSolver(step_size=0.05, iterations=80)
