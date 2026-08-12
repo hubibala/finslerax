@@ -18,6 +18,7 @@ and provides O(1)-memory implicit gradients with respect to ``(G, B)`` via
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+from jax.typing import ArrayLike
 
 from ham.geometry.metric import AsymmetricMetric, FinslerMetric
 
@@ -113,10 +114,10 @@ def compute_two_point_update(
     g22: jax.Array,
     b1: jax.Array,
     b2: jax.Array,
-    m1x: float,
-    m1y: float,
-    m2x: float,
-    m2y: float,
+    m1x: ArrayLike,
+    m1y: ArrayLike,
+    m2x: ArrayLike,
+    m2y: ArrayLike,
     eps: float = 1e-12,
 ) -> jax.Array:
     """
@@ -167,8 +168,8 @@ def compute_one_point_update(
     g22: jax.Array,
     b1: jax.Array,
     b2: jax.Array,
-    mx: float,
-    my: float,
+    mx: ArrayLike,
+    my: ArrayLike,
 ) -> jax.Array:
     """Computes the 1-point (edge) update.
 
