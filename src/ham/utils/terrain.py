@@ -258,6 +258,8 @@ class CovariateMeshRanders(AsymmetricMetric):
         spec/MATH_SPEC.md §§ 1–2, 5; spec/ARCH_SPEC.md § 3.
     """
 
+    # Narrows the base-class Manifold: this metric reads mesh faces directly.
+    manifold: TriangularMesh
     global_mlp: eqx.nn.MLP
     local_mlp: eqx.nn.MLP
     fuel_embedding: jax.Array
