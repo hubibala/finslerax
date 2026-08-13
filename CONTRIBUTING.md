@@ -37,10 +37,8 @@ be green before it can merge.
 | Lint | `ruff check --no-cache src/ tests/ examples/` | `ruff check src/ tests/ examples/` |
 | Format | `ruff format --check --no-cache src/ tests/ examples/` | `ruff format src/ tests/ examples/` |
 | Tests | `pytest tests/ -v --timeout=300`, on Python 3.10 and 3.11 × `JAX_ENABLE_X64` ∈ {0, 1} | `pytest tests/ -q` and `JAX_ENABLE_X64=1 pytest tests/ -q` |
+| Types | `mypy src/ham` | `mypy src/ham` |
 | Build | `uv build` then `twine check dist/*` | `uv build` |
-
-One further check, `types` (`mypy src/ham`), runs on every PR but is advisory
-rather than blocking while the annotations are tightened incrementally.
 
 The whole suite takes several minutes, so while iterating on one module, run
 just its test file and lint the files you touched. Run the full dual-precision

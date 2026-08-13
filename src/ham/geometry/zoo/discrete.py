@@ -18,6 +18,8 @@ class DiscreteRanders(AsymmetricMetric):
     :class:`ham.geometry.zoo.Randers` and :func:`ham.utils.causal_wind_scale`.
     """
 
+    # Narrows the base-class Manifold: this metric reads mesh face weights.
+    manifold: TriangularMesh
     face_winds: jnp.ndarray
     epsilon: float = eqx.field(static=True)
     wind_stiffness: float = eqx.field(static=True)
