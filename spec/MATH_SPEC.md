@@ -59,30 +59,56 @@ $$
 
 ---
 
-## 3. Kinematics: The Berwald Connection
+## 3. Kinematics: Parallel Translation
 
-For parallel transport and covariant differentiation, we employ the **Berwald Connection**. Unlike the Chern connection, the Berwald connection is defined purely by the non-linearity of the Spray.
+The spray $G^i(x,y)$ induces two distinct objects, and they must not be confused. The **nonlinear connection** defines the canonical parallel translation of the Finsler manifold; the **linear Berwald connection** is its velocity-derivative and is a different transport.
 
-### 3.1. Definition
-The Berwald connection coefficients $^B\Gamma^i_{jk}$ are defined as the second partial derivatives of the spray coefficients with respect to velocity:
+### 3.1. The nonlinear connection and horizontal translation
+
+The nonlinear connection coefficients are the first velocity derivatives of the spray:
 
 $$
-^B\Gamma^i_{jk}(x, v) = \frac{\partial^2 G^i}{\partial v^j \partial v^k}(x, v)
+N^i_j(x, y) = \frac{\partial G^i}{\partial y^j}(x, y)
+$$
+
+They are homogeneous of degree one in $y$. A curve $t \mapsto (\gamma(t), Y(t))$ in $TM$ is **horizontal** when
+
+$$
+\dot Y^i + N^i_j(\gamma, Y)\,\dot\gamma^j = 0,
+$$
+
+and the resulting map $P_\gamma \colon T_{\gamma(0)}M \to T_{\gamma(1)}M$ is the parallel translation of the Finsler manifold. Note that $N$ is evaluated **at the transported vector $Y$**, not at the curve's velocity; the equation is therefore *nonlinear* in $Y$.
+
+**Key Properties:**
+* **Positively 1-homogeneous:** $P_\gamma(\lambda Y) = \lambda P_\gamma(Y)$ for $\lambda > 0$. Not linear in general.
+* **Norm-preserving:** $F(\gamma(t), Y(t))$ is constant. The translation preserves the *norm function* $F$, though not the fundamental tensor $g$.
+* **Indicatrix-valued:** homogeneity and norm preservation together mean $P_\gamma$ carries $\mathcal{I}_{\gamma(0)}$ to $\mathcal{I}_{\gamma(1)}$. This is why the holonomy group is a subgroup of the diffeomorphism group of the indicatrix, rather than of $O(n)$, and why it is typically infinite-dimensional.
+
+This is what `BerwaldConnection.parallel_transport` integrates.
+
+### 3.2. The linear Berwald connection
+
+Differentiating $N$ once more in the velocity gives the linear Berwald coefficients:
+
+$$
+^B\Gamma^i_{jk}(x, v) = \frac{\partial N^i_j}{\partial v^k}(x,v) = \frac{\partial^2 G^i}{\partial v^j \partial v^k}(x, v)
+$$
+
+with transport
+
+$$
+\frac{d X^i}{dt} + \ ^B\Gamma^i_{jk}(\gamma, \dot{\gamma}) \dot{\gamma}^j X^k = 0 .
 $$
 
 **Key Properties:**
 * **Torsion-Free:** Symmetric in $j, k$.
-* **Spray-Induced:** If the Spray is quadratic in $v$ (Riemannian case), $\Gamma$ depends only on $x$ (it becomes the Levi-Civita connection).
-* **Non-Metric:** In general Finsler spaces, the Berwald connection does *not* preserve the Finsler norm ($D g \neq 0$). This is a feature, not a bug: it tracks the "affine" deformation of the space rather than forcing rigid rotation.
+* **Linear:** in $X$, with coefficients frozen at $\dot\gamma$.
+* **Not metric-compatible:** $D g \neq 0$, and this transport does *not* preserve $F$.
+* **Spray-Induced:** if the spray is quadratic in $v$ — the Berwald case, and in particular the Riemannian one — then $N^i_j(x,y) = \Gamma^i_{jk}(x)y^k$, the two transports coincide, and $^B\Gamma$ is Levi-Civita.
 
-### 3.2. Parallel Transport
-A vector field $X(t)$ is **Berwald Parallel** along a curve $\gamma(t)$ (with velocity $\dot{\gamma}$) if:
+Exposed as `BerwaldConnection.linear_parallel_transport`, and used for curvature. It is **not** the canonical Finsler translation.
 
-$$
-\frac{d X^i}{dt} + \ ^B\Gamma^i_{jk}(\gamma, \dot{\gamma}) \dot{\gamma}^j X^k = 0
-$$
-
-In JAX, this is simply an ODE integration where the `force` term uses the Hessian of the `spray` function.
+The difference is measurable rather than formal. On a Randers metric with varying wind ($h=I$, $W=(y/2,\,0)$), horizontal translation holds $F$ constant to $6	imes10^{-11}$ along a unit path, while the linear transport loses $46\%$ of it and converges to that value under refinement.
 
 ### 3.3. Holonomy and Projection-Based Transport
 
