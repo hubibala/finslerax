@@ -43,9 +43,6 @@ jobs:
 
   types:
     runs-on: ubuntu-latest
-    # Advisory, not a merge gate: the annotations are being tightened
-    # incrementally. Make this blocking once the error count reaches zero.
-    continue-on-error: true
     steps:
     - uses: actions/checkout@v4
 
