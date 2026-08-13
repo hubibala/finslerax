@@ -8,12 +8,12 @@ and it preserves the Finsler norm ``F``. That norm preservation is what makes
 translation a map between indicatrices, and therefore what makes the holonomy
 group a subgroup of the diffeomorphism group of the indicatrix.
 
-The linear Berwald connection ``^BΓ^i_jk = ∂²G^i/∂y^j∂y^k`` is a different
-object. It is linear and torsion-free but not metric-compatible, so its
-transport does not preserve ``F``. It is exposed as
-:meth:`BerwaldConnection.linear_parallel_transport`, named so that the two are
-not confused. The two agree exactly when the spray is quadratic in the velocity
-— the Berwald case, and in particular the Riemannian one.
+Differentiating the nonlinear coefficients once more in the velocity gives the
+linear Berwald coefficients ``^BΓ^i_jk = ∂²G^i/∂y^j∂y^k``. They are the
+Christoffel symbols of Levi-Civita whenever the spray is quadratic in the
+velocity, and :meth:`BerwaldConnection.christoffel_symbols` exposes them for
+analysis. They do not define the transport: the linear equation they generate is
+not metric-compatible and is not an isometry of ``F``.
 
 See ``spec/MATH_SPEC.md § 3``.
 """
@@ -102,8 +102,8 @@ class BerwaldConnection(Connection):
         Linear Berwald coefficients :math:`^B\Gamma^i_{jk}=\partial^2 G^i/\partial v^j \partial v^k`.
 
         Torsion-free, and equal to the Christoffel symbols of Levi-Civita when
-        the metric is Riemannian. Used by
-        :meth:`linear_parallel_transport`, and by curvature computations.
+        the metric is Riemannian. A derived quantity for analysis; transport is
+        :meth:`parallel_transport`, which is horizontal rather than linear.
 
         Args:
             x: Position, shape (D,).
@@ -168,48 +168,6 @@ class BerwaldConnection(Connection):
             new_vec = carry_vec + dvec * dt
 
             # Project onto tangent space at the NEXT point to prevent drift bias
-            new_vec = self.metric.manifold.to_tangent(x_next, new_vec)
-            return new_vec, new_vec
-
-        _, transported_vecs = jax.lax.scan(
-            transport_ode, vec_start, (path_x[:-1], path_x[1:], path_v[:-1])
-        )
-
-        return jnp.concatenate([vec_start[None, :], transported_vecs], axis=0)
-
-    def linear_parallel_transport(
-        self, path_x: jax.Array, path_v: jax.Array, vec_start: jax.Array
-    ) -> jax.Array:
-        r"""
-        Transport by the *linear* Berwald connection.
-
-        .. math::
-            \dot X^i + {}^B\Gamma^i_{jk}(\gamma, \dot\gamma)\,\dot\gamma^j X^k = 0.
-
-        Linear in ``X``, with the coefficients frozen at the curve's velocity.
-        This is **not** the canonical Finsler parallel translation and does not
-        preserve ``F``; use :meth:`parallel_transport` unless the linear
-        connection is specifically what is wanted. The two coincide when the
-        spray is quadratic in the velocity.
-
-        Args:
-            path_x: Discrete positions along the curve, shape (T, D).
-            path_v: Velocities at each position, shape (T, D).
-            vec_start: Initial tangent vector, shape (D,).
-
-        Returns:
-            Transported vectors aligned with path_x, shape (T, D).
-        """
-        if path_x.shape[0] < 2:
-            return jnp.broadcast_to(vec_start, path_x.shape)
-
-        dt = 1.0 / (len(path_x) - 1)
-
-        def transport_ode(carry_vec, inputs):
-            x, x_next, v = inputs
-            gamma = self.christoffel_symbols(x, v)
-            dx = -jnp.einsum("ijk,j,k->i", gamma, v, carry_vec)
-            new_vec = carry_vec + dx * dt
             new_vec = self.metric.manifold.to_tangent(x_next, new_vec)
             return new_vec, new_vec
 

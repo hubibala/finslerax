@@ -16,6 +16,7 @@ import numpy as np
 from ham.geometry import EuclideanSpace, Sphere
 from ham.geometry.transport import BerwaldConnection
 from ham.geometry.zoo import Euclidean, Randers, Riemannian
+from ham.solvers import ExponentialMap
 
 
 class TestTransport(unittest.TestCase):
@@ -227,26 +228,6 @@ class TestTransport(unittest.TestCase):
         # The coordinate vector genuinely moves; the norm is what is held fixed.
         self.assertGreater(float(jnp.linalg.norm(vecs[-1] - vec_start)), 0.1)
 
-    def test_linear_transport_does_not_preserve_norm(self):
-        """
-        The linear Berwald connection is a different object, and it is not an
-        isometry of F. Guards the distinction between the two transports.
-        """
-        h_net = lambda x: jnp.eye(2)
-        w_net = lambda x: jnp.array([0.5 * x[1], 0.0])
-        metric = Randers(self.plane, h_net, w_net, wind_mode="raw")
-
-        y = jnp.linspace(0, 1, 400)
-        path_x = jnp.stack([jnp.zeros_like(y), y], axis=1)
-        path_v = jnp.stack([jnp.zeros_like(y), jnp.ones_like(y)], axis=1)
-        vec_start = jnp.array([1.0, 0.0])
-
-        conn = BerwaldConnection(metric)
-        vecs = conn.linear_parallel_transport(path_x, path_v, vec_start)
-
-        norms = jax.vmap(metric.metric_fn)(path_x, vecs)
-        self.assertNotAlmostEqual(float(norms[0]), float(norms[-1]), places=3)
-
     def test_horizontal_transport_is_homogeneous(self):
         """
         Horizontal translation is positively homogeneous of degree one:
@@ -268,51 +249,29 @@ class TestTransport(unittest.TestCase):
 
         np.testing.assert_allclose(scaled, 2.0 * single, rtol=1e-5)
 
-    def test_randers_velocity_dependence_of_linear_connection(self):
+    def test_geodesic_is_autoparallel(self):
         """
-        Verify that Randers Berwald transport depends on velocity.
+        A geodesic is autoparallel: transporting its own initial velocity along
+        it reproduces the velocity field.
 
-        We compare Randers transport against a reference Riemannian transport
-        on the SAME path geometry. For Riemannian metrics, the Berwald
-        connection Gamma(x) is velocity-independent, so doubling v with
-        the same discrete dt is purely a rescaling artifact. For Randers,
-        the difference must exceed the Riemannian difference.
+        This pins the sign and index convention of the horizontal equation
+        against the geodesic equation itself. Euler's theorem on the
+        degree-two-homogeneous spray gives N^i_j(x, y) y^j = 2 G^i(x, y), so
+        Y = gamma_dot solves the horizontality condition exactly when gamma
+        solves gamma_ddot + 2G = 0.
         """
         h_net = lambda x: jnp.eye(2)
-        w_net = lambda x: jnp.array([0.5 * x[1], 0.0])
-        randers_metric = Randers(self.plane, h_net, w_net)
-        riemannian_metric = Riemannian(self.plane, h_net)
+        w_net = lambda x: jnp.array([0.3 * jnp.sin(x[1]), 0.2])
+        metric = Randers(self.plane, h_net, w_net, wind_mode="raw")
 
-        vec_start = jnp.array([1.0, 0.0])
-
-        y1 = jnp.linspace(0, 1, 20)
-        path_x1 = jnp.stack([jnp.zeros_like(y1), y1], axis=1)
-        path_v1 = jnp.stack([jnp.zeros_like(y1), jnp.ones_like(y1)], axis=1)
-        path_v2 = path_v1 * 2.0  # Double speed, same geometry
-
-        # Randers transport at two speeds
-        randers_conn = BerwaldConnection(randers_metric)
-        vecs_randers_1 = randers_conn.linear_parallel_transport(
-            path_x1, path_v1, vec_start
+        path_x, path_v = ExponentialMap(max_steps=200).trace(
+            metric, jnp.array([0.0, 0.0]), jnp.array([1.0, 0.4]), t_max=1.0
         )
-        vecs_randers_2 = randers_conn.linear_parallel_transport(
-            path_x1, path_v2, vec_start
-        )
-        diff_randers = jnp.linalg.norm(vecs_randers_1[-1] - vecs_randers_2[-1])
 
-        # Riemannian transport at two speeds (for reference)
-        riem_conn = BerwaldConnection(riemannian_metric)
-        vecs_riem_1 = riem_conn.linear_parallel_transport(path_x1, path_v1, vec_start)
-        vecs_riem_2 = riem_conn.linear_parallel_transport(path_x1, path_v2, vec_start)
-        diff_riem = jnp.linalg.norm(vecs_riem_1[-1] - vecs_riem_2[-1])
+        conn = BerwaldConnection(metric)
+        transported = conn.parallel_transport(path_x, path_v, path_v[0])
 
-        # The Randers difference should strictly exceed the Riemannian difference
-        # because Gamma(x, v) genuinely depends on v for Randers
-        self.assertGreater(
-            float(diff_randers),
-            float(diff_riem) + 1e-4,
-            "Randers velocity dependence should exceed Riemannian dt-artifact",
-        )
+        np.testing.assert_allclose(transported, path_v, rtol=2e-2, atol=2e-2)
 
     def test_sphere_holonomy(self):
         """
