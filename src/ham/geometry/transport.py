@@ -1,10 +1,21 @@
 """
-Berwald parallel-transport integrator.
+Parallel transport along curves on Finsler manifolds.
 
-Implements the Berwald connection (spec/MATH_SPEC.md § 3) for transporting
-tangent vectors along geodesics on Finsler manifolds. The connection
-coefficients are derived by differentiating the geodesic spray twice
-w.r.t. velocity.
+The canonical parallel translation of a Finsler manifold is the *horizontal*
+one, carried by the nonlinear connection ``N^i_j = ∂G^i/∂y^j`` that the geodesic
+spray induces. It is positively homogeneous of degree one rather than linear,
+and it preserves the Finsler norm ``F``. That norm preservation is what makes
+translation a map between indicatrices, and therefore what makes the holonomy
+group a subgroup of the diffeomorphism group of the indicatrix.
+
+The linear Berwald connection ``^BΓ^i_jk = ∂²G^i/∂y^j∂y^k`` is a different
+object. It is linear and torsion-free but not metric-compatible, so its
+transport does not preserve ``F``. It is exposed as
+:meth:`BerwaldConnection.linear_parallel_transport`, named so that the two are
+not confused. The two agree exactly when the spray is quadratic in the velocity
+— the Berwald case, and in particular the Riemannian one.
+
+See ``spec/MATH_SPEC.md § 3``.
 """
 
 from abc import abstractmethod
@@ -27,7 +38,7 @@ class Connection(eqx.Module):
     @abstractmethod
     def christoffel_symbols(self, x: jax.Array, v: jax.Array) -> jax.Array:
         """
-        Compute the connection coefficients at (x, v).
+        Compute the linear connection coefficients at (x, v).
 
         Args:
             x: Position on the manifold, shape (D,).
@@ -58,21 +69,41 @@ class Connection(eqx.Module):
 
 class BerwaldConnection(Connection):
     r"""
-    Berwald Connection induced by a Finsler spray.
+    The connection induced by a Finsler spray.
 
-    The Berwald connection coefficients are defined as:
-        ^B\Gamma^i_{jk} = \partial^2 G^i / \partial v^j \partial v^k
+    Two objects live here, both derived from the spray :math:`G^i(x, y)`:
 
-    Computationally, the coefficients are the Hessian of the `metric.spray`
-    function with respect to the velocity argument. See `spec/MATH_SPEC.md § 3.1`.
+    * the nonlinear connection :math:`N^i_j = \partial G^i / \partial y^j`,
+      whose horizontal curves define the canonical parallel translation; and
+    * the linear Berwald connection
+      :math:`^B\Gamma^i_{jk} = \partial N^i_j / \partial y^k`.
+
+    :meth:`parallel_transport` uses the first. See ``spec/MATH_SPEC.md § 3``.
     """
+
+    def nonlinear_coefficients(self, x: jax.Array, y: jax.Array) -> jax.Array:
+        r"""
+        Nonlinear connection coefficients :math:`N^i_j = \partial G^i/\partial y^j`.
+
+        Homogeneous of degree one in ``y``, which is what makes the transport it
+        defines homogeneous of degree one in the transported vector.
+
+        Args:
+            x: Position, shape (D,).
+            y: Tangent vector, shape (D,).
+
+        Returns:
+            Coefficients, shape (D, D), indexed ``[i, j]``.
+        """
+        return jax.jacfwd(self.metric.spray, argnums=1)(x, y)
 
     def christoffel_symbols(self, x: jax.Array, v: jax.Array) -> jax.Array:
         r"""
-        Berwald connection coefficients via Hessian of the spray.
+        Linear Berwald coefficients :math:`^B\Gamma^i_{jk}=\partial^2 G^i/\partial v^j \partial v^k`.
 
-        Computes $^B\Gamma^i_{jk}(x,v) = \partial^2 G^i / \partial v^j \partial v^k$
-        using two nested `jax.jacfwd` calls on `metric.spray`.
+        Torsion-free, and equal to the Christoffel symbols of Levi-Civita when
+        the metric is Riemannian. Used by
+        :meth:`linear_parallel_transport`, and by curvature computations.
 
         Args:
             x: Position, shape (D,).
@@ -85,9 +116,6 @@ class BerwaldConnection(Connection):
             This differentiates through the linear solver in `metric.spray`. It assumes
             the Hessian of the energy is reasonably conditioned (regularised).
         """
-        # G^i(x, v) is defined via self.metric.spray(x, v)
-        # We need the Hessian w.r.t. the velocity argument (argnums=1)
-        # Using jacfwd twice on arg 1 gives a tensor of shape (D, D, D)
         jacobian_v = jax.jacfwd(self.metric.spray, argnums=1)
         hessian_v = jax.jacfwd(jacobian_v, argnums=1)
         return hessian_v(x, v)
@@ -96,9 +124,17 @@ class BerwaldConnection(Connection):
         self, path_x: jax.Array, path_v: jax.Array, vec_start: jax.Array
     ) -> jax.Array:
         r"""
-        Parallel transports a vector 'vec_start' along a trajectory (path_x, path_v).
+        Horizontal parallel translation of ``vec_start`` along ``(path_x, path_v)``.
 
-        Equation: $$\frac{dX^i}{dt} + \,^B\Gamma^i_{jk}(\gamma, \dot\gamma)\,\dot\gamma^j X^k = 0$$
+        Integrates the horizontality condition
+
+        .. math::
+            \dot Y^i + N^i_j(\gamma, Y)\,\dot\gamma^j = 0,
+
+        in which the coefficients are evaluated at the *transported vector*
+        rather than at the curve's velocity. The equation is therefore nonlinear
+        in ``Y``, and the resulting map is positively homogeneous of degree one
+        and preserves the Finsler norm.
 
         Args:
             path_x: Discrete positions along the curve, shape (T, D).
@@ -107,9 +143,8 @@ class BerwaldConnection(Connection):
 
         Returns:
             Transported vectors aligned with path_x, shape (T, D).
-            The returned array has the same leading dimension as `path_x`. Entry `i`
-            is the transported vector at `path_x[i]`, computed from integrating over
-            the segment ending at that point. In particular, `result[0] == vec_start`.
+            Entry ``i`` is the transported vector at ``path_x[i]``; in particular
+            ``result[0] == vec_start``.
 
         Note:
             Assumes the curve is parameterised over [0, 1] with uniform spacing.
@@ -123,22 +158,63 @@ class BerwaldConnection(Connection):
         def transport_ode(carry_vec, inputs):
             x, x_next, v = inputs
 
-            # (D, D, D)
-            gamma = self.christoffel_symbols(x, v)
+            # N^i_j evaluated at the carried vector — this is what makes the
+            # translation horizontal rather than linear. (D, D)
+            n_coeff = self.nonlinear_coefficients(x, carry_vec)
 
-            # dX^i_dt = - Gamma^i_jk v^j X^k
-            dx = -jnp.einsum("ijk,j,k->i", gamma, v, carry_vec)
+            # dY^i/dt = - N^i_j(x, Y) v^j
+            dvec = -jnp.einsum("ij,j->i", n_coeff, v)
 
-            new_vec = carry_vec + dx * dt
+            new_vec = carry_vec + dvec * dt
 
             # Project onto tangent space at the NEXT point to prevent drift bias
             new_vec = self.metric.manifold.to_tangent(x_next, new_vec)
             return new_vec, new_vec
 
-        # Run exactly T-1 steps
         _, transported_vecs = jax.lax.scan(
             transport_ode, vec_start, (path_x[:-1], path_x[1:], path_v[:-1])
         )
 
-        result = jnp.concatenate([vec_start[None, :], transported_vecs], axis=0)
-        return result
+        return jnp.concatenate([vec_start[None, :], transported_vecs], axis=0)
+
+    def linear_parallel_transport(
+        self, path_x: jax.Array, path_v: jax.Array, vec_start: jax.Array
+    ) -> jax.Array:
+        r"""
+        Transport by the *linear* Berwald connection.
+
+        .. math::
+            \dot X^i + {}^B\Gamma^i_{jk}(\gamma, \dot\gamma)\,\dot\gamma^j X^k = 0.
+
+        Linear in ``X``, with the coefficients frozen at the curve's velocity.
+        This is **not** the canonical Finsler parallel translation and does not
+        preserve ``F``; use :meth:`parallel_transport` unless the linear
+        connection is specifically what is wanted. The two coincide when the
+        spray is quadratic in the velocity.
+
+        Args:
+            path_x: Discrete positions along the curve, shape (T, D).
+            path_v: Velocities at each position, shape (T, D).
+            vec_start: Initial tangent vector, shape (D,).
+
+        Returns:
+            Transported vectors aligned with path_x, shape (T, D).
+        """
+        if path_x.shape[0] < 2:
+            return jnp.broadcast_to(vec_start, path_x.shape)
+
+        dt = 1.0 / (len(path_x) - 1)
+
+        def transport_ode(carry_vec, inputs):
+            x, x_next, v = inputs
+            gamma = self.christoffel_symbols(x, v)
+            dx = -jnp.einsum("ijk,j,k->i", gamma, v, carry_vec)
+            new_vec = carry_vec + dx * dt
+            new_vec = self.metric.manifold.to_tangent(x_next, new_vec)
+            return new_vec, new_vec
+
+        _, transported_vecs = jax.lax.scan(
+            transport_ode, vec_start, (path_x[:-1], path_x[1:], path_v[:-1])
+        )
+
+        return jnp.concatenate([vec_start[None, :], transported_vecs], axis=0)

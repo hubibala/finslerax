@@ -200,31 +200,75 @@ class TestTransport(unittest.TestCase):
         dots = jnp.sum(vecs * path_x, axis=1)
         np.testing.assert_allclose(dots, jnp.zeros_like(dots), atol=1e-3)
 
-    def test_randers_norm_drift(self):
+    def test_randers_horizontal_transport_preserves_norm(self):
         """
-        Verifies that Berwald transport in a Randers space is NOT an isometry.
-        The Finsler norm of the transported vector changes because the
-        wind W(x) varies along the path.
+        Horizontal parallel translation preserves the Finsler norm.
+
+        This is the defining property of the canonical Finsler translation, and
+        the reason holonomy acts on the indicatrix: F is constant along a
+        horizontal curve even though the wind W(x) varies along the path, and
+        even though the transported vector's Euclidean length does not.
         """
         h_net = lambda x: jnp.eye(2)
         w_net = lambda x: jnp.array([0.5 * x[1], 0.0])
-        metric = Randers(self.plane, h_net, w_net)
+        metric = Randers(self.plane, h_net, w_net, wind_mode="raw")
 
-        y = jnp.linspace(0, 1, 20)
+        y = jnp.linspace(0, 1, 400)
         path_x = jnp.stack([jnp.zeros_like(y), y], axis=1)
         path_v = jnp.stack([jnp.zeros_like(y), jnp.ones_like(y)], axis=1)
         vec_start = jnp.array([1.0, 0.0])
 
         conn = BerwaldConnection(metric)
-        vecs_randers = conn.parallel_transport(path_x, path_v, vec_start)
+        vecs = conn.parallel_transport(path_x, path_v, vec_start)
 
-        norms_randers = jax.vmap(metric.metric_fn)(path_x, vecs_randers)
-        initial_norm = norms_randers[0]
-        final_norm = norms_randers[-1]
+        norms = jax.vmap(metric.metric_fn)(path_x, vecs)
+        np.testing.assert_allclose(norms, jnp.full_like(norms, norms[0]), rtol=2e-3)
 
-        self.assertNotAlmostEqual(float(initial_norm), float(final_norm), places=3)
+        # The coordinate vector genuinely moves; the norm is what is held fixed.
+        self.assertGreater(float(jnp.linalg.norm(vecs[-1] - vec_start)), 0.1)
 
-    def test_randers_velocity_dependence(self):
+    def test_linear_transport_does_not_preserve_norm(self):
+        """
+        The linear Berwald connection is a different object, and it is not an
+        isometry of F. Guards the distinction between the two transports.
+        """
+        h_net = lambda x: jnp.eye(2)
+        w_net = lambda x: jnp.array([0.5 * x[1], 0.0])
+        metric = Randers(self.plane, h_net, w_net, wind_mode="raw")
+
+        y = jnp.linspace(0, 1, 400)
+        path_x = jnp.stack([jnp.zeros_like(y), y], axis=1)
+        path_v = jnp.stack([jnp.zeros_like(y), jnp.ones_like(y)], axis=1)
+        vec_start = jnp.array([1.0, 0.0])
+
+        conn = BerwaldConnection(metric)
+        vecs = conn.linear_parallel_transport(path_x, path_v, vec_start)
+
+        norms = jax.vmap(metric.metric_fn)(path_x, vecs)
+        self.assertNotAlmostEqual(float(norms[0]), float(norms[-1]), places=3)
+
+    def test_horizontal_transport_is_homogeneous(self):
+        """
+        Horizontal translation is positively homogeneous of degree one:
+        P(lambda * Y) = lambda * P(Y). This is what lets it be read as a map
+        between indicatrices.
+        """
+        h_net = lambda x: jnp.eye(2)
+        w_net = lambda x: jnp.array([0.5 * x[1], 0.0])
+        metric = Randers(self.plane, h_net, w_net, wind_mode="raw")
+
+        y = jnp.linspace(0, 1, 100)
+        path_x = jnp.stack([jnp.zeros_like(y), y], axis=1)
+        path_v = jnp.stack([jnp.zeros_like(y), jnp.ones_like(y)], axis=1)
+
+        conn = BerwaldConnection(metric)
+        v0 = jnp.array([1.0, 0.3])
+        single = conn.parallel_transport(path_x, path_v, v0)[-1]
+        scaled = conn.parallel_transport(path_x, path_v, 2.0 * v0)[-1]
+
+        np.testing.assert_allclose(scaled, 2.0 * single, rtol=1e-5)
+
+    def test_randers_velocity_dependence_of_linear_connection(self):
         """
         Verify that Randers Berwald transport depends on velocity.
 
@@ -248,14 +292,18 @@ class TestTransport(unittest.TestCase):
 
         # Randers transport at two speeds
         randers_conn = BerwaldConnection(randers_metric)
-        vecs_randers_1 = randers_conn.parallel_transport(path_x1, path_v1, vec_start)
-        vecs_randers_2 = randers_conn.parallel_transport(path_x1, path_v2, vec_start)
+        vecs_randers_1 = randers_conn.linear_parallel_transport(
+            path_x1, path_v1, vec_start
+        )
+        vecs_randers_2 = randers_conn.linear_parallel_transport(
+            path_x1, path_v2, vec_start
+        )
         diff_randers = jnp.linalg.norm(vecs_randers_1[-1] - vecs_randers_2[-1])
 
         # Riemannian transport at two speeds (for reference)
         riem_conn = BerwaldConnection(riemannian_metric)
-        vecs_riem_1 = riem_conn.parallel_transport(path_x1, path_v1, vec_start)
-        vecs_riem_2 = riem_conn.parallel_transport(path_x1, path_v2, vec_start)
+        vecs_riem_1 = riem_conn.linear_parallel_transport(path_x1, path_v1, vec_start)
+        vecs_riem_2 = riem_conn.linear_parallel_transport(path_x1, path_v2, vec_start)
         diff_riem = jnp.linalg.norm(vecs_riem_1[-1] - vecs_riem_2[-1])
 
         # The Randers difference should strictly exceed the Riemannian difference
