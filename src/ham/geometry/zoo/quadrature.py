@@ -85,7 +85,9 @@ class SegmentQuadratureMetric(FinslerMetric):
         total = 0.0
         for s, w in zip(nodes, weights, strict=True):
             total = total + w * self.base.energy(x + s * v, v)
-        return total
+        # Starts as a weak-typed Python float so dtype promotion follows the
+        # base energy rather than pinning a precision here.
+        return jnp.asarray(total)
 
     def metric_fn(self, x: jax.Array, v: jax.Array) -> jax.Array:
         """Effective cost ``F = sqrt(2 · E_quad)`` (consistent with ``E = ½F²``)."""

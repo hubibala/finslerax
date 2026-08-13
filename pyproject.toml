@@ -72,6 +72,21 @@ exclude = [
     "results_"
 ]
 
+# Equinox modules are dataclasses, and FinslerMetric declares `spray_reg` with a
+# default. Every subclass field therefore "follows an attribute with a default",
+# which mypy reports even though it cannot happen at runtime: these classes
+# define their own __init__, so Equinox never generates the positional one whose
+# ordering rule is being checked. Scoped to the metric-defining modules; real
+# [misc] errors elsewhere are still reported.
+[[tool.mypy.overrides]]
+module = [
+    "ham.geometry.zoo.*",
+    "ham.models.*",
+    "ham.solvers.mesh_eikonal",
+    "ham.utils.terrain",
+]
+disable_error_code = ["misc"]
+
 [tool.ruff]
 line-length = 88
 # Walkthrough notebooks are generated from build_notebook.py scripts (which ARE
