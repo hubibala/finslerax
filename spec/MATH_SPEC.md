@@ -106,7 +106,7 @@ $$
 * **Not metric-compatible:** $D g \neq 0$, and this transport does *not* preserve $F$.
 * **Spray-Induced:** if the spray is quadratic in $v$ — the Berwald case, and in particular the Riemannian one — then $N^i_j(x,y) = \Gamma^i_{jk}(x)y^k$, the two transports coincide, and $^B\Gamma$ is Levi-Civita.
 
-Exposed as `BerwaldConnection.linear_parallel_transport`, and used for curvature. It is **not** the canonical Finsler translation.
+`BerwaldConnection.christoffel_symbols` exposes these coefficients for analysis. They do not define a transport in this library: the linear equation above is not an isometry of $F$ and is not the parallel translation of the manifold. Curvature is computed from the nonlinear connection (§ 4).
 
 The difference is measurable rather than formal. On a Randers metric with varying wind ($h=I$, $W=(y/2,\,0)$), horizontal translation holds $F$ constant to $6	imes10^{-11}$ along a unit path, while the linear transport loses $46\%$ of it and converges to that value under refinement.
 
