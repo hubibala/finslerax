@@ -91,14 +91,9 @@ When the metric is defined in ambient coordinates as $g(x) = I_n$ (the identity)
 
 $$X_{k+1} = \Pi_{T_{\gamma_{k+1}}\mathcal{M}} \left( X_k - \Gamma^i_{jk} \dot\gamma^j X^k \Delta t \right) = \Pi_{T_{\gamma_{k+1}}\mathcal{M}}(X_k)$$
 
-This is a valid approximation of the Levi-Civita connection via the Gauss equation ($\nabla^M_X Y = \Pi_{TM}(\bar\nabla_X Y)$), but it produces a holonomy angle that is the complement of the standard solid-angle formula. Here $\theta$ is the **colatitude** (polar angle measured from the north pole), so the transport circle is at constant $\theta$ and the enclosed spherical cap subtends solid angle $\Omega = 2\pi(1-\cos\theta)$:
+This is exactly the Levi-Civita connection via the Gauss equation ($\nabla^M_X Y = \Pi_{TM}(\bar\nabla_X Y)$). Here $\theta$ is the **colatitude** (polar angle measured from the north pole), so the transport circle is at constant $\theta$ and the enclosed spherical cap subtends solid angle $\Omega = 2\pi(1-\cos\theta)$.
 
-| Mechanism | Holonomy angle for colatitude $\theta$ on $S^2$ |
-|---|---|
-| Projection-based ($\Gamma = 0$, ambient coords) | $2\pi\cos\theta$ |
-| Intrinsic Levi-Civita ($\Gamma \neq 0$, chart coords) | $2\pi(1 - \cos\theta)$ |
-
-The intrinsic row is the textbook result: parallel transport around a circle of colatitude $\theta$ rotates a vector by the enclosed solid angle $2\pi(1-\cos\theta)$. (In terms of *latitude* $\varphi = \tfrac{\pi}{2}-\theta$ this reads $2\pi(1-\sin\varphi)$.) Both rows are equivalent modulo $2\pi$ as elements of $SO(2)$ — since $\cos(2\pi\cos\theta) = \cos\!\big(2\pi(1-\cos\theta)\big)$ — so they describe the same physical rotation. The implementation uses the projection-based approach when the metric is position-independent in ambient coordinates.
+By the Gauss-Bonnet theorem, the vector's bearing relative to the curve turns by $-2\pi\cos\theta$. Because the curve is a closed loop, the total holonomy rotation is exactly $-2\pi\cos\theta$. This is mathematically identical modulo $2\pi$ to the enclosed solid angle $2\pi(1-\cos\theta)$, since $-2\pi\cos\theta \equiv 2\pi(1-\cos\theta) \pmod{2\pi}$. The implementation uses the projection-based approach when the metric is position-independent in ambient coordinates, which correctly produces this exact Levi-Civita rotation.
 
 For metrics defined in intrinsic coordinates where $g(x)$ is position-dependent (e.g., the Poincaré half-plane $ds^2 = (dx^2+dy^2)/y^2$), the Berwald connection is non-trivially non-zero and the ODE integration genuinely drives the transport.
 

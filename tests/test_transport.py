@@ -273,9 +273,11 @@ class TestTransport(unittest.TestCase):
 
         Note: Our implementation uses g(x) = I_3 (ambient Euclidean), so
         Gamma^i_jk = 0 and the transport is entirely projection-based.
-        The resulting holonomy angle is 2*pi*cos(theta), which is the
-        complement of the standard solid-angle formula 2*pi*(1-cos(theta)).
-        Both are equivalent modulo 2*pi (cos(a) = cos(2*pi - a)).
+        This correctly computes the exact Levi-Civita connection via the Gauss
+        equation. The true holonomy rotation is the solid angle 2*pi*(1-cos(theta)).
+        However, the local frame (phi_hat, theta_hat) used here is negatively
+        oriented, causing the measured angle to appear as -Omega, which is exactly
+        -2*pi*(1-cos(theta)) ≡ 2*pi*cos(theta) modulo 2*pi.
         """
 
         def identity_metric(x):
@@ -318,11 +320,16 @@ class TestTransport(unittest.TestCase):
 
         angle = jnp.arctan2(v_end_theta, v_end_phi)
 
-        # Our projection-based transport produces angle = 2*pi*cos(theta)
+        # The physical rotation is the enclosed solid angle Omega = 2*pi*(1 - cos(theta)).
+        # However, our local tangent frame (phi_hat, theta_hat) has a negative orientation
+        # relative to the outward normal: (phi_hat x theta_hat) = -r_hat.
+        # Thus, the physical rotation Omega appears as -Omega in this frame.
+        # Modulo 2*pi, we have -2*pi*(1 - cos(theta)) = 2*pi*cos(theta) - 2*pi ≡ 2*pi*cos(theta).
         expected_angle = 2 * jnp.pi * jnp.cos(theta)
 
-        # Use cosine comparison to avoid sign/wrapping ambiguities
-        np.testing.assert_allclose(jnp.cos(angle), jnp.cos(expected_angle), atol=1e-2)
+        # We need to account for the fact that angles near 0 and 2pi might wrap differently
+        # so we compare the complex phases directly.
+        np.testing.assert_allclose(jnp.exp(1j * angle), jnp.exp(1j * expected_angle), atol=1e-2)
 
     def test_integrator_convergence_order(self):
         """
