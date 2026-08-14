@@ -1,32 +1,37 @@
-# MATH_SPEC.md: Mathematical Foundations of the HAM Library (Berwald Edition)
+# MATH_SPEC.md: Mathematical Foundations of the HAM Library
 
-**Version:** 1.2.0 (Berwald Revision + Eikonal Duality)
-**Date:** June 2026
+**Version:** 1.3.0
+**Date:** August 2026
 **Project:** Holonomic Association Model (HAM)
 
 ## Abstract
 
-This document defines the mathematical specification of HAM, a differentiable geometry library for Finslerian representation learning. It sets out a hierarchy of geometric spaces — Euclidean, Riemannian, Randers — unified under the energy-based formalism, and derives the *geodesic spray* coefficients from the Euler-Lagrange equations. Parallel transport uses the **Berwald connection**, the unique connection induced directly by the geodesic spray, which allows path stability and parallel vector fields to be analysed without imposing metric compatibility.
+This document defines the mathematical specification of HAM, a differentiable geometry library for Finslerian representation learning. It sets out a hierarchy of geometric spaces — Euclidean, Riemannian, Randers — unified under the energy-based formalism, and derives the *geodesic spray* coefficients from the Euler-Lagrange equations. Parallel translation is the horizontal one carried by the **Berwald connection**, the connection the spray induces; it is homogeneous rather than linear, preserves the Finsler norm, and is the translation whose loops generate the Finslerian holonomy group.
 
 ---
 
 ## 1. General Finsler Geometry
 
 ### 1.1. Definition
+
 A **Finsler Manifold** is a pair $(M, F)$, where $M$ is a differentiable manifold and $F: TM \to [0, \infty)$ is a continuous function on the tangent bundle, satisfying:
 
-1.  **Regularity:** $F$ is $C^\infty$ on $TM \setminus \{0\}$.
+1.  **Regularity:** $F$ is $C^\infty$ on $TM \setminus \lbrace 0 \rbrace$.
 2.  **Positive Homogeneity:** $F(x, \lambda v) = \lambda F(x, v)$ for $\lambda > 0$.
-3.  **Strong Convexity:** The **Fundamental Tensor** $g_{ij}$ is positive definite:
-    $$
-    g_{ij}(x, v) := \frac{1}{2} \frac{\partial^2 F^2}{\partial v^i \partial v^j}(x, v)
-    $$
+3.  **Strong Convexity:** the **Fundamental Tensor** $g_{ij}$ is positive definite:
+
+```math
+g_{ij}(x, v) := \frac{1}{2} \frac{\partial^2 F^2}{\partial v^i \partial v^j}(x, v)
+```
 
 ### 1.2. The Energy Functional
+
 We define the **Lagrangian** (Energy) as:
-$$
+
+```math
 E(x, v) = \frac{1}{2} F^2(x, v)
-$$
+```
+
 This scalar functional is the root of our computational graph. All geometric objects are derivatives of $E$.
 
 ---
@@ -36,97 +41,108 @@ This scalar functional is the root of our computational graph. All geometric obj
 The "Physics Engine" of the manifold is determined by the **Geodesic Spray**. This vector field describes the inertial flow of particles.
 
 ### 2.1. Derivation
+
 Minimizing the energy functional $\mathcal{E}[\gamma] = \int E(x, \dot{x}) dt$ yields the Euler-Lagrange equations:
-$$
+
+```math
 \frac{d}{dt} \left( \frac{\partial E}{\partial v^i} \right) - \frac{\partial E}{\partial x^i} = 0
-$$
+```
 
 Expanding this yields the equation of motion:
-$$
+
+```math
 \ddot{x}^i + 2G^i(x, \dot{x}) = 0
-$$
+```
 
 Where $G^i$ are the **Spray Coefficients**. They are given by:
-$$
+
+```math
 G^i(x, v) = \frac{1}{2} g^{il}(x, v) \left( \frac{\partial^2 E}{\partial x^k \partial v^l} v^k - \frac{\partial E}{\partial x^l} \right)
-$$
+```
+
+$G^i$ is homogeneous of degree two in $v$. That single fact drives most of § 3.
 
 ### 2.2. JAX Implementation (Implicit Solve)
+
 We avoid inverting $g_{ij}$ explicitly. Instead, we compute $G^i$ by solving the linear system:
-$$
+
+```math
 \text{Hess}_v(E) \cdot (-2G) = \nabla_x E - \text{Jac}_x(\nabla_v E) \cdot v
-$$
+```
 
 ---
 
 ## 3. Kinematics: Parallel Translation
 
-The spray $G^i(x,y)$ induces two distinct objects, and they must not be confused. The **nonlinear connection** defines the canonical parallel translation of the Finsler manifold; the **linear Berwald connection** is its velocity-derivative and is a different transport.
+The spray induces the coefficients of the **Berwald connection**,
 
-### 3.1. The nonlinear connection and horizontal translation
+```math
+G^i_j(x, y) = \frac{\partial G^i}{\partial y^j}(x, y),
+```
 
-The nonlinear connection coefficients are the first velocity derivatives of the spray:
+which span the horizontal distribution on $TM \setminus \lbrace 0 \rbrace$. Because $G^i$ is homogeneous of degree two, $G^i_j$ is homogeneous of degree one in $y$, and Euler's theorem gives the contraction
 
-$$
-N^i_j(x, y) = \frac{\partial G^i}{\partial y^j}(x, y)
-$$
+```math
+G^i_j(x, y)\, y^j = 2\, G^i(x, y).
+```
 
-They are homogeneous of degree one in $y$. A curve $t \mapsto (\gamma(t), Y(t))$ in $TM$ is **horizontal** when
+This is the only connection the library uses.
 
-$$
-\dot Y^i + N^i_j(\gamma, Y)\,\dot\gamma^j = 0,
-$$
+### 3.1. Parallel translation
 
-and the resulting map $P_\gamma \colon T_{\gamma(0)}M \to T_{\gamma(1)}M$ is the parallel translation of the Finsler manifold. Note that $N$ is evaluated **at the transported vector $Y$**, not at the curve's velocity; the equation is therefore *nonlinear* in $Y$.
+A vector field $X(t)$ along a curve $\gamma$ is **parallel** when its Berwald covariant derivative vanishes:
 
-**Key Properties:**
-* **Positively 1-homogeneous:** $P_\gamma(\lambda Y) = \lambda P_\gamma(Y)$ for $\lambda > 0$. Not linear in general.
-* **Norm-preserving:** $F(\gamma(t), Y(t))$ is constant. The translation preserves the *norm function* $F$, though not the fundamental tensor $g$.
-* **Indicatrix-valued:** homogeneity and norm preservation together mean $P_\gamma$ carries $\mathcal{I}_{\gamma(0)}$ to $\mathcal{I}_{\gamma(1)}$. This is why the holonomy group is a subgroup of the diffeomorphism group of the indicatrix, rather than of $O(n)$, and why it is typically infinite-dimensional.
+```math
+\frac{d X^i(t)}{dt} + G^i_j\big(\gamma(t), X(t)\big)\, \dot\gamma^j(t) = 0 .
+```
 
-This is what `BerwaldConnection.parallel_transport` integrates.
+The resulting map $P_\gamma \colon T_{\gamma(0)}M \to T_{\gamma(1)}M$ is the parallel translation of the Finsler manifold, and the group generated by translation around loops at $x$ is the **holonomy group** $\mathrm{Hol}_x(M, F)$.
 
-### 3.2. The linear Berwald connection
-
-Differentiating $N$ once more in the velocity gives the linear Berwald coefficients:
-
-$$
-^B\Gamma^i_{jk}(x, v) = \frac{\partial N^i_j}{\partial v^k}(x,v) = \frac{\partial^2 G^i}{\partial v^j \partial v^k}(x, v)
-$$
-
-with transport
-
-$$
-\frac{d X^i}{dt} + \ ^B\Gamma^i_{jk}(\gamma, \dot{\gamma}) \dot{\gamma}^j X^k = 0 .
-$$
+Note that the coefficients are evaluated **at the translated vector $X(t)$**, not at the curve's velocity. The equation is therefore *nonlinear* in $X$ — which is the whole point.
 
 **Key Properties:**
-* **Torsion-Free:** Symmetric in $j, k$.
-* **Linear:** in $X$, with coefficients frozen at $\dot\gamma$.
-* **Not metric-compatible:** $D g \neq 0$, and this transport does *not* preserve $F$.
-* **Spray-Induced:** if the spray is quadratic in $v$ — the Berwald case, and in particular the Riemannian one — then $N^i_j(x,y) = \Gamma^i_{jk}(x)y^k$, the two transports coincide, and $^B\Gamma$ is Levi-Civita.
 
-`BerwaldConnection.christoffel_symbols` exposes these coefficients for analysis. They do not define a transport in this library: the linear equation above is not an isometry of $F$ and is not the parallel translation of the manifold. Curvature is computed from the nonlinear connection (§ 4).
+* **Positively 1-homogeneous:** $P_\gamma(\lambda X) = \lambda P_\gamma(X)$ for $\lambda > 0$. Not linear in general.
+* **Norm-preserving:** $F(\gamma(t), X(t))$ is constant. The translation preserves the *norm function* $F$, though not the fundamental tensor $g$.
+* **Indicatrix-valued:** homogeneity and norm preservation together mean $P_\gamma$ carries the indicatrix at $\gamma(0)$ onto the indicatrix at $\gamma(1)$. This is why the holonomy group is a subgroup of the diffeomorphism group of the indicatrix, rather than of $O(n)$, and why it is typically infinite-dimensional.
+* **Auto-parallel geodesics:** by the Euler contraction above, $X = \dot\gamma$ solves the equation exactly when $\gamma$ solves $\ddot\gamma^i + 2G^i = 0$. This pins the sign and index convention against the geodesic equation itself.
 
-The difference is measurable rather than formal. On a Randers metric with varying wind ($h=I$, $W=(y/2,\,0)$), horizontal translation holds $F$ constant to $6	imes10^{-11}$ along a unit path, while the linear transport loses $46\%$ of it and converges to that value under refinement.
+This is what `BerwaldConnection.parallel_transport` integrates, with `BerwaldConnection.connection_coefficients` returning $G^i_j$.
 
-### 3.3. Holonomy and Projection-Based Transport
+### 3.2. Why there is no linear transport here
 
-**Remark (Ambient vs. Intrinsic Convention):**
-When the metric is defined in ambient coordinates as $g(x) = I_n$ (the identity), the Berwald connection satisfies $\Gamma^i_{jk} = 0$ everywhere. In this case, the parallel transport reduces to a pure tangent-space projection at each discrete step:
+Differentiating once more in the velocity gives the second-level coefficients $G^i_{jk} = \partial G^i_j / \partial y^k$. It is tempting to read these as Christoffel symbols and to transport linearly by
 
-$$X_{k+1} = \Pi_{T_{\gamma_{k+1}}\mathcal{M}} \left( X_k - \Gamma^i_{jk} \dot\gamma^j X^k \Delta t \right) = \Pi_{T_{\gamma_{k+1}}\mathcal{M}}(X_k)$$
+```math
+\frac{d X^i}{dt} + G^i_{jk}(\gamma, \dot{\gamma})\, \dot{\gamma}^j X^k = 0 ,
+```
 
-This is a valid approximation of the Levi-Civita connection via the Gauss equation ($\nabla^M_X Y = \Pi_{TM}(\bar\nabla_X Y)$), but it produces a holonomy angle that is the complement of the standard solid-angle formula. Here $\theta$ is the **colatitude** (polar angle measured from the north pole), so the transport circle is at constant $\theta$ and the enclosed spherical cap subtends solid angle $\Omega = 2\pi(1-\cos\theta)$:
+freezing the coefficients at the curve's velocity. **The library does not do this, and the operation is not available.**
+
+The reason is that $G^i_{jk}(x, y)$ still depends on the direction $y$. It is a linear connection on the pulled-back bundle $\pi^*TM$ over $TM \setminus \lbrace 0 \rbrace$, not on $M$, so "freezing at $\dot\gamma$" is a choice of supporting element rather than a canonical construction. The resulting transport is not metric-compatible and does not preserve $F$, so it is not an isometry between indicatrices and does not generate the holonomy group.
+
+$G^i_{jk}$ is independent of $y$ precisely on **Berwald manifolds**. There $G^i_{jk} = \Gamma^i_{jk}(x)$ is an affine connection on $M$, $G^i_j(x,y) = \Gamma^i_{jk}(x) y^k$ is linear in $y$, and § 3.1 collapses to ordinary linear parallel transport on its own. In the Riemannian and Euclidean cases those $\Gamma^i_{jk}$ are exactly the Levi-Civita symbols of $g$. The collapse is automatic; nothing needs to be selected. (A Randers metric is Berwald exactly when its wind is Riemann-parallel, $\nabla^h W = 0$.)
+
+So the library exposes one translation, it is correct for arbitrary $F$, and it degenerates to Levi-Civita in the cases where Levi-Civita is what you want.
+
+### 3.3. Ambient vs. intrinsic coordinates
+
+When the metric is defined in ambient coordinates as $g(x) = I_n$ (the identity), the spray vanishes, hence $G^i_j = 0$ everywhere. Translation then reduces to a pure tangent-space projection at each discrete step:
+
+```math
+X_{k+1} = \Pi_{T_{\gamma_{k+1}}\mathcal{M}} \left( X_k - G^i_j(\gamma_k, X_k)\, \dot\gamma^j \Delta t \right) = \Pi_{T_{\gamma_{k+1}}\mathcal{M}}(X_k)
+```
+
+This is a valid approximation of the Levi-Civita connection via the Gauss equation $(\nabla^M_X Y = \Pi_{TM}(\bar\nabla_X Y))$, but it produces a holonomy angle that is the complement of the standard solid-angle formula. Here $\theta$ is the **colatitude** (polar angle measured from the north pole), so the transport circle is at constant $\theta$ and the enclosed spherical cap subtends solid angle $\Omega = 2\pi(1-\cos\theta)$:
 
 | Mechanism | Holonomy angle for colatitude $\theta$ on $S^2$ |
 |---|---|
-| Projection-based ($\Gamma = 0$, ambient coords) | $2\pi\cos\theta$ |
-| Intrinsic Levi-Civita ($\Gamma \neq 0$, chart coords) | $2\pi(1 - \cos\theta)$ |
+| Projection-based ($G^i_j = 0$, ambient coords) | $2\pi\cos\theta$ |
+| Intrinsic Levi-Civita ($G^i_j \neq 0$, chart coords) | $2\pi(1 - \cos\theta)$ |
 
-The intrinsic row is the textbook result: parallel transport around a circle of colatitude $\theta$ rotates a vector by the enclosed solid angle $2\pi(1-\cos\theta)$. (In terms of *latitude* $\varphi = \tfrac{\pi}{2}-\theta$ this reads $2\pi(1-\sin\varphi)$.) Both rows are equivalent modulo $2\pi$ as elements of $SO(2)$ — since $\cos(2\pi\cos\theta) = \cos\!\big(2\pi(1-\cos\theta)\big)$ — so they describe the same physical rotation. The implementation uses the projection-based approach when the metric is position-independent in ambient coordinates.
+The intrinsic row is the textbook result: parallel transport around a circle of colatitude $\theta$ rotates a vector by the enclosed solid angle $2\pi(1-\cos\theta)$. (In terms of *latitude* $\varphi = \tfrac{\pi}{2}-\theta$ this reads $2\pi(1-\sin\varphi)$.) Both rows are equivalent modulo $2\pi$ as elements of $SO(2)$ — since $\cos(2\pi\cos\theta) = \cos(2\pi(1-\cos\theta))$ — so they describe the same physical rotation. The implementation uses the projection-based approach when the metric is position-independent in ambient coordinates.
 
-For metrics defined in intrinsic coordinates where $g(x)$ is position-dependent (e.g., the Poincaré half-plane $ds^2 = (dx^2+dy^2)/y^2$), the Berwald connection is non-trivially non-zero and the ODE integration genuinely drives the transport.
+For metrics defined in intrinsic coordinates where $g(x)$ is position-dependent (e.g. the Poincaré half-plane $ds^2 = (dx^2+dy^2)/y^2$), the coefficients are non-trivially non-zero and the ODE integration genuinely drives the translation.
 
 ---
 
@@ -134,16 +150,18 @@ For metrics defined in intrinsic coordinates where $g(x)$ is position-dependent 
 
 We verify that our implementation generalizes standard geometries.
 
-| Geometry | Metric Function $F(x, v)$ | Spray $G^i$ | Berwald Connection $\Gamma^i_{jk}$ |
+| Geometry | Metric Function $F(x, v)$ | Spray $G^i$ | Coefficients $G^i_j(x,y)$ |
 | :--- | :--- | :--- | :--- |
 | **Euclidean** | $\sqrt{v^T v}$ | $0$ | $0$ |
-| **Riemannian** | $\sqrt{v^T g(x) v}$ | Quadratic in $v$ | $\Gamma^i_{jk}(x)$ (Levi-Civita) |
-| **Berwald** | General Finsler | Quadratic in $v$ | $\Gamma^i_{jk}(x)$ (Indep. of $v$) |
-| **Randers** | $\sqrt{v^T M v} + \beta \cdot v$ | Non-quadratic | $\Gamma^i_{jk}(x, v)$ (Dep. on $v$) |
+| **Riemannian** | $\sqrt{v^T g(x) v}$ | Quadratic in $v$ | $\Gamma^i_{jk}(x) y^k$ — linear in $y$ (Levi-Civita) |
+| **Berwald** | General Finsler, quadratic spray | Quadratic in $v$ | $\Gamma^i_{jk}(x) y^k$ — linear in $y$ (an affine connection on $M$) |
+| **Randers** | $\sqrt{v^T M v} + \beta \cdot v$ | Non-quadratic | Nonlinear in $y$ (Berwald only if $\nabla^h W = 0$) |
 | **Hyperboloid** | Minkowskian $\sqrt{\langle v, v\rangle_L}$ | Quadratic in $v$ | Levi-Civita equivalent |
 
 ### 4.1. Surface Formulations and Instabilities
-HAM provides exact analytical sub-manifolds (`Sphere`, `Hyperboloid`, `Torus`, `Paraboloid`). The Hyperboloid models the upper sheet in Minkowski space, with exact $\cosh$/$\sinh$ exponential and logarithmic maps.
+
+HAM provides exact analytical sub-manifolds (`Sphere`, `Hyperboloid`, `Torus`, `Paraboloid`). The Hyperboloid models the upper sheet in Minkowski space, with exact $\cosh/\sinh$ exponential and logarithmic maps.
+
 *Limitation:* combining these exact maps with a deep learning loop inside a generative model is numerically fragile; the strongly curved cases (Sphere, Hyperboloid) can drive the solver to collapse. A flat `EuclideanSpace` latent is the recommended default.
 
 ---
@@ -153,34 +171,37 @@ HAM provides exact analytical sub-manifolds (`Sphere`, `Hyperboloid`, `Torus`, `
 To learn valid Randers metrics, we parameterize $F$ via Zermelo's Navigation Problem.
 
 **Inputs:**
+
 * Riemannian metric (Sea): $h_{ij}(x)$
-* Wind field: $W^i(x)$ with constraint $\|W\|_h < 1$.
+* Wind field: $W^i(x)$ with constraint $\lVert W \rVert_h < 1$.
 
 **Resulting Randers Metric:**
-$$
+
+```math
 F(x, v) = \frac{\sqrt{\lambda \|v\|_h^2 + \langle W, v \rangle_h^2} - \langle W, v \rangle_h}{\lambda}
-$$
-where $\lambda = 1 - \|W\|_h^2$.
+```
+
+where $\lambda = 1 - \lVert W \rVert_h^2$.
 
 **Note:** We use the minus sign convention for $\beta$ here to align with "Headwind increases cost."
 
-### 5.1. Enforcing the Causal Bound $\|W\|_h < 1$
+### 5.1. Enforcing the Causal Bound
 
-The strong-convexity (weak-wind) condition $\|W\|_h < 1$ keeps $\lambda > 0$ and the
+The strong-convexity (weak-wind) condition $\lVert W \rVert_h < 1$ keeps $\lambda > 0$ and the
 fundamental tensor positive-definite. A learned $W(x)$ is unconstrained, so it must
 be projected into the causal ball. We require the projection to (i) preserve
 *physically-valid* winds without distortion, (ii) be $C^\infty$ so the spray and
-Berwald connection remain smooth, and (iii) guarantee $\|W\|_h < 1-\varepsilon$
-strictly. Writing $r = \|W\|_h$ and $c = 1-\varepsilon$, we scale $W \mapsto sW$ with
+connection coefficients remain smooth, and (iii) guarantee $\lVert W \rVert_h < 1-\varepsilon$
+strictly. Writing $r = \lVert W \rVert_h$ and $c = 1-\varepsilon$, we scale $W \mapsto sW$ with
 $s = \varphi(r)/r$, where $\varphi$ is the temperature-controlled smooth minimum
 
-$$
+```math
 \varphi(r) \;=\; r \;-\; \tfrac{1}{\kappa}\,\mathrm{softplus}\!\big(\kappa\,(r-c)\big),
 \qquad
 \varphi'(r) = 1 - \sigma\!\big(\kappa(r-c)\big) \in (0,1),
 \qquad
 \sup_r \varphi(r) = c .
-$$
+```
 
 $\varphi$ is the identity to within $\sim e^{-\kappa(c-r)}/\kappa$ for $r < c$, so a
 requested wind of, say, $r=0.5$ is returned as $0.5$ (to $\sim 10^{-6}$), and bending
@@ -194,7 +215,7 @@ is unavoidable. The stiffness $\kappa$ defaults to `ham.utils.WIND_STIFFNESS`.
 > distortion.
 
 For **trusted, prescribed** fields (e.g. a known ocean current already satisfying
-$\|W\|_h < 1$), `Randers(..., wind_mode="raw")` bypasses the clamp entirely and passes
+$\lVert W \rVert_h < 1$), `Randers(..., wind_mode="raw")` bypasses the clamp entirely and passes
 $W$ through bit-exact, flooring only $\lambda$ as a NaN guard. The default
 `wind_mode="soft"` applies $\varphi$ and is the correct choice for learned winds.
 
@@ -203,60 +224,78 @@ $W$ through bit-exact, flooring only $\lambda$ as a NaN guard. The default
 ## 6. Numerical Stability
 
 ### 6.1. Epsilon Regularization
-The spray and Berwald connection involve high-order derivatives of the energy that are sensitive to the singularity at $v = 0$ and to near-degenerate directions (e.g. the Randers boundary, where the fundamental tensor's smallest eigenvalue $\to 0$). Two complementary safeguards are used:
+
+The spray and its velocity derivatives involve high-order derivatives of the energy that are sensitive to the singularity at $v = 0$ and to near-degenerate directions (e.g. the Randers boundary, where the fundamental tensor's smallest eigenvalue $\to 0$). Two complementary safeguards are used:
 
 **Norm smoothing.** Where a raw norm would be non-differentiable at the origin, we evaluate a smoothed surrogate
-$$
+
+```math
 F_\epsilon(x, v) = \sqrt{F^2(x, v) + \epsilon^2},
-$$
-and the `Randers.metric_fn` additionally clamps the discriminant and substitutes a shifted velocity for $\|v\| \approx 0$ so that $F$ and $\nabla F$ stay finite.
+```
+
+and the `Randers.metric_fn` additionally clamps the discriminant and substitutes a shifted velocity for $\lVert v \rVert \approx 0$ so that $F$ and $\nabla F$ stay finite.
 
 **Trace-scaled Tikhonov on the spray solve.** Rather than inverting the bare velocity-Hessian $H = \mathrm{Hess}_v(E)$, the spray solves
-$$
+
+```math
 \big(H + \epsilon\,\tfrac{\mathrm{tr}\,H}{D}\,I\big)\,(-2G) = \nabla_x E - \mathrm{Jac}_x(\nabla_v E)\,v .
-$$
-Scaling the regularizer by the mean eigenvalue $\mathrm{tr}\,H / D$ keeps the *relative* perturbation constant across metrics of different magnitude — avoiding over-regularizing small metrics and under-regularizing large ones.
+```
+
+Scaling the regularizer by the mean eigenvalue $\mathrm{tr}(H)/D$ keeps the *relative* perturbation constant across metrics of different magnitude — avoiding over-regularizing small metrics and under-regularizing large ones.
 
 ### 6.2. Homogeneity Enforcement
-Neural Networks approximating $F(x, v)$ may violate positive homogeneity ($F(\lambda v) \neq \lambda F(v)$).
+
+Neural Networks approximating $F(x, v)$ may violate positive homogeneity $(F(\lambda v) \neq \lambda F(v))$.
+
 **Fix:** We enforce homogeneity by construction:
-$$
+
+```math
 F_{net}(x, v) = \|v\| \cdot \text{NN}(x, v / \|v\|)
-$$
-This ensures the Berwald coefficients (which depend on homogeneity) remain well-defined.
+```
+
+This keeps $G^i$ homogeneous of degree two, and hence $G^i_j$ of degree one — the property § 3 rests on.
 
 ### 6.3. Secant Scaling for Logarithmic Maps
+
 The projected secant $\Pi_{T_xM}(y - x)$ can have a shorter ambient length than the chord $y - x$ on highly curved manifolds, which can cause topological shortcuts. To correct this, we rescale the tangent projection by the chord length:
-$$
+
+```math
 \log_x(y) \approx \frac{\|y - x\|}{\|\Pi_{T_xM}(y - x)\|} \cdot \Pi_{T_xM}(y - x)
-$$
+```
+
 This preserves the direction but scales the magnitude correctly to avoid optimizer exploitation of the manifold's interior.
 
 ---
 
 ## 7. The Eikonal Dual: Arrival Times
 
-Sections 2–4 describe the **primal** picture: a path $\gamma$ and its cost $\int F(\gamma, \dot\gamma)\,dt$. For *one-source-to-everywhere* problems it is far cheaper to solve the **dual** problem directly — the field of minimal arrival times $T(x)$ from a source set — without ever enumerating paths. This is the Finsler **eikonal equation**, and HAM's eikonal solvers implement it.
+Sections 2–4 describe the **primal** picture: a path $\gamma$ and its cost $\int F(\gamma, \dot\gamma) dt$. For *one-source-to-everywhere* problems it is far cheaper to solve the **dual** problem directly — the field of minimal arrival times $T(x)$ from a source set — without ever enumerating paths. This is the Finsler **eikonal equation**, and HAM's eikonal solvers implement it.
 
 ### 7.1. Hamilton–Jacobi Form
 
 The minimal-cost (Finsler distance) field $T(x)$ from a source obeys the static Hamilton–Jacobi equation that the **dual norm** of its gradient is unit:
-$$
+
+```math
 F^*\!\big(x,\, \nabla T(x)\big) = 1, \qquad T\big|_{\text{source}} = 0,
-$$
+```
+
 where $F^*$ is the polar (Legendre) dual of the Finsler norm $F$. Intuitively, $T$ rises at unit rate per unit Finsler cost, so its gradient lies exactly on the dual indicatrix.
 
 ### 7.2. Randers Duality
 
-For a Randers norm written in the affine form $F(x, v) = \sqrt{v^\top G(x)\, v} + B(x)^\top v$, the unit ball $\{F = 1\}$ is an ellipsoid shifted by the drift $B$. Its polar dual is again a shifted ellipsoid, so $F^*(\nabla T) = 1$ becomes a concrete anisotropic eikonal PDE:
-$$
+For a Randers norm written in the affine form $F(x, v) = \sqrt{v^\top G(x) v} + B(x)^\top v$, the unit ball $\lbrace F = 1 \rbrace$ is an ellipsoid shifted by the drift $B$. Its polar dual is again a shifted ellipsoid, so $F^*(\nabla T) = 1$ becomes a concrete anisotropic eikonal PDE:
+
+```math
 \big(\nabla T - B\big)^\top G^{-1} \big(\nabla T - B\big) = 1 .
-$$
+```
+
 The pair $(G, B)$ is an algebraic function of the Zermelo navigation data $(H, W, \lambda)$ of § 5. In the 3-D solver the equivalent **dual** operators are formed directly,
-$$
+
+```math
 Q = \lambda\,\big(H^{-1} - W W^\top\big), \qquad B_{\text{dual}} = -\,\frac{H W}{\lambda},
-$$
-giving $(\nabla T - B_{\text{dual}})^\top Q\,(\nabla T - B_{\text{dual}}) = 1$ — the same PDE, since $Q = G^{-1}$ and $B_{\text{dual}} = B$ (one can verify $\sqrt{v^\top G v} + B^\top v$ reproduces the Zermelo formula of § 5 exactly). The drift term $B$ is exactly what makes the metric **asymmetric**: it shifts the dual indicatrix off-center, so arrival time grows faster against the wind than with it.
+```
+
+giving $(\nabla T - B_{\text{dual}})^\top Q (\nabla T - B_{\text{dual}}) = 1$ — the same PDE, since $Q = G^{-1}$ and $B_{\text{dual}} = B$ (one can verify $\sqrt{v^\top G v} + B^\top v$ reproduces the Zermelo formula of § 5 exactly). The drift term $B$ is exactly what makes the metric **asymmetric**: it shifts the dual indicatrix off-center, so arrival time grows faster against the wind than with it.
 
 ### 7.3. Numerical Scheme
 
