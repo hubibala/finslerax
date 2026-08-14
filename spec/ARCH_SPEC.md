@@ -233,10 +233,16 @@ $$\frac{d X^i}{dt} + G^i_j(\gamma, X)\, \dot\gamma^j = 0 .$$
 
 The coefficients are evaluated at the *translated vector* $X$, which makes the
 map homogeneous of degree one rather than linear, and norm-preserving. This is
-the translation whose loops generate the holonomy group. The library deliberately
-offers no linear transport: $\partial G^i_j / \partial y^k$ still depends on
-direction for a general Finsler metric, so freezing it at $\dot\gamma$ is not
-canonical and does not preserve $F$. See `spec/MATH_SPEC.md` § 3.
+the translation whose loops generate the holonomy group.
+
+`berwald_coefficients` returns the second-level coefficients
+$G^i_{jk} = \partial G^i_j / \partial y^k$
+for analysis — horizontal covariant derivatives, the infinitesimal
+holonomy algebra, and testing whether a metric is Berwald (they are
+$y$-independent exactly then). They deliberately do **not** back a second,
+linear transport: for a general Finsler metric they still depend on direction,
+so freezing them at $\dot\gamma$ is not canonical and does not preserve $F$.
+See `spec/MATH_SPEC.md` § 3.2.
 
 ### 4.7 Curvature (`geometry/curvature.py`)
 

@@ -109,21 +109,29 @@ Note that the coefficients are evaluated **at the translated vector $X(t)$**, no
 
 This is what `BerwaldConnection.parallel_transport` integrates, with `BerwaldConnection.connection_coefficients` returning $G^i_j$.
 
-### 3.2. Why there is no linear transport here
+### 3.2. The second-level coefficients, and why they are not a transport
 
-Differentiating once more in the velocity gives the second-level coefficients $G^i_{jk} = \partial G^i_j / \partial y^k$. It is tempting to read these as Christoffel symbols and to transport linearly by
+Differentiating once more in the velocity gives
+
+```math
+G^i_{jk}(x, y) = \frac{\partial G^i_j}{\partial y^k}(x, y) = \frac{\partial^2 G^i}{\partial y^j \partial y^k}(x, y),
+```
+
+torsion-free in $j, k$. These are genuine objects — they are the coefficients of the Berwald connection on the pulled-back bundle $\pi^*TM$, and the horizontal covariant derivatives built from them are what generate the infinitesimal holonomy algebra. `BerwaldConnection.berwald_coefficients` returns them, for analysis.
+
+It is tempting to go one step further, read them as Christoffel symbols, and transport linearly by
 
 ```math
 \frac{d X^i}{dt} + G^i_{jk}(\gamma, \dot{\gamma})\, \dot{\gamma}^j X^k = 0 ,
 ```
 
-freezing the coefficients at the curve's velocity. **The library does not do this, and the operation is not available.**
+freezing the coefficients at the curve's velocity. **The library does not offer this, for arbitrary $F$ it is not a canonical construction, and § 3.1 is the transport.**
 
-The reason is that $G^i_{jk}(x, y)$ still depends on the direction $y$. It is a linear connection on the pulled-back bundle $\pi^*TM$ over $TM \setminus \lbrace 0 \rbrace$, not on $M$, so "freezing at $\dot\gamma$" is a choice of supporting element rather than a canonical construction. The resulting transport is not metric-compatible and does not preserve $F$, so it is not an isometry between indicatrices and does not generate the holonomy group.
+The reason is that $G^i_{jk}(x, y)$ still depends on the direction $y$. It lives on $\pi^*TM$ over $TM \setminus \lbrace 0 \rbrace$, not on $M$, so "freezing at $\dot\gamma$" is a choice of supporting element. The resulting transport is not metric-compatible and does not preserve $F$, so it is not an isometry between indicatrices and does not generate the holonomy group.
 
-$G^i_{jk}$ is independent of $y$ precisely on **Berwald manifolds**. There $G^i_{jk} = \Gamma^i_{jk}(x)$ is an affine connection on $M$, $G^i_j(x,y) = \Gamma^i_{jk}(x) y^k$ is linear in $y$, and § 3.1 collapses to ordinary linear parallel transport on its own. In the Riemannian and Euclidean cases those $\Gamma^i_{jk}$ are exactly the Levi-Civita symbols of $g$. The collapse is automatic; nothing needs to be selected. (A Randers metric is Berwald exactly when its wind is Riemann-parallel, $\nabla^h W = 0$.)
+$G^i_{jk}$ is independent of $y$ precisely on **Berwald manifolds** — that independence is the definition. There $G^i_{jk} = \Gamma^i_{jk}(x)$ is an affine connection on $M$, $G^i_j(x,y) = \Gamma^i_{jk}(x) y^k$ is linear in $y$, and § 3.1 collapses to ordinary linear parallel transport on its own. In the Riemannian and Euclidean cases those $\Gamma^i_{jk}$ are exactly the Levi-Civita symbols of $g$. The collapse is automatic; nothing needs to be selected. (A Randers metric is Berwald exactly when its wind is Riemann-parallel, $\nabla^h W = 0$.)
 
-So the library exposes one translation, it is correct for arbitrary $F$, and it degenerates to Levi-Civita in the cases where Levi-Civita is what you want.
+So the library exposes one translation, it is correct for arbitrary $F$, and it degenerates to Levi-Civita in the cases where Levi-Civita is what you want. The second-level coefficients remain available as a quantity to *inspect* — testing whether a metric is Berwald is exactly a test on their $y$-dependence — rather than as a second transport to pick from.
 
 ### 3.3. Ambient vs. intrinsic coordinates
 
