@@ -177,6 +177,83 @@ class TestTransport(unittest.TestCase):
         )
         self.assertGreater(float(jnp.max(jnp.abs(residual))), 1e-3)
 
+    def test_berwald_coefficients_torsion_free(self):
+        """
+        G^i_jk is symmetric in j, k. Guaranteed by Schwarz's theorem on the
+        double jacfwd, but verified explicitly as a guard against refactors.
+        """
+        h_net = lambda x: jnp.eye(2)
+        w_net = lambda x: jnp.array([0.5 * x[1], 0.0])
+        conn = BerwaldConnection(Randers(self.plane, h_net, w_net, wind_mode="raw"))
+
+        gamma = conn.berwald_coefficients(jnp.array([1.0, 0.5]), jnp.array([0.7, 1.3]))
+        np.testing.assert_allclose(gamma, jnp.transpose(gamma, (0, 2, 1)), atol=1e-5)
+
+    def test_berwald_coefficients_y_independent_iff_berwald(self):
+        """
+        Independence of y *is* the definition of a Berwald manifold. A
+        position-dependent Riemannian metric qualifies; Randers with sheared
+        wind does not. This is the direct dual of the additivity test above.
+        """
+        from ham.geometry.metric import FinslerMetric
+
+        class DiagMetric(FinslerMetric):
+            def metric_fn(self, x, v):
+                g_diag = jnp.array([1.0, 1.0 + x[0] ** 2])
+                return jnp.sqrt(jnp.sum(g_diag * v**2))
+
+        x = jnp.array([1.0, 0.0])
+        y1 = jnp.array([1.0, 1.0])
+        y2 = jnp.array([0.4, -0.9])
+
+        riemannian = BerwaldConnection(DiagMetric(self.plane))
+        np.testing.assert_allclose(
+            riemannian.berwald_coefficients(x, y1),
+            riemannian.berwald_coefficients(x, y2),
+            atol=1e-4,
+        )
+
+        h_net = lambda x: jnp.eye(2)
+        w_net = lambda x: jnp.array([0.5 * x[1], 0.0])
+        randers = BerwaldConnection(Randers(self.plane, h_net, w_net, wind_mode="raw"))
+        spread = jnp.max(
+            jnp.abs(
+                randers.berwald_coefficients(x, y1)
+                - randers.berwald_coefficients(x, y2)
+            )
+        )
+        self.assertGreater(float(spread), 1e-3)
+
+    def test_berwald_coefficients_poincare_levi_civita(self):
+        """
+        On the Poincare half-plane, G^i_jk must reproduce the analytic
+        Levi-Civita symbols. This is real coverage of the spray's second
+        velocity derivative against closed-form values.
+        """
+        from ham.geometry.metric import FinslerMetric
+        from ham.utils.math import safe_norm
+
+        class PoincareMetric(FinslerMetric):
+            """Poincare half-plane metric: F(x, v) = ||v|| / y."""
+
+            def metric_fn(self, x, v):
+                y = jnp.maximum(x[1], 1e-10)
+                return safe_norm(v) / y
+
+        conn = BerwaldConnection(PoincareMetric(self.plane))
+        gamma = conn.berwald_coefficients(jnp.array([0.0, 2.0]), jnp.array([1.0, 1.0]))
+
+        y_val = 2.0
+        # Gamma^1_12 = Gamma^1_21 = -1/y, Gamma^2_11 = 1/y, Gamma^2_22 = -1/y.
+        # Tolerance 1e-3: the spray carries a Tikhonov term (spray_reg).
+        np.testing.assert_allclose(gamma[0, 0, 1], -1.0 / y_val, atol=1e-3)
+        np.testing.assert_allclose(gamma[0, 1, 0], -1.0 / y_val, atol=1e-3)
+        np.testing.assert_allclose(gamma[1, 0, 0], 1.0 / y_val, atol=1e-3)
+        np.testing.assert_allclose(gamma[1, 1, 1], -1.0 / y_val, atol=1e-3)
+        # The remaining independent symbols vanish.
+        np.testing.assert_allclose(gamma[0, 0, 0], 0.0, atol=1e-3)
+        np.testing.assert_allclose(gamma[1, 0, 1], 0.0, atol=1e-3)
+
     def test_riemannian_sphere_isometry(self):
         """
         Riemannian transport on a Sphere (via projection-based Berwald).

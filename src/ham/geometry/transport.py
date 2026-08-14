@@ -17,7 +17,9 @@ diffeomorphism group of the indicatrix rather than of ``O(n)``.
 Riemannian ones, where ``G^i_j(x, y) = Γ^i_{jk}(x) y^k`` for the Levi-Civita
 symbols and the translation above collapses to the usual linear one.
 
-See ``spec/MATH_SPEC.md § 3``.
+Differentiating once more gives ``G^i_jk = ∂G^i_j/∂y^k``, available as
+:meth:`BerwaldConnection.berwald_coefficients` for analysis. It is not a
+transport: see ``spec/MATH_SPEC.md § 3.2``.
 """
 
 from abc import abstractmethod
@@ -84,6 +86,34 @@ class BerwaldConnection(Connection):
             Coefficients, shape (D, D), indexed ``[i, j]``.
         """
         return jax.jacfwd(self.metric.spray, argnums=1)(x, y)
+
+    def berwald_coefficients(self, x: jax.Array, y: jax.Array) -> jax.Array:
+        r"""
+        Second-level coefficients :math:`G^i_{jk} = \partial^2 G^i/\partial y^j \partial y^k`.
+
+        Torsion-free, and independent of ``y`` exactly on Berwald manifolds,
+        where they are the Christoffel symbols of an affine connection on ``M``
+        — the Levi-Civita symbols in the Riemannian case. Exposed for analysis
+        (horizontal covariant derivatives, the infinitesimal holonomy algebra,
+        testing whether a metric is Berwald).
+
+        This is **not** a transport. Freezing it at the curve's velocity gives a
+        linear equation that is not metric-compatible and does not preserve
+        ``F``; :meth:`parallel_transport` is the translation of the manifold.
+
+        Args:
+            x: Position, shape (D,).
+            y: Tangent vector, shape (D,).
+
+        Returns:
+            Coefficients, shape (D, D, D), indexed ``[i, j, k]``.
+
+        Note:
+            Differentiates twice through the linear solve in ``metric.spray``,
+            so it assumes the energy Hessian is reasonably conditioned.
+        """
+        jacobian_y = jax.jacfwd(self.metric.spray, argnums=1)
+        return jax.jacfwd(jacobian_y, argnums=1)(x, y)
 
     def parallel_transport(
         self, path_x: jax.Array, path_v: jax.Array, vec_start: jax.Array
