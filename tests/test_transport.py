@@ -428,7 +428,9 @@ class TestTransport(unittest.TestCase):
 
         # We need to account for the fact that angles near 0 and 2pi might wrap differently
         # so we compare the complex phases directly.
-        np.testing.assert_allclose(jnp.exp(1j * angle), jnp.exp(1j * expected_angle), atol=1e-2)
+        np.testing.assert_allclose(
+            jnp.exp(1j * angle), jnp.exp(1j * expected_angle), atol=1e-2
+        )
 
     def test_integrator_convergence_order(self):
         """
