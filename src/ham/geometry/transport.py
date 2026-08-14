@@ -1,19 +1,21 @@
 """
-Parallel transport along curves on Finsler manifolds.
+Parallel translation along curves on Finsler manifolds.
 
-The canonical parallel translation of a Finsler manifold is the *horizontal*
-one, carried by the nonlinear connection ``N^i_j = ∂G^i/∂y^j`` that the geodesic
-spray induces. It is positively homogeneous of degree one rather than linear,
-and it preserves the Finsler norm ``F``. That norm preservation is what makes
-translation a map between indicatrices, and therefore what makes the holonomy
-group a subgroup of the diffeomorphism group of the indicatrix.
+The geodesic spray ``G^i(x, y)`` induces the coefficients ``G^i_j = ∂G^i/∂y^j``
+of the Berwald connection. They span the horizontal distribution, and their
+horizontal curves are the parallel translation of the Finsler manifold:
 
-Differentiating the nonlinear coefficients once more in the velocity gives the
-linear Berwald coefficients ``^BΓ^i_jk = ∂²G^i/∂y^j∂y^k``. They are the
-Christoffel symbols of Levi-Civita whenever the spray is quadratic in the
-velocity, and :meth:`BerwaldConnection.christoffel_symbols` exposes them for
-analysis. They do not define the transport: the linear equation they generate is
-not metric-compatible and is not an isometry of ``F``.
+    dX^i/dt + G^i_j(γ(t), X(t)) γ̇^j(t) = 0.
+
+The coefficients are evaluated at the *translated vector* ``X(t)``, not at the
+curve's velocity, so the equation is homogeneous of degree one in ``X`` but in
+general nonlinear. It preserves the Finsler norm ``F``, which makes translation
+a map between indicatrices and the holonomy group a subgroup of the
+diffeomorphism group of the indicatrix rather than of ``O(n)``.
+
+``G^i_j`` is linear in ``y`` exactly on Berwald manifolds — in particular
+Riemannian ones, where ``G^i_j(x, y) = Γ^i_{jk}(x) y^k`` for the Levi-Civita
+symbols and the translation above collapses to the usual linear one.
 
 See ``spec/MATH_SPEC.md § 3``.
 """
@@ -36,20 +38,6 @@ class Connection(eqx.Module):
     metric: FinslerMetric
 
     @abstractmethod
-    def christoffel_symbols(self, x: jax.Array, v: jax.Array) -> jax.Array:
-        """
-        Compute the linear connection coefficients at (x, v).
-
-        Args:
-            x: Position on the manifold, shape (D,).
-            v: Tangent vector at x, shape (D,).
-
-        Returns:
-            Connection coefficients Γ^i_{jk}, shape (D, D, D).
-        """
-        pass
-
-    @abstractmethod
     def parallel_transport(
         self, path_x: jax.Array, path_v: jax.Array, vec_start: jax.Array
     ) -> jax.Array:
@@ -69,24 +57,24 @@ class Connection(eqx.Module):
 
 class BerwaldConnection(Connection):
     r"""
-    The connection induced by a Finsler spray.
+    The Berwald connection of a Finsler spray.
 
-    Two objects live here, both derived from the spray :math:`G^i(x, y)`:
+    Its coefficients are the first velocity derivatives of the spray,
+    :math:`G^i_j = \partial G^i / \partial y^j`. They span the horizontal
+    distribution, and :meth:`parallel_transport` integrates the horizontal
+    curves — the parallel translation whose loops generate the holonomy group.
 
-    * the nonlinear connection :math:`N^i_j = \partial G^i / \partial y^j`,
-      whose horizontal curves define the canonical parallel translation; and
-    * the linear Berwald connection
-      :math:`^B\Gamma^i_{jk} = \partial N^i_j / \partial y^k`.
-
-    :meth:`parallel_transport` uses the first. See ``spec/MATH_SPEC.md § 3``.
+    See ``spec/MATH_SPEC.md § 3``.
     """
 
-    def nonlinear_coefficients(self, x: jax.Array, y: jax.Array) -> jax.Array:
+    def connection_coefficients(self, x: jax.Array, y: jax.Array) -> jax.Array:
         r"""
-        Nonlinear connection coefficients :math:`N^i_j = \partial G^i/\partial y^j`.
+        Berwald coefficients :math:`G^i_j = \partial G^i/\partial y^j`.
 
-        Homogeneous of degree one in ``y``, which is what makes the transport it
-        defines homogeneous of degree one in the transported vector.
+        Homogeneous of degree one in ``y``, which is what makes the translation
+        they define homogeneous of degree one in the translated vector. Linear
+        in ``y`` exactly on Berwald manifolds, where they reduce to
+        :math:`\Gamma^i_{jk}(x) y^k`.
 
         Args:
             x: Position, shape (D,).
@@ -97,43 +85,20 @@ class BerwaldConnection(Connection):
         """
         return jax.jacfwd(self.metric.spray, argnums=1)(x, y)
 
-    def christoffel_symbols(self, x: jax.Array, v: jax.Array) -> jax.Array:
-        r"""
-        Linear Berwald coefficients :math:`^B\Gamma^i_{jk}=\partial^2 G^i/\partial v^j \partial v^k`.
-
-        Torsion-free, and equal to the Christoffel symbols of Levi-Civita when
-        the metric is Riemannian. A derived quantity for analysis; transport is
-        :meth:`parallel_transport`, which is horizontal rather than linear.
-
-        Args:
-            x: Position, shape (D,).
-            v: Tangent vector, shape (D,).
-
-        Returns:
-            Coefficients tensor, shape (D, D, D).
-
-        Note:
-            This differentiates through the linear solver in `metric.spray`. It assumes
-            the Hessian of the energy is reasonably conditioned (regularised).
-        """
-        jacobian_v = jax.jacfwd(self.metric.spray, argnums=1)
-        hessian_v = jax.jacfwd(jacobian_v, argnums=1)
-        return hessian_v(x, v)
-
     def parallel_transport(
         self, path_x: jax.Array, path_v: jax.Array, vec_start: jax.Array
     ) -> jax.Array:
         r"""
-        Horizontal parallel translation of ``vec_start`` along ``(path_x, path_v)``.
+        Parallel translation of ``vec_start`` along ``(path_x, path_v)``.
 
         Integrates the horizontality condition
 
         .. math::
-            \dot Y^i + N^i_j(\gamma, Y)\,\dot\gamma^j = 0,
+            \dot X^i + G^i_j(\gamma, X)\,\dot\gamma^j = 0,
 
-        in which the coefficients are evaluated at the *transported vector*
+        in which the coefficients are evaluated at the *translated vector*
         rather than at the curve's velocity. The equation is therefore nonlinear
-        in ``Y``, and the resulting map is positively homogeneous of degree one
+        in ``X``, and the resulting map is positively homogeneous of degree one
         and preserves the Finsler norm.
 
         Args:
@@ -158,12 +123,12 @@ class BerwaldConnection(Connection):
         def transport_ode(carry_vec, inputs):
             x, x_next, v = inputs
 
-            # N^i_j evaluated at the carried vector — this is what makes the
+            # G^i_j evaluated at the carried vector — this is what makes the
             # translation horizontal rather than linear. (D, D)
-            n_coeff = self.nonlinear_coefficients(x, carry_vec)
+            g_coeff = self.connection_coefficients(x, carry_vec)
 
-            # dY^i/dt = - N^i_j(x, Y) v^j
-            dvec = -jnp.einsum("ij,j->i", n_coeff, v)
+            # dX^i/dt = - G^i_j(x, X) v^j
+            dvec = -jnp.einsum("ij,j->i", g_coeff, v)
 
             new_vec = carry_vec + dvec * dt
 

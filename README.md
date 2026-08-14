@@ -43,8 +43,9 @@ print(metric.arc_length(traj.xs),          # downwind cost  ≈ 1.19
 - The Euler–Lagrange equations are solved as a small linear system per step,
   avoiding the $O(N^3)$ cost of forming connection coefficients explicitly.
 - Randers metrics carry a Zermelo parameterization that keeps the wind causal
-  ($\|W\|_h < 1$) and the metric strongly convex, using a $C^1$ squashing
-  function at the boundary.
+  ($\lVert W \rVert_h < 1$) and the metric strongly convex, using a $C^\infty$
+  smooth-minimum that bends only near the boundary and leaves already-causal
+  winds untouched.
 - Four routes to a geodesic: shoot from initial conditions (`ExponentialMap`),
   relax a boundary-value path locally (`AVBDSolver`) or globally
   (`GaussNewtonGeodesic`), or solve the arrival-time PDE on a grid or mesh
@@ -249,7 +250,7 @@ design is in [`spec/ARCH_SPEC.md`](spec/ARCH_SPEC.md).
 ```text
 src/ham/
 ├── geometry/     # Manifold and FinslerMetric ABCs, manifolds/, mesh, zoo/,
-│                 # transport (Berwald), curvature (flag/sectional/Riemann)
+│                 # transport (Berwald connection), curvature (flag/sectional/Riemann)
 ├── models/       # learned.py: neural, pullback, energy-based, kernel metrics
 │                 # covariate.py: CovariateConditionedRanders, terrain CNN
 ├── nn/           # VectorField, PSDMatrixField, RandomFourierFeatures, EBM, KDE
@@ -261,7 +262,7 @@ src/ham/
 
 examples/        # runnable demo scripts + Jupyter notebooks
 spec/            # MATH_SPEC.md, ARCH_SPEC.md
-tests/           # 348 tests across 33 modules, run in both precisions
+tests/           # 349 tests across 35 modules, run in both precisions
 ```
 
 ---
@@ -323,7 +324,7 @@ on CPU. If you hit accelerator initialization in a CPU-only environment, set
 | `test_geodesic.py`, `test_solver.py` | spray ODE, energy conservation |
 | `test_avbd.py`, `test_gauss_newton.py` | BVP solvers, implicit differentiation |
 | `test_eikonal_solver.py`, `test_mesh_eikonal.py`, `test_volumetric_eikonal.py` | arrival-time PDEs |
-| `test_transport.py`, `test_curvature.py` | Berwald transport, curvature |
+| `test_transport.py`, `test_curvature.py` | parallel translation, curvature |
 | `test_pipeline.py`, `test_learned_metric.py` | training pipeline, neural metrics |
 | `test_invariants.py` | Finsler axioms and cross-cutting metric invariants |
 
