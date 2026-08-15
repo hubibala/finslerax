@@ -1,6 +1,6 @@
-# Contributing to HAM
+# Contributing to finslerax
 
-Thank you for your interest in HAM. Bug reports, mathematical corrections,
+Thank you for your interest in finslerax. Bug reports, mathematical corrections,
 new metrics/manifolds/solvers, and documentation improvements are all welcome.
 
 ## Branch model
@@ -13,7 +13,7 @@ application subtree:
 
 | Branch | Contains |
 | :--- | :--- |
-| `app/wildfire` | `experiments/wildfire/`, the `ham.data` raster loaders, the `wildfire` extra |
+| `app/wildfire` | `experiments/wildfire/`, the `finslerax.data` raster loaders, the `wildfire` extra |
 | `app/robot-arm` | `experiments/arm/` and its Stage-D theory note |
 
 Send library changes to `main`, and application changes to the relevant `app/*`
@@ -22,8 +22,8 @@ branch. When `main` moves, the application branches rebase onto it.
 ## Getting started
 
 ```bash
-git clone https://github.com/hubibala/HAM.git
-cd HAM
+git clone https://github.com/hubibala/finslerax.git
+cd finslerax
 pip install -e ".[dev]"      # core + pytest, ruff, matplotlib, jupyter
 ```
 
@@ -37,7 +37,7 @@ be green before it can merge.
 | Lint | `ruff check --no-cache src/ tests/ examples/` | `ruff check src/ tests/ examples/` |
 | Format | `ruff format --check --no-cache src/ tests/ examples/` | `ruff format src/ tests/ examples/` |
 | Tests | `pytest tests/ -v --timeout=300`, on Python 3.10 and 3.11 × `JAX_ENABLE_X64` ∈ {0, 1} | `pytest tests/ -q` and `JAX_ENABLE_X64=1 pytest tests/ -q` |
-| Types | `mypy src/ham` | `mypy src/ham` |
+| Types | `mypy src/finslerax` | `mypy src/finslerax` |
 | Build | `uv build` then `twine check dist/*` | `uv build` |
 
 The whole suite takes several minutes, so while iterating on one module, run

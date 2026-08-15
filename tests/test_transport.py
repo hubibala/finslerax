@@ -13,9 +13,10 @@ import jax.numpy as jnp
 import numpy as np
 
 # Ensure precision for geometric drift checks
-from ham.geometry import EuclideanSpace, Sphere
-from ham.geometry.transport import BerwaldConnection
-from ham.geometry.zoo import Euclidean, Randers, Riemannian
+from finslerax.geometry import EuclideanSpace, Sphere
+from finslerax.geometry.transport import BerwaldConnection
+from finslerax.geometry.zoo import Euclidean, Randers, Riemannian
+from finslerax.solvers import ExponentialMap
 
 
 class TestTransport(unittest.TestCase):
@@ -44,14 +45,14 @@ class TestTransport(unittest.TestCase):
         expected = jnp.tile(vec_start, (len(path_x), 1))
         np.testing.assert_allclose(vecs, expected, atol=1e-5)
 
-    def test_christoffel_symbols_euclidean(self):
-        """Euclidean Christoffel symbols must be identically zero."""
+    def test_connection_coefficients_euclidean(self):
+        """Euclidean connection coefficients must be identically zero."""
         metric = Euclidean(self.plane)
         conn = BerwaldConnection(metric)
         x = jnp.array([1.0, 2.0])
         v = jnp.array([3.0, 4.0])
-        gamma = conn.christoffel_symbols(x, v)
-        np.testing.assert_allclose(gamma, jnp.zeros((2, 2, 2)), atol=1e-5)
+        coeff = conn.connection_coefficients(x, v)
+        np.testing.assert_allclose(coeff, jnp.zeros((2, 2)), atol=1e-5)
 
     def test_jit_vmap_grad_compatibility(self):
         """Test JAX transforms (jit, vmap, grad) over the connection object."""
@@ -62,9 +63,9 @@ class TestTransport(unittest.TestCase):
         v_batch = jax.random.normal(self.key, (10, 2))
 
         # 1. vmap over batch
-        vmap_gamma = jax.vmap(conn.christoffel_symbols)
-        gammas = vmap_gamma(x_batch, v_batch)
-        self.assertEqual(gammas.shape, (10, 2, 2, 2))
+        vmap_coeff = jax.vmap(conn.connection_coefficients)
+        coeffs = vmap_coeff(x_batch, v_batch)
+        self.assertEqual(coeffs.shape, (10, 2, 2))
 
         # 2. jit over transport
         jit_transport = jax.jit(conn.parallel_transport)
@@ -83,7 +84,7 @@ class TestTransport(unittest.TestCase):
         # For Euclidean, d/dv0 ||v0||^2 = 2*v0
         np.testing.assert_allclose(g, 2.0 * vec_start, atol=1e-5)
 
-    def test_christoffel_zero_velocity(self):
+    def test_coefficients_zero_velocity(self):
         """Ensure connection coefficients do not NaN at v=0."""
         h_net = lambda x: jnp.eye(2)
         w_net = lambda x: jnp.array([0.5, 0.0])
@@ -93,8 +94,8 @@ class TestTransport(unittest.TestCase):
         x = jnp.array([1.0, 1.0])
         v_zero = jnp.array([0.0, 0.0])
 
-        gamma = conn.christoffel_symbols(x, v_zero)
-        self.assertFalse(jnp.any(jnp.isnan(gamma)))
+        coeff = conn.connection_coefficients(x, v_zero)
+        self.assertFalse(jnp.any(jnp.isnan(coeff)))
 
     def test_transport_degenerate(self):
         """Test that transport handles single-point paths gracefully."""
@@ -107,34 +108,40 @@ class TestTransport(unittest.TestCase):
         self.assertEqual(vecs.shape, (1, 2))
         np.testing.assert_allclose(vecs[0], vec_start)
 
-    def test_christoffel_torsion_free(self):
+    def test_coefficients_are_homogeneous_degree_one(self):
         """
-        Berwald connection must be torsion-free: Gamma^i_jk = Gamma^i_kj.
-        This is guaranteed by Schwarz's theorem on the double jacfwd,
-        but we verify it explicitly as a guard against future refactors.
+        G^i_j is the velocity gradient of a degree-two-homogeneous spray, so it
+        is homogeneous of degree one: G^i_j(x, s*y) = s * G^i_j(x, y).
+
+        Euler's theorem then gives G^i_j(x, y) y^j = 2 G^i(x, y), which is what
+        makes a geodesic auto-parallel.
         """
         h_net = lambda x: jnp.eye(2)
         w_net = lambda x: jnp.array([0.5 * x[1], 0.0])
-        metric = Randers(self.plane, h_net, w_net)
+        metric = Randers(self.plane, h_net, w_net, wind_mode="raw")
         conn = BerwaldConnection(metric)
 
         x = jnp.array([1.0, 0.5])
-        v = jnp.array([0.7, 1.3])
+        y = jnp.array([0.7, 1.3])
 
-        gamma = conn.christoffel_symbols(x, v)
+        base = conn.connection_coefficients(x, y)
+        scaled = conn.connection_coefficients(x, 3.0 * y)
+        np.testing.assert_allclose(scaled, 3.0 * base, rtol=1e-5)
 
-        # Check symmetry in last two indices: gamma[i,j,k] == gamma[i,k,j]
-        np.testing.assert_allclose(gamma, jnp.transpose(gamma, (0, 2, 1)), atol=1e-5)
+        # Euler: contracting with y recovers twice the spray.
+        np.testing.assert_allclose(
+            jnp.einsum("ij,j->i", base, y), 2.0 * metric.spray(x, y), rtol=1e-4
+        )
 
-    def test_christoffel_nonzero_curved_riemannian(self):
+    def test_coefficients_linear_in_y_iff_berwald(self):
         """
-        Verify that a position-dependent Riemannian metric produces
-        analytically non-zero Christoffel symbols.
-
-        Uses metric g = diag(1, 1+x^2) on R^2.
-        For this metric: Gamma^2_11 = x / (1+x^2) (non-zero when x != 0).
+        G^i_j is linear in y exactly on Berwald manifolds. A position-dependent
+        Riemannian metric is one, so there G^i_j(x, y) = Gamma^i_jk(x) y^k and
+        additivity holds. A Randers metric with non-parallel wind is not, and
+        additivity must fail — this is what stops the coefficients from being
+        Christoffel symbols of any linear connection on M.
         """
-        from ham.geometry.metric import FinslerMetric
+        from finslerax.geometry.metric import FinslerMetric
 
         class DiagMetric(FinslerMetric):
             def metric_fn(self, x, v):
@@ -142,24 +149,110 @@ class TestTransport(unittest.TestCase):
                 g_diag = jnp.array([1.0, 1.0 + x[0] ** 2])
                 return jnp.sqrt(jnp.sum(g_diag * v**2))
 
-        metric = DiagMetric(self.plane)
-        conn = BerwaldConnection(metric)
-
         x = jnp.array([1.0, 0.0])  # x[0]=1 → g22 = 2
-        v = jnp.array([1.0, 1.0])
+        y1 = jnp.array([1.0, 1.0])
+        y2 = jnp.array([0.4, -0.9])
 
-        gamma = conn.christoffel_symbols(x, v)
+        riemannian = BerwaldConnection(DiagMetric(self.plane))
+        coeff = riemannian.connection_coefficients(x, y1)
 
-        # The tensor should be non-trivially non-zero
-        max_abs = jnp.max(jnp.abs(gamma))
-        self.assertGreater(
-            float(max_abs),
-            1e-4,
-            "Christoffel symbols should be non-zero for position-dependent metric",
+        # Position-dependent metric ⇒ genuinely non-zero coefficients.
+        self.assertGreater(float(jnp.max(jnp.abs(coeff))), 1e-4)
+
+        # Riemannian ⇒ Berwald ⇒ linear in y.
+        np.testing.assert_allclose(
+            riemannian.connection_coefficients(x, y1 + y2),
+            coeff + riemannian.connection_coefficients(x, y2),
+            atol=1e-5,
         )
 
-        # Still torsion-free
+        # Randers with non-parallel wind ⇒ not Berwald ⇒ additivity fails.
+        h_net = lambda x: jnp.eye(2)
+        w_net = lambda x: jnp.array([0.5 * x[1], 0.0])
+        randers = BerwaldConnection(Randers(self.plane, h_net, w_net, wind_mode="raw"))
+        residual = (
+            randers.connection_coefficients(x, y1 + y2)
+            - randers.connection_coefficients(x, y1)
+            - randers.connection_coefficients(x, y2)
+        )
+        self.assertGreater(float(jnp.max(jnp.abs(residual))), 1e-3)
+
+    def test_berwald_coefficients_torsion_free(self):
+        """
+        G^i_jk is symmetric in j, k. Guaranteed by Schwarz's theorem on the
+        double jacfwd, but verified explicitly as a guard against refactors.
+        """
+        h_net = lambda x: jnp.eye(2)
+        w_net = lambda x: jnp.array([0.5 * x[1], 0.0])
+        conn = BerwaldConnection(Randers(self.plane, h_net, w_net, wind_mode="raw"))
+
+        gamma = conn.berwald_coefficients(jnp.array([1.0, 0.5]), jnp.array([0.7, 1.3]))
         np.testing.assert_allclose(gamma, jnp.transpose(gamma, (0, 2, 1)), atol=1e-5)
+
+    def test_berwald_coefficients_y_independent_iff_berwald(self):
+        """
+        Independence of y *is* the definition of a Berwald manifold. A
+        position-dependent Riemannian metric qualifies; Randers with sheared
+        wind does not. This is the direct dual of the additivity test above.
+        """
+        from finslerax.geometry.metric import FinslerMetric
+
+        class DiagMetric(FinslerMetric):
+            def metric_fn(self, x, v):
+                g_diag = jnp.array([1.0, 1.0 + x[0] ** 2])
+                return jnp.sqrt(jnp.sum(g_diag * v**2))
+
+        x = jnp.array([1.0, 0.0])
+        y1 = jnp.array([1.0, 1.0])
+        y2 = jnp.array([0.4, -0.9])
+
+        riemannian = BerwaldConnection(DiagMetric(self.plane))
+        np.testing.assert_allclose(
+            riemannian.berwald_coefficients(x, y1),
+            riemannian.berwald_coefficients(x, y2),
+            atol=1e-4,
+        )
+
+        h_net = lambda x: jnp.eye(2)
+        w_net = lambda x: jnp.array([0.5 * x[1], 0.0])
+        randers = BerwaldConnection(Randers(self.plane, h_net, w_net, wind_mode="raw"))
+        spread = jnp.max(
+            jnp.abs(
+                randers.berwald_coefficients(x, y1)
+                - randers.berwald_coefficients(x, y2)
+            )
+        )
+        self.assertGreater(float(spread), 1e-3)
+
+    def test_berwald_coefficients_poincare_levi_civita(self):
+        """
+        On the Poincare half-plane, G^i_jk must reproduce the analytic
+        Levi-Civita symbols. This is real coverage of the spray's second
+        velocity derivative against closed-form values.
+        """
+        from finslerax.geometry.metric import FinslerMetric
+        from finslerax.utils.math import safe_norm
+
+        class PoincareMetric(FinslerMetric):
+            """Poincare half-plane metric: F(x, v) = ||v|| / y."""
+
+            def metric_fn(self, x, v):
+                y = jnp.maximum(x[1], 1e-10)
+                return safe_norm(v) / y
+
+        conn = BerwaldConnection(PoincareMetric(self.plane))
+        gamma = conn.berwald_coefficients(jnp.array([0.0, 2.0]), jnp.array([1.0, 1.0]))
+
+        y_val = 2.0
+        # Gamma^1_12 = Gamma^1_21 = -1/y, Gamma^2_11 = 1/y, Gamma^2_22 = -1/y.
+        # Tolerance 1e-3: the spray carries a Tikhonov term (spray_reg).
+        np.testing.assert_allclose(gamma[0, 0, 1], -1.0 / y_val, atol=1e-3)
+        np.testing.assert_allclose(gamma[0, 1, 0], -1.0 / y_val, atol=1e-3)
+        np.testing.assert_allclose(gamma[1, 0, 0], 1.0 / y_val, atol=1e-3)
+        np.testing.assert_allclose(gamma[1, 1, 1], -1.0 / y_val, atol=1e-3)
+        # The remaining independent symbols vanish.
+        np.testing.assert_allclose(gamma[0, 0, 0], 0.0, atol=1e-3)
+        np.testing.assert_allclose(gamma[1, 0, 1], 0.0, atol=1e-3)
 
     def test_riemannian_sphere_isometry(self):
         """
@@ -200,71 +293,77 @@ class TestTransport(unittest.TestCase):
         dots = jnp.sum(vecs * path_x, axis=1)
         np.testing.assert_allclose(dots, jnp.zeros_like(dots), atol=1e-3)
 
-    def test_randers_norm_drift(self):
+    def test_randers_horizontal_transport_preserves_norm(self):
         """
-        Verifies that Berwald transport in a Randers space is NOT an isometry.
-        The Finsler norm of the transported vector changes because the
-        wind W(x) varies along the path.
+        Horizontal parallel translation preserves the Finsler norm.
+
+        This is the defining property of the canonical Finsler translation, and
+        the reason holonomy acts on the indicatrix: F is constant along a
+        horizontal curve even though the wind W(x) varies along the path, and
+        even though the transported vector's Euclidean length does not.
         """
         h_net = lambda x: jnp.eye(2)
         w_net = lambda x: jnp.array([0.5 * x[1], 0.0])
-        metric = Randers(self.plane, h_net, w_net)
+        metric = Randers(self.plane, h_net, w_net, wind_mode="raw")
 
-        y = jnp.linspace(0, 1, 20)
+        y = jnp.linspace(0, 1, 400)
         path_x = jnp.stack([jnp.zeros_like(y), y], axis=1)
         path_v = jnp.stack([jnp.zeros_like(y), jnp.ones_like(y)], axis=1)
         vec_start = jnp.array([1.0, 0.0])
 
         conn = BerwaldConnection(metric)
-        vecs_randers = conn.parallel_transport(path_x, path_v, vec_start)
+        vecs = conn.parallel_transport(path_x, path_v, vec_start)
 
-        norms_randers = jax.vmap(metric.metric_fn)(path_x, vecs_randers)
-        initial_norm = norms_randers[0]
-        final_norm = norms_randers[-1]
+        norms = jax.vmap(metric.metric_fn)(path_x, vecs)
+        np.testing.assert_allclose(norms, jnp.full_like(norms, norms[0]), rtol=2e-3)
 
-        self.assertNotAlmostEqual(float(initial_norm), float(final_norm), places=3)
+        # The coordinate vector genuinely moves; the norm is what is held fixed.
+        self.assertGreater(float(jnp.linalg.norm(vecs[-1] - vec_start)), 0.1)
 
-    def test_randers_velocity_dependence(self):
+    def test_horizontal_transport_is_homogeneous(self):
         """
-        Verify that Randers Berwald transport depends on velocity.
-
-        We compare Randers transport against a reference Riemannian transport
-        on the SAME path geometry. For Riemannian metrics, the Berwald
-        connection Gamma(x) is velocity-independent, so doubling v with
-        the same discrete dt is purely a rescaling artifact. For Randers,
-        the difference must exceed the Riemannian difference.
+        Horizontal translation is positively homogeneous of degree one:
+        P(lambda * Y) = lambda * P(Y). This is what lets it be read as a map
+        between indicatrices.
         """
         h_net = lambda x: jnp.eye(2)
         w_net = lambda x: jnp.array([0.5 * x[1], 0.0])
-        randers_metric = Randers(self.plane, h_net, w_net)
-        riemannian_metric = Riemannian(self.plane, h_net)
+        metric = Randers(self.plane, h_net, w_net, wind_mode="raw")
 
-        vec_start = jnp.array([1.0, 0.0])
+        y = jnp.linspace(0, 1, 100)
+        path_x = jnp.stack([jnp.zeros_like(y), y], axis=1)
+        path_v = jnp.stack([jnp.zeros_like(y), jnp.ones_like(y)], axis=1)
 
-        y1 = jnp.linspace(0, 1, 20)
-        path_x1 = jnp.stack([jnp.zeros_like(y1), y1], axis=1)
-        path_v1 = jnp.stack([jnp.zeros_like(y1), jnp.ones_like(y1)], axis=1)
-        path_v2 = path_v1 * 2.0  # Double speed, same geometry
+        conn = BerwaldConnection(metric)
+        v0 = jnp.array([1.0, 0.3])
+        single = conn.parallel_transport(path_x, path_v, v0)[-1]
+        scaled = conn.parallel_transport(path_x, path_v, 2.0 * v0)[-1]
 
-        # Randers transport at two speeds
-        randers_conn = BerwaldConnection(randers_metric)
-        vecs_randers_1 = randers_conn.parallel_transport(path_x1, path_v1, vec_start)
-        vecs_randers_2 = randers_conn.parallel_transport(path_x1, path_v2, vec_start)
-        diff_randers = jnp.linalg.norm(vecs_randers_1[-1] - vecs_randers_2[-1])
+        np.testing.assert_allclose(scaled, 2.0 * single, rtol=1e-5)
 
-        # Riemannian transport at two speeds (for reference)
-        riem_conn = BerwaldConnection(riemannian_metric)
-        vecs_riem_1 = riem_conn.parallel_transport(path_x1, path_v1, vec_start)
-        vecs_riem_2 = riem_conn.parallel_transport(path_x1, path_v2, vec_start)
-        diff_riem = jnp.linalg.norm(vecs_riem_1[-1] - vecs_riem_2[-1])
+    def test_geodesic_is_autoparallel(self):
+        """
+        A geodesic is autoparallel: transporting its own initial velocity along
+        it reproduces the velocity field.
 
-        # The Randers difference should strictly exceed the Riemannian difference
-        # because Gamma(x, v) genuinely depends on v for Randers
-        self.assertGreater(
-            float(diff_randers),
-            float(diff_riem) + 1e-4,
-            "Randers velocity dependence should exceed Riemannian dt-artifact",
+        This pins the sign and index convention of the horizontal equation
+        against the geodesic equation itself. Euler's theorem on the
+        degree-two-homogeneous spray gives N^i_j(x, y) y^j = 2 G^i(x, y), so
+        Y = gamma_dot solves the horizontality condition exactly when gamma
+        solves gamma_ddot + 2G = 0.
+        """
+        h_net = lambda x: jnp.eye(2)
+        w_net = lambda x: jnp.array([0.3 * jnp.sin(x[1]), 0.2])
+        metric = Randers(self.plane, h_net, w_net, wind_mode="raw")
+
+        path_x, path_v = ExponentialMap(max_steps=200).trace(
+            metric, jnp.array([0.0, 0.0]), jnp.array([1.0, 0.4]), t_max=1.0
         )
+
+        conn = BerwaldConnection(metric)
+        transported = conn.parallel_transport(path_x, path_v, path_v[0])
+
+        np.testing.assert_allclose(transported, path_v, rtol=2e-2, atol=2e-2)
 
     def test_sphere_holonomy(self):
         """
@@ -273,9 +372,11 @@ class TestTransport(unittest.TestCase):
 
         Note: Our implementation uses g(x) = I_3 (ambient Euclidean), so
         Gamma^i_jk = 0 and the transport is entirely projection-based.
-        The resulting holonomy angle is 2*pi*cos(theta), which is the
-        complement of the standard solid-angle formula 2*pi*(1-cos(theta)).
-        Both are equivalent modulo 2*pi (cos(a) = cos(2*pi - a)).
+        This correctly computes the exact Levi-Civita connection via the Gauss
+        equation. The true holonomy rotation is the solid angle 2*pi*(1-cos(theta)).
+        However, the local frame (phi_hat, theta_hat) used here is negatively
+        oriented, causing the measured angle to appear as -Omega, which is exactly
+        -2*pi*(1-cos(theta)) ≡ 2*pi*cos(theta) modulo 2*pi.
         """
 
         def identity_metric(x):
@@ -318,11 +419,18 @@ class TestTransport(unittest.TestCase):
 
         angle = jnp.arctan2(v_end_theta, v_end_phi)
 
-        # Our projection-based transport produces angle = 2*pi*cos(theta)
+        # The physical rotation is the enclosed solid angle Omega = 2*pi*(1 - cos(theta)).
+        # However, our local tangent frame (phi_hat, theta_hat) has a negative orientation
+        # relative to the outward normal: (phi_hat x theta_hat) = -r_hat.
+        # Thus, the physical rotation Omega appears as -Omega in this frame.
+        # Modulo 2*pi, we have -2*pi*(1 - cos(theta)) = 2*pi*cos(theta) - 2*pi ≡ 2*pi*cos(theta).
         expected_angle = 2 * jnp.pi * jnp.cos(theta)
 
-        # Use cosine comparison to avoid sign/wrapping ambiguities
-        np.testing.assert_allclose(jnp.cos(angle), jnp.cos(expected_angle), atol=1e-2)
+        # We need to account for the fact that angles near 0 and 2pi might wrap differently
+        # so we compare the complex phases directly.
+        np.testing.assert_allclose(
+            jnp.exp(1j * angle), jnp.exp(1j * expected_angle), atol=1e-2
+        )
 
     def test_integrator_convergence_order(self):
         """
@@ -422,8 +530,8 @@ class TestTransport(unittest.TestCase):
             If Gamma were incorrectly zero, the vector would stay at (1, 0),
             and the metric norm would drop to 1/e ≈ 0.368 (wrong).
         """
-        from ham.geometry.metric import FinslerMetric
-        from ham.utils.math import safe_norm
+        from finslerax.geometry.metric import FinslerMetric
+        from finslerax.utils.math import safe_norm
 
         class PoincareMetric(FinslerMetric):
             """Poincaré half-plane metric: F(x, v) = ||v|| / y."""
@@ -436,24 +544,23 @@ class TestTransport(unittest.TestCase):
         metric = PoincareMetric(plane)
         conn = BerwaldConnection(metric)
 
-        # --- 1. Verify Christoffel symbols analytically ---
+        # --- 1. Verify the connection coefficients analytically ---
         x_test = jnp.array([0.0, 2.0])  # y = 2
         v_test = jnp.array([1.0, 1.0])
-        gamma = conn.christoffel_symbols(x_test, v_test)
+        coeff = conn.connection_coefficients(x_test, v_test)
 
         y_val = 2.0
-        # Expected: Gamma^1_12 = Gamma^1_21 = -1/y, Gamma^2_11 = 1/y, Gamma^2_22 = -1/y
+        # The half-plane is Riemannian, hence Berwald, so G^i_j = Gamma^i_jk y^k
+        # with Gamma^1_12 = Gamma^1_21 = -1/y, Gamma^2_11 = 1/y, Gamma^2_22 = -1/y.
+        # Contracting with v = (1, 1) gives:
+        expected = jnp.array(
+            [
+                [-v_test[1] / y_val, -v_test[0] / y_val],
+                [v_test[0] / y_val, -v_test[1] / y_val],
+            ]
+        )
         # Note: tolerance is 1e-3 due to Tikhonov regularization in spray (spray_reg)
-        np.testing.assert_allclose(
-            gamma[0, 0, 1], -1.0 / y_val, atol=1e-3
-        )  # Gamma^1_12
-        np.testing.assert_allclose(
-            gamma[0, 1, 0], -1.0 / y_val, atol=1e-3
-        )  # Gamma^1_21
-        np.testing.assert_allclose(gamma[1, 0, 0], 1.0 / y_val, atol=1e-3)  # Gamma^2_11
-        np.testing.assert_allclose(
-            gamma[1, 1, 1], -1.0 / y_val, atol=1e-3
-        )  # Gamma^2_22
+        np.testing.assert_allclose(coeff, expected, atol=1e-3)
 
         # --- 2. Transport along vertical geodesic ---
         N = 200

@@ -1,0 +1,59 @@
+"""
+finslerax — Differentiable Finsler Geometry in JAX
+=============================================
+
+A library for learnable Finsler metrics, geodesic solvers, and parallel
+transport built on JAX and Equinox.
+
+Subpackages
+-----------
+geometry : Manifolds, metrics (Euclidean/Riemannian/Randers), transport, curvature
+models   : Neural, pullback, and covariate-conditioned metric implementations
+solvers  : Geodesic BVP (AVBD) and IVP (ExponentialMap); grid/mesh/volumetric eikonal
+training : Multi-phase training pipeline and modular losses
+nn       : Neural network building blocks (VectorField, PSDMatrixField, EBM, KDE)
+sim, utils, vis : Analytical fields, numerics, visualization
+"""
+
+__version__ = "1.0.0"
+
+# Core geometry
+from finslerax.geometry import (
+    DiscreteRanders,
+    Euclidean,
+    EuclideanSpace,
+    Hyperboloid,
+    Paraboloid,
+    Randers,
+    Riemannian,
+    Sphere,
+    Torus,
+)
+from finslerax.geometry.manifold import Manifold
+from finslerax.geometry.metric import FinslerMetric
+from finslerax.geometry.transport import BerwaldConnection
+
+# Solvers
+from finslerax.solvers.avbd import AVBDSolver, Trajectory
+from finslerax.solvers.geodesic import ExponentialMap
+
+__all__ = [
+    # Solvers
+    "AVBDSolver",
+    "BerwaldConnection",
+    "DiscreteRanders",
+    "Euclidean",
+    "EuclideanSpace",
+    "ExponentialMap",
+    "FinslerMetric",
+    "Hyperboloid",
+    # Geometry
+    "Manifold",
+    "Paraboloid",
+    "Randers",
+    "Riemannian",
+    "Sphere",
+    "Torus",
+    "Trajectory",
+    "__version__",
+]

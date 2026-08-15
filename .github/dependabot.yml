@@ -13,6 +13,13 @@ updates:
       interval: "monthly"
     commit-message:
       prefix: "deps"
+    # This is a library, so its constraints are floors: "the oldest version we
+    # still work with". The default strategy raises them to whatever released
+    # most recently, which shrinks the set of environments finslerax can be
+    # co-installed into and tests nothing new. increase-if-necessary only opens
+    # a PR when a release is genuinely excluded by our constraint. Security
+    # updates are unaffected by this setting.
+    versioning-strategy: increase-if-necessary
     # JAX pins the numerical behaviour of the whole stack; review those bumps
     # by hand rather than letting a bot open them.
     ignore:

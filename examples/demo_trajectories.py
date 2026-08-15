@@ -6,11 +6,11 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ham.geometry import Randers, Sphere
-from ham.sim.fields import rossby_haurwitz
-from ham.solvers import AVBDSolver
-from ham.solvers.geodesic import ExponentialMap
-from ham.vis import (
+from finslerax.geometry import Randers, Sphere
+from finslerax.sim.fields import rossby_haurwitz
+from finslerax.solvers import AVBDSolver
+from finslerax.solvers.geodesic import ExponentialMap
+from finslerax.vis import (
     generate_icosphere,
     plot_indicatrices,
     plot_sphere,
@@ -78,7 +78,7 @@ def path_length(trajectory: Union[jnp.ndarray, NamedTuple, tuple]) -> float:
 
 
 def main():
-    print("--- HAM Rossby-Haurwitz Vortex Demo (2026) ---")
+    print("--- finslerax Rossby-Haurwitz Vortex Demo (2026) ---")
     print("Showing optimal steering vs passive drift vs verification shot\n")
 
     # ────────────────────────────────────────────────────────────────

@@ -6,9 +6,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ham.nn.ebm import QuadraticHead, ScalarEnergyField
-from ham.nn.kde import GaussianKDEEnergy
-from ham.training.losses_ebm import (
+from finslerax.nn.ebm import QuadraticHead, ScalarEnergyField
+from finslerax.nn.kde import GaussianKDEEnergy
+from finslerax.training.losses_ebm import (
     ContrastiveDivergenceLoss,
     DenoisingScoreMatchingLoss,
     MSELoss,

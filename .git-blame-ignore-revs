@@ -4,3 +4,6 @@
 
 # Normalize formatting with ruff format (50 files, no behaviour change)
 cf2ab426f3bb8bcc8ba5b6ce410e95861ff272af
+
+# Rename the package ham -> finslerax (446 occurrences, no behaviour change)
+bcb2dc2906e9d655b12d747306ea3a9c8083b225

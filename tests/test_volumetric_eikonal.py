@@ -8,9 +8,12 @@ the implicit custom-VJP backward pass.
 import equinox as eqx
 import jax.numpy as jnp
 
-from ham.geometry.manifolds import EuclideanSpace
-from ham.geometry.metric import AsymmetricMetric
-from ham.solvers.volumetric_eikonal import VolumetricEikonalSolver, _volumetric_solve
+from finslerax.geometry.manifolds import EuclideanSpace
+from finslerax.geometry.metric import AsymmetricMetric
+from finslerax.solvers.volumetric_eikonal import (
+    VolumetricEikonalSolver,
+    _volumetric_solve,
+)
 
 
 class Iso3D(AsymmetricMetric):

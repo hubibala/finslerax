@@ -1,10 +1,10 @@
-"""Tests for ham.utils.terrain."""
+"""Tests for finslerax.utils.terrain."""
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ham.utils.terrain import (
+from finslerax.utils.terrain import (
     CovariateMeshRanders,
     compute_face_normals,
     compute_face_slopes_aspects,

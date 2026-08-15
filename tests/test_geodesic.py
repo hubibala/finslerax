@@ -10,10 +10,10 @@ import numpy as np
 import pytest
 
 # Enforce High Precision
-from ham.geometry import Sphere
-from ham.geometry.manifold import Manifold
-from ham.geometry.zoo import Euclidean, Randers
-from ham.solvers.geodesic import ExponentialMap
+from finslerax.geometry import Sphere
+from finslerax.geometry.manifold import Manifold
+from finslerax.geometry.zoo import Euclidean, Randers
+from finslerax.solvers.geodesic import ExponentialMap
 
 
 @pytest.fixture

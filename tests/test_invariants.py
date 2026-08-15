@@ -21,7 +21,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ham.geometry import (
+from finslerax.geometry import (
     Euclidean,
     EuclideanSpace,
     Hyperboloid,
@@ -29,7 +29,7 @@ from ham.geometry import (
     Riemannian,
     Sphere,
 )
-from ham.geometry.manifold import Manifold
+from finslerax.geometry.manifold import Manifold
 
 
 class _FlatPlane(Manifold):
@@ -208,7 +208,7 @@ class TestEulerLagrangeResidualLoss(unittest.TestCase):
     """W-EL: residual differentiates the model's true metric.energy."""
 
     def _loss_on_traj(self, traj):
-        from ham.training.losses import EulerLagrangeResidualLoss
+        from finslerax.training.losses import EulerLagrangeResidualLoss
 
         manifold = EuclideanSpace(2)
         model = _StubModel(metric=Euclidean(manifold), manifold=manifold)
@@ -233,10 +233,10 @@ class TestAlignmentLossesManifoldAgnostic(unittest.TestCase):
     """W-MK: alignment losses run on non-hyperboloid manifolds."""
 
     def test_zermelo_alignment_on_euclidean_space(self):
-        from ham.training.losses import ZermeloAlignmentLoss
+        from finslerax.training.losses import ZermeloAlignmentLoss
 
         manifold = EuclideanSpace(2)
-        from ham.models.learned import NeuralRanders
+        from finslerax.models.learned import NeuralRanders
 
         metric = NeuralRanders(manifold, jax.random.PRNGKey(1))
         model = _StubModel(metric=metric, manifold=manifold)
@@ -270,7 +270,7 @@ class TestZermeloDataConsistency(unittest.TestCase):
     """
 
     def test_covariate_conditioned_randers(self):
-        from ham.models.covariate import CovariateConditionedRanders
+        from finslerax.models.covariate import CovariateConditionedRanders
 
         m = CovariateConditionedRanders(
             EuclideanSpace(2),
@@ -302,8 +302,8 @@ class TestZermeloDataConsistency(unittest.TestCase):
             )
 
     def test_covariate_mesh_randers(self):
-        from ham.geometry.mesh import TriangularMesh
-        from ham.utils.terrain import CovariateMeshRanders
+        from finslerax.geometry.mesh import TriangularMesh
+        from finslerax.utils.terrain import CovariateMeshRanders
 
         verts = jnp.array(
             [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 0.0]]

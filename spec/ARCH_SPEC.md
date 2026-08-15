@@ -1,10 +1,10 @@
-# ARCH_SPEC.md — Software Architecture of HAM
+# ARCH_SPEC.md — Software Architecture of finslerax
 
 **Dependencies:** JAX, Equinox, Optax
 
 ## 1. Design Philosophy
 
-`HAM` (distributed as `hamtools`) is a JAX-native library for learning and
+`finslerax` (distributed as `finslerax`) is a JAX-native library for learning and
 manipulating Finsler geometries. Unlike static differential-geometry libraries
 (e.g. `geomstats`), it prioritizes **generative** and **learning** use-cases
 where the metric is a neural network rather than an analytical formula.
@@ -33,8 +33,8 @@ where the metric is a neural network rather than an analytical formula.
 
 `Manifold` defines the domain $\mathcal{M}$ and how to stay on it. It does *not*
 define distance — that is the metric's job. Concrete manifolds live in
-`ham.geometry.manifolds` (`EuclideanSpace`, `Sphere`, `Torus`, `Hyperboloid`,
-`Paraboloid`) and `ham.geometry.mesh` (`TriangularMesh`).
+`finslerax.geometry.manifolds` (`EuclideanSpace`, `Sphere`, `Torus`, `Hyperboloid`,
+`Paraboloid`) and `finslerax.geometry.mesh` (`TriangularMesh`).
 
 ```python
 class Manifold(eqx.Module):
@@ -86,20 +86,20 @@ class FinslerMetric(eqx.Module):
 | Method | Returns | Mechanism |
 | :--- | :--- | :--- |
 | `energy` | $E = \tfrac12 F^2$ | algebraic |
-| `inner_product` | $w_1^\top g(x,v)\, w_2$ | `jax.hessian(energy)` |
+| `inner_product` | $w_1^\top g(x,v) w_2$ | `jax.hessian(energy)` |
 | `spray` | $G^i(x,v)$ | linear solve of the Euler–Lagrange system |
 | `geod_acceleration` | $\ddot x = -2G$ | scales the spray |
 
-The spray solve adds a **trace-scaled Tikhonov term** $\varepsilon\cdot
-(\mathrm{tr}\,H / D)\,I$ to the velocity-Hessian before inverting, regularizing
-near-degenerate directions (e.g. the Randers boundary) without distorting
-well-conditioned metrics. See `spec/MATH_SPEC.md` § 6.1.
+The spray solve adds a **trace-scaled Tikhonov term** $\varepsilon (\mathrm{tr}(H)/D) I$
+to the velocity-Hessian before inverting, regularizing near-degenerate
+directions (e.g. the Randers boundary) without distorting well-conditioned
+metrics. See `spec/MATH_SPEC.md` § 6.1.
 
 ### 2.3 Asymmetric metrics (Randers base)
 
 `AsymmetricMetric(FinslerMetric)` is the base for all Randers-type metrics. It
 adds one abstract method, `zermelo_data(x) -> (H, W, λ)`, returning the
-navigation triple (sea metric, wind, causality scalar $\lambda = 1 - \|W\|_H^2$).
+navigation triple (sea metric, wind, causality scalar $\lambda = 1 - \lVert W \rVert_H^2$).
 
 Consumers branch on `isinstance(metric, AsymmetricMetric)` to access the wind
 field — a `jit`-safe replacement for the fragile `hasattr(..., '_get_zermelo_data')`
@@ -110,12 +110,12 @@ inside `jax.jit`).
 
 ## 3. The Metric Hierarchy
 
-Concrete metrics live in `ham.geometry.zoo`; learnable ones in `ham.models`.
+Concrete metrics live in `finslerax.geometry.zoo`; learnable ones in `finslerax.models`.
 
 | Class | Module | `metric_fn(x, v)` |
 | :--- | :--- | :--- |
-| `Euclidean` | `zoo` | $\|v\|$ |
-| `Riemannian` | `zoo` | $\sqrt{v^\top G(x)\, v}$ |
+| `Euclidean` | `zoo` | $\lVert v \rVert$ |
+| `Riemannian` | `zoo` | $\sqrt{v^\top G(x) v}$ |
 | `Randers` | `zoo` | Zermelo formula (§ 5 of MATH_SPEC) |
 | `DiscreteRanders` | `zoo` | anisotropic mesh metric via differentiable face weights |
 | `SegmentQuadratureMetric` | `zoo` | Gauss-quadrature segment cost (high-accuracy arc length) |
@@ -131,15 +131,23 @@ strongly-convex Finsler norm:
 
 ```python
 class Randers(AsymmetricMetric):
-    def __init__(self, manifold, h_net, w_net, epsilon=1e-5, use_wind=True): ...
-    def zermelo_data(self, x):   # symmetrize H, project & causally squash W, return (H, W, λ)
+    def __init__(self, manifold, h_net, w_net, epsilon=1e-5, use_wind=True,
+                 wind_mode="soft", wind_stiffness=WIND_STIFFNESS): ...
+    def zermelo_data(self, x):   # symmetrize H, causally clamp W, return (H, W, λ)
 ```
 
-The wind is squashed with a **$C^1$ map** applied at *all* magnitudes,
-`W_safe = (1-ε)·tanh(‖W‖_H)·W/‖W‖_H`, guaranteeing $\|W_{\text{safe}}\|_H <
-1-\varepsilon$ everywhere. An earlier gated squash introduced a discontinuity at
-$\|W\|_H = 0.5$ that violated Finsler regularity (review finding **W-RAND**); the
-smooth version replaced it.
+Two wind policies are available, selected by the static `wind_mode` field:
+
+- **`"soft"`** (default, for *learned* winds) scales $W$ by $\varphi(r)/r$ with
+  $\varphi$ the softplus smooth-minimum of `finslerax.utils.causal_wind_scale`. It is
+  $C^\infty$, guarantees the causal bound strictly, and — unlike a `tanh`
+  squash — leaves already-causal winds undistorted, bending only within a shell
+  of width $\sim 1/\kappa$ around the boundary. See `spec/MATH_SPEC.md` § 5.1.
+- **`"raw"`** (for *trusted, prescribed* fields such as a measured current)
+  passes $W$ through bit-exact and floors only $\lambda$ as a NaN guard.
+
+An earlier gated squash introduced a discontinuity at $r = 0.5$ that violated
+Finsler regularity (review finding **W-RAND**); the smooth version replaced it.
 
 ---
 
@@ -153,7 +161,8 @@ A geodesic *problem* (the spray ODE / minimizing action) is decoupled from the
 Integrates $\ddot x^i + 2G^i(x,\dot x) = 0$ by RK4. After each composite step the
 position is projected back to the manifold and the velocity to its tangent space
 to counter numerical drift. `shoot(metric, x0, v0, t_max)` returns the endpoint
-$\mathrm{Exp}_{x_0}(t_{\max} v_0)$ memory-efficiently via `lax.fori_loop`.
+of the geodesic leaving $x_0$ with initial velocity $t_{\max} v_0$,
+memory-efficiently via `lax.fori_loop`.
 
 ### 4.2 Boundary-value: `AVBDSolver` (`solvers/avbd.py`)
 
@@ -180,12 +189,12 @@ slowing of 1-D Laplacian relaxation on long/stiff paths), this solver takes a
 energy has a **block-tridiagonal** Hessian, so each step costs $O(N D^3)$ via the
 block-Thomas algorithm, and low-frequency deformations converge in a number of
 iterations **independent of $N$**. This is the recommended workhorse for long
-latent-space geodesics (see `spec/AVBD_LATENT_FINDINGS_2026-06-14.md`).
+latent-space geodesics.
 
 ### 4.4 Arrival times: the Eikonal family (`solvers/eikonal.py`, …)
 
 For *all-pairs-from-a-source* problems, solving the anisotropic Eikonal PDE is
-far cheaper than shooting many geodesics. HAM solves the **dual Randers /
+far cheaper than shooting many geodesics. finslerax solves the **dual Randers /
 Zermelo arrival-time PDE**
 
 $$(\nabla T - B)^\top G^{-1} (\nabla T - B) = 1, \qquad T(\text{source}) = 0,$$
@@ -213,13 +222,27 @@ can sit inside a training loss (`ArrivalTimeLoss`, `DenseArrivalTimeLoss`).
 - `graph_init` — kNN-graph + Dijkstra warm-starts for BVP solvers in latent space.
 - `coloring` — chain / greedy / mesh vertex colorings for parallel sweeps.
 
-### 4.6 Parallel transport: `BerwaldConnection` (`geometry/transport.py`)
+### 4.6 Parallel translation: `BerwaldConnection` (`geometry/transport.py`)
 
-Transports a vector along a curve using the **Berwald connection**, the unique
-connection induced by the geodesic spray. Its coefficients are the velocity
-Hessian of the spray, $^B\Gamma^i_{jk} = \partial^2 G^i / \partial v^j \partial
-v^k$, so transport is again an ODE driven by auto-differentiation. See
-`spec/MATH_SPEC.md` § 3.
+Translates a vector along a curve using the **Berwald connection** induced by
+the geodesic spray. Its coefficients are the spray's velocity gradient,
+$G^i_j = \partial G^i / \partial y^j$, so translation is again an ODE driven by
+auto-differentiation:
+
+$$\frac{d X^i}{dt} + G^i_j(\gamma, X)\, \dot\gamma^j = 0 .$$
+
+The coefficients are evaluated at the *translated vector* $X$, which makes the
+map homogeneous of degree one rather than linear, and norm-preserving. This is
+the translation whose loops generate the holonomy group.
+
+`berwald_coefficients` returns the second-level coefficients
+$G^i_{jk} = \partial G^i_j / \partial y^k$
+for analysis — horizontal covariant derivatives, the infinitesimal
+holonomy algebra, and testing whether a metric is Berwald (they are
+$y$-independent exactly then). They deliberately do **not** back a second,
+linear transport: for a general Finsler metric they still depend on direction,
+so freezing them at $\dot\gamma$ is not canonical and does not preserve $F$.
+See `spec/MATH_SPEC.md` § 3.2.
 
 ### 4.7 Curvature (`geometry/curvature.py`)
 
@@ -232,7 +255,7 @@ nonlinear connection derived from the spray.
 ## 5. Module Structure
 
 ```text
-src/ham/
+src/finslerax/
 ├── geometry/
 │   ├── manifold.py          # Manifold ABC (eqx.Module)
 │   ├── manifolds/           # EuclideanSpace, Sphere, Torus, Hyperboloid, Paraboloid
@@ -256,7 +279,7 @@ src/ham/
 │   ├── eikonal.py / mesh_eikonal.py / volumetric_eikonal.py   # arrival-time PDEs
 │   ├── continuation.py / graph_init.py / coloring.py          # warm-starts, homotopy
 ├── training/
-│   ├── pipeline.py          # HAMPipeline, TrainingPhase
+│   ├── pipeline.py          # TrainingPipeline, TrainingPhase
 │   ├── losses.py            # geometry-aware loss components
 │   └── losses_ebm.py        # contrastive divergence, denoising score matching
 ├── sim/                     # analytic vector fields (Rossby–Haurwitz, vortices)
@@ -265,7 +288,7 @@ src/ham/
 
 examples/        # runnable demo scripts + notebooks
 spec/            # MATH_SPEC.md, ARCH_SPEC.md
-tests/           # 36 test modules, dual-precision
+tests/           # 35 test modules, dual-precision
 ```
 
 ---
@@ -307,7 +330,7 @@ A declarative description of one stage: `name`, `epochs`, an
 marking trainable vs. frozen leaves, consumed by `eqx.partition`), and
 `requires_pairs`, which switches on paired or tripled batching.
 
-### 6.4 `HAMPipeline`
+### 6.4 `TrainingPipeline`
 
 Executes phases in sequence. For each phase it partitions the model via
 `filter_spec`, initializes the optimizer on the trainable partition, runs vmapped
@@ -326,15 +349,16 @@ skipped, with a printed notice, when the dataset supplies neither
 1. **Geometry core** — `metric.py`, `zoo/`, `manifolds/`, `mesh.py`, exercised by
    the test suite in both precisions. `FinslerMetric` auto-differentiates the
    energy to the spray; `Randers` / `DiscreteRanders` implement Zermelo
-   navigation; curvature and Berwald transport are validated on `Sphere`,
+   navigation; curvature and parallel translation are validated on `Sphere`,
    `Torus`, `Hyperboloid`, and triangular meshes.
 2. **Geodesic solvers** — `ExponentialMap` (IVP), `AVBDSolver` (BVP, with
    parallel + implicit-diff modes), and `GaussNewtonGeodesic` (global BVP).
 3. **Eikonal solvers** — grid, volumetric (3-D), and mesh arrival-time PDEs with
    implicit gradients; used inside arrival-time training losses.
-4. **Parallel transport** — Berwald connection verified for norm preservation on
-   the sphere and non-trivial Randers holonomy.
-5. **Training pipeline** — `HAMPipeline` with per-phase freezing, paired and
+4. **Parallel translation** — the Berwald connection's horizontal translation,
+   verified for norm preservation on the sphere, homogeneity, auto-parallel
+   geodesics, and non-trivial Randers holonomy.
+5. **Training pipeline** — `TrainingPipeline` with per-phase freezing, paired and
    tripled batching, and the modular loss library above.
 6. **Applications.** Worked end-to-end applications are developed on their own
    branches so that the framework itself stays dependency-light:

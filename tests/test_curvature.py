@@ -21,8 +21,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ham.geometry import Euclidean, EuclideanSpace, Randers, Riemannian, Sphere
-from ham.geometry.curvature import (
+from finslerax.geometry import Euclidean, EuclideanSpace, Randers, Riemannian, Sphere
+from finslerax.geometry.curvature import (
     flag_curvature_sample,
     riemann_curvature_tensor,
     sectional_curvature,
@@ -93,7 +93,7 @@ class TestRiemannCurvatureTensor(unittest.TestCase):
         This must hold for any 2-homogeneous spray.
         (Bao-Chern-Shen, Lemma 2.3.1)
         """
-        from ham.geometry.curvature import _nonlinear_connection
+        from finslerax.geometry.curvature import _nonlinear_connection
 
         def curved_g(x):
             return jnp.diag(jnp.array([1.0 + x[0] ** 2, 1.0 + x[1] ** 2]))

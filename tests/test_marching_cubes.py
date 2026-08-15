@@ -1,7 +1,10 @@
 import jax
 import jax.numpy as jnp
 
-from ham.vis.isosurface import compute_analytical_normals, differentiable_marching_cubes
+from finslerax.vis.isosurface import (
+    compute_analytical_normals,
+    differentiable_marching_cubes,
+)
 
 
 def test_marching_cubes_gradients():

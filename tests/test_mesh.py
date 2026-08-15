@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ham.geometry.mesh import TriangularMesh
+from finslerax.geometry.mesh import TriangularMesh
 
 
 class TestMeshManifold(unittest.TestCase):
