@@ -59,7 +59,7 @@ holonomy:
 The transport and holonomy machinery in this library implements that line of
 work rather than reproducing a textbook.
 
-[issue](https://github.com/hubibala/finslerax/issues).
+**Contact:** open an [issue](https://github.com/hubibala/finslerax/issues).
 
 ---
 
