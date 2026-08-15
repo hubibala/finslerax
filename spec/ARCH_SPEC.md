@@ -1,10 +1,10 @@
-# ARCH_SPEC.md — Software Architecture of HAM
+# ARCH_SPEC.md — Software Architecture of finslerax
 
 **Dependencies:** JAX, Equinox, Optax
 
 ## 1. Design Philosophy
 
-`HAM` (distributed as `hamtools`) is a JAX-native library for learning and
+`finslerax` (distributed as `finslerax`) is a JAX-native library for learning and
 manipulating Finsler geometries. Unlike static differential-geometry libraries
 (e.g. `geomstats`), it prioritizes **generative** and **learning** use-cases
 where the metric is a neural network rather than an analytical formula.
@@ -33,8 +33,8 @@ where the metric is a neural network rather than an analytical formula.
 
 `Manifold` defines the domain $\mathcal{M}$ and how to stay on it. It does *not*
 define distance — that is the metric's job. Concrete manifolds live in
-`ham.geometry.manifolds` (`EuclideanSpace`, `Sphere`, `Torus`, `Hyperboloid`,
-`Paraboloid`) and `ham.geometry.mesh` (`TriangularMesh`).
+`finslerax.geometry.manifolds` (`EuclideanSpace`, `Sphere`, `Torus`, `Hyperboloid`,
+`Paraboloid`) and `finslerax.geometry.mesh` (`TriangularMesh`).
 
 ```python
 class Manifold(eqx.Module):
@@ -110,7 +110,7 @@ inside `jax.jit`).
 
 ## 3. The Metric Hierarchy
 
-Concrete metrics live in `ham.geometry.zoo`; learnable ones in `ham.models`.
+Concrete metrics live in `finslerax.geometry.zoo`; learnable ones in `finslerax.models`.
 
 | Class | Module | `metric_fn(x, v)` |
 | :--- | :--- | :--- |
@@ -139,7 +139,7 @@ class Randers(AsymmetricMetric):
 Two wind policies are available, selected by the static `wind_mode` field:
 
 - **`"soft"`** (default, for *learned* winds) scales $W$ by $\varphi(r)/r$ with
-  $\varphi$ the softplus smooth-minimum of `ham.utils.causal_wind_scale`. It is
+  $\varphi$ the softplus smooth-minimum of `finslerax.utils.causal_wind_scale`. It is
   $C^\infty$, guarantees the causal bound strictly, and — unlike a `tanh`
   squash — leaves already-causal winds undistorted, bending only within a shell
   of width $\sim 1/\kappa$ around the boundary. See `spec/MATH_SPEC.md` § 5.1.
@@ -194,7 +194,7 @@ latent-space geodesics.
 ### 4.4 Arrival times: the Eikonal family (`solvers/eikonal.py`, …)
 
 For *all-pairs-from-a-source* problems, solving the anisotropic Eikonal PDE is
-far cheaper than shooting many geodesics. HAM solves the **dual Randers /
+far cheaper than shooting many geodesics. finslerax solves the **dual Randers /
 Zermelo arrival-time PDE**
 
 $$(\nabla T - B)^\top G^{-1} (\nabla T - B) = 1, \qquad T(\text{source}) = 0,$$
@@ -255,7 +255,7 @@ nonlinear connection derived from the spray.
 ## 5. Module Structure
 
 ```text
-src/ham/
+src/finslerax/
 ├── geometry/
 │   ├── manifold.py          # Manifold ABC (eqx.Module)
 │   ├── manifolds/           # EuclideanSpace, Sphere, Torus, Hyperboloid, Paraboloid
@@ -279,7 +279,7 @@ src/ham/
 │   ├── eikonal.py / mesh_eikonal.py / volumetric_eikonal.py   # arrival-time PDEs
 │   ├── continuation.py / graph_init.py / coloring.py          # warm-starts, homotopy
 ├── training/
-│   ├── pipeline.py          # HAMPipeline, TrainingPhase
+│   ├── pipeline.py          # TrainingPipeline, TrainingPhase
 │   ├── losses.py            # geometry-aware loss components
 │   └── losses_ebm.py        # contrastive divergence, denoising score matching
 ├── sim/                     # analytic vector fields (Rossby–Haurwitz, vortices)
@@ -330,7 +330,7 @@ A declarative description of one stage: `name`, `epochs`, an
 marking trainable vs. frozen leaves, consumed by `eqx.partition`), and
 `requires_pairs`, which switches on paired or tripled batching.
 
-### 6.4 `HAMPipeline`
+### 6.4 `TrainingPipeline`
 
 Executes phases in sequence. For each phase it partitions the model via
 `filter_spec`, initializes the optimizer on the trainable partition, runs vmapped
@@ -358,7 +358,7 @@ skipped, with a printed notice, when the dataset supplies neither
 4. **Parallel translation** — the Berwald connection's horizontal translation,
    verified for norm preservation on the sphere, homogeneity, auto-parallel
    geodesics, and non-trivial Randers holonomy.
-5. **Training pipeline** — `HAMPipeline` with per-phase freezing, paired and
+5. **Training pipeline** — `TrainingPipeline` with per-phase freezing, paired and
    tripled batching, and the modular loss library above.
 6. **Applications.** Worked end-to-end applications are developed on their own
    branches so that the framework itself stays dependency-light:

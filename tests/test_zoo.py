@@ -4,11 +4,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ham.geometry import DiscreteRanders, Euclidean, Randers, Riemannian
+from finslerax.geometry import DiscreteRanders, Euclidean, Randers, Riemannian
 
 # Ensure 64-bit precision for rigorous geometric testing
-from ham.geometry.manifold import Manifold
-from ham.utils.math import PSD_EPS
+from finslerax.geometry.manifold import Manifold
+from finslerax.utils.math import PSD_EPS
 
 
 class FlatPlane(Manifold):

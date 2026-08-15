@@ -62,7 +62,7 @@ jobs:
 
     - name: Mypy
       run: |
-        uv run mypy src/ham
+        uv run mypy src/finslerax
 
   build:
     runs-on: ubuntu-latest
@@ -98,7 +98,7 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11"]
         # Numerical precision matrix: run the whole suite in both float32 and
-        # float64 so float64 support cannot silently rot (see ham.utils.config).
+        # float64 so float64 support cannot silently rot (see finslerax.utils.config).
         jax-x64: ["0", "1"]
 
     name: py${{ matrix.python-version }} x64=${{ matrix.jax-x64 }}

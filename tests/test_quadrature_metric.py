@@ -6,9 +6,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ham.geometry import EuclideanSpace, Riemannian, SegmentQuadratureMetric
-from ham.geometry.zoo import Euclidean
-from ham.solvers import AVBDSolver
+from finslerax.geometry import EuclideanSpace, Riemannian, SegmentQuadratureMetric
+from finslerax.geometry.zoo import Euclidean
+from finslerax.solvers import AVBDSolver
 
 
 def bump_metric(D, height=50.0, width=0.05):

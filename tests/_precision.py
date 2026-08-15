@@ -1,13 +1,13 @@
 """Precision-aware helpers for the dual-mode (float32/float64) test suite.
 
 The suite runs under both JAX precisions — ``JAX_ENABLE_X64=0`` and ``=1`` (see
-``ham.utils.config`` and the CI matrix). These helpers let a single assertion or
+``finslerax.utils.config`` and the CI matrix). These helpers let a single assertion or
 tolerance adapt to the active precision instead of hardcoding ``float32``.
 """
 
 import numpy as np
 
-from ham.utils.config import default_dtype, x64_enabled
+from finslerax.utils.config import default_dtype, x64_enabled
 
 __all__ = ["assert_default_dtype", "tol", "x64_enabled"]
 

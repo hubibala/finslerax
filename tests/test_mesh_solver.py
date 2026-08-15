@@ -4,9 +4,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ham.geometry.mesh import TriangularMesh
-from ham.geometry.zoo import DiscreteRanders, Euclidean
-from ham.solvers.avbd import AVBDSolver
+from finslerax.geometry.mesh import TriangularMesh
+from finslerax.geometry.zoo import DiscreteRanders, Euclidean
+from finslerax.solvers.avbd import AVBDSolver
 
 
 class TestMeshSolver(unittest.TestCase):

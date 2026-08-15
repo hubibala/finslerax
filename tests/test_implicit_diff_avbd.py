@@ -12,11 +12,11 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
-from ham.geometry.manifolds import EuclideanSpace
-from ham.geometry.zoo import Riemannian
-from ham.models.learned import NeuralRanders
-from ham.solvers.avbd import AVBDSolver
-from ham.training.losses import ArrivalTimeLoss
+from finslerax.geometry.manifolds import EuclideanSpace
+from finslerax.geometry.zoo import Riemannian
+from finslerax.models.learned import NeuralRanders
+from finslerax.solvers.avbd import AVBDSolver
+from finslerax.training.losses import ArrivalTimeLoss
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -291,7 +291,7 @@ class TestConstrainedAndCurvedGradients:
         sign, which the pre-fix adjoint (missing the penalty Hessian) failed
         by >100x.
         """
-        from ham.geometry.zoo import Riemannian
+        from finslerax.geometry.zoo import Riemannian
 
         manifold = EuclideanSpace(2)
         solver = AVBDSolver(
@@ -320,8 +320,8 @@ class TestConstrainedAndCurvedGradients:
 
     def test_fd_agreement_sphere(self):
         """IFT gradients on a curved manifold (sphere) track FD."""
-        from ham.geometry import Sphere
-        from ham.geometry.zoo import Riemannian
+        from finslerax.geometry import Sphere
+        from finslerax.geometry.zoo import Riemannian
 
         sphere = Sphere()
         p0 = jnp.array([1.0, 0.0, 0.0])
@@ -358,7 +358,7 @@ class TestConstrainedAndCurvedGradients:
         plus per-sweep dual updates used to blow the solve up *after* it had
         converged (violation 0.8 at 300 iterations vs 1e-4 at 25).
         """
-        from ham.geometry.zoo import Riemannian
+        from finslerax.geometry.zoo import Riemannian
 
         manifold = EuclideanSpace(2)
         m = Riemannian(manifold, _DiagMetricFn2(jnp.array(1.3)))

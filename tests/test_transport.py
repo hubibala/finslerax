@@ -13,10 +13,10 @@ import jax.numpy as jnp
 import numpy as np
 
 # Ensure precision for geometric drift checks
-from ham.geometry import EuclideanSpace, Sphere
-from ham.geometry.transport import BerwaldConnection
-from ham.geometry.zoo import Euclidean, Randers, Riemannian
-from ham.solvers import ExponentialMap
+from finslerax.geometry import EuclideanSpace, Sphere
+from finslerax.geometry.transport import BerwaldConnection
+from finslerax.geometry.zoo import Euclidean, Randers, Riemannian
+from finslerax.solvers import ExponentialMap
 
 
 class TestTransport(unittest.TestCase):
@@ -141,7 +141,7 @@ class TestTransport(unittest.TestCase):
         additivity must fail — this is what stops the coefficients from being
         Christoffel symbols of any linear connection on M.
         """
-        from ham.geometry.metric import FinslerMetric
+        from finslerax.geometry.metric import FinslerMetric
 
         class DiagMetric(FinslerMetric):
             def metric_fn(self, x, v):
@@ -195,7 +195,7 @@ class TestTransport(unittest.TestCase):
         position-dependent Riemannian metric qualifies; Randers with sheared
         wind does not. This is the direct dual of the additivity test above.
         """
-        from ham.geometry.metric import FinslerMetric
+        from finslerax.geometry.metric import FinslerMetric
 
         class DiagMetric(FinslerMetric):
             def metric_fn(self, x, v):
@@ -230,8 +230,8 @@ class TestTransport(unittest.TestCase):
         Levi-Civita symbols. This is real coverage of the spray's second
         velocity derivative against closed-form values.
         """
-        from ham.geometry.metric import FinslerMetric
-        from ham.utils.math import safe_norm
+        from finslerax.geometry.metric import FinslerMetric
+        from finslerax.utils.math import safe_norm
 
         class PoincareMetric(FinslerMetric):
             """Poincare half-plane metric: F(x, v) = ||v|| / y."""
@@ -530,8 +530,8 @@ class TestTransport(unittest.TestCase):
             If Gamma were incorrectly zero, the vector would stay at (1, 0),
             and the metric norm would drop to 1/e ≈ 0.368 (wrong).
         """
-        from ham.geometry.metric import FinslerMetric
-        from ham.utils.math import safe_norm
+        from finslerax.geometry.metric import FinslerMetric
+        from finslerax.utils.math import safe_norm
 
         class PoincareMetric(FinslerMetric):
             """Poincaré half-plane metric: F(x, v) = ||v|| / y."""

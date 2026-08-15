@@ -15,7 +15,7 @@ updates:
       prefix: "deps"
     # This is a library, so its constraints are floors: "the oldest version we
     # still work with". The default strategy raises them to whatever released
-    # most recently, which shrinks the set of environments hamtools can be
+    # most recently, which shrinks the set of environments finslerax can be
     # co-installed into and tests nothing new. increase-if-necessary only opens
     # a PR when a release is genuinely excluded by our constraint. Security
     # updates are unaffected by this setting.

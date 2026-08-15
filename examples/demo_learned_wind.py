@@ -5,14 +5,19 @@ import matplotlib.pyplot as plt
 import numpy as np
 import optax
 
-from ham.geometry import Sphere
-from ham.models.learned import NeuralRanders
-from ham.sim.fields import rossby_haurwitz
-from ham.vis import generate_icosphere, plot_sphere, plot_vector_field, setup_3d_plot
+from finslerax.geometry import Sphere
+from finslerax.models.learned import NeuralRanders
+from finslerax.sim.fields import rossby_haurwitz
+from finslerax.vis import (
+    generate_icosphere,
+    plot_sphere,
+    plot_vector_field,
+    setup_3d_plot,
+)
 
 
 def main():
-    print("--- HAM Metric Learning ---")
+    print("--- finslerax Metric Learning ---")
     print(
         "Fitting a wind field with Jacobian regularization for smooth vector lengths."
     )

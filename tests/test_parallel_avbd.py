@@ -4,10 +4,14 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ham.geometry import Sphere
-from ham.geometry.zoo import Euclidean, Randers
-from ham.solvers.avbd import AVBDSolver
-from ham.solvers.coloring import chain_coloring, greedy_coloring, mesh_vertex_coloring
+from finslerax.geometry import Sphere
+from finslerax.geometry.zoo import Euclidean, Randers
+from finslerax.solvers.avbd import AVBDSolver
+from finslerax.solvers.coloring import (
+    chain_coloring,
+    greedy_coloring,
+    mesh_vertex_coloring,
+)
 
 
 class TestChainColoring(unittest.TestCase):
@@ -97,7 +101,7 @@ class TestParallelAVBDSolver(unittest.TestCase):
 
     def test_parallel_euclidean_straight_line(self):
         """Parallel solver should find a straight line in Euclidean space."""
-        from ham.geometry.manifolds.euclidean_space import EuclideanSpace
+        from finslerax.geometry.manifolds.euclidean_space import EuclideanSpace
 
         metric = Euclidean(EuclideanSpace(dim=2))
         solver = AVBDSolver(iterations=50, step_size=0.1, parallel=True)
@@ -185,7 +189,7 @@ class TestParallelAVBDSolver(unittest.TestCase):
 
     def test_parallel_matches_sequential_energy_order(self):
         """Parallel solver energy should be within 2x of sequential."""
-        from ham.geometry.manifolds.euclidean_space import EuclideanSpace
+        from finslerax.geometry.manifolds.euclidean_space import EuclideanSpace
 
         metric = Euclidean(EuclideanSpace(dim=3))
         solver_seq = AVBDSolver(iterations=80, step_size=0.1, parallel=False)

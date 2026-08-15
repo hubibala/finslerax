@@ -35,7 +35,7 @@ body:
     id: versions
     attributes:
       label: Versions
-      description: Output of `python -c "import ham, jax; print(ham.__version__, jax.__version__)"`
+      description: Output of `python -c "import finslerax, jax; print(finslerax.__version__, jax.__version__)"`
       placeholder: "1.0.0 0.4.35"
     validations:
       required: true

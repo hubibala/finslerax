@@ -1,10 +1,10 @@
-# HAM — Differentiable Finsler Geometry in JAX
+# finslerax — Differentiable Finsler Geometry in JAX
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![JAX](https://img.shields.io/badge/backend-JAX-green.svg)](https://github.com/google/jax)
 
-**HAM** (*Holonomic Association Model*) is a JAX-native library for learnable
+**finslerax** (*Holonomic Association Model*) is a JAX-native library for learnable
 Finsler geometry. You supply a cost function $F(x, v)$ — the price of moving
 through point $x$ in direction $v$ — and the library derives what follows:
 geodesics, the geodesic spray, curvature, and parallel transport. Metrics are
@@ -17,8 +17,8 @@ ocean currents, gravity in a robot's joint space, and spreading fronts
 expressible as geometry.
 
 ```python
-from ham.geometry import Randers, EuclideanSpace
-from ham.solvers import AVBDSolver
+from finslerax.geometry import Randers, EuclideanSpace
+from finslerax.solvers import AVBDSolver
 import jax.numpy as jnp
 
 # A plane with a steady eastward wind — moving with it is cheaper.
@@ -69,18 +69,18 @@ the transport and holonomy machinery it needed is why every piece here exists.
 ## Installation
 
 ```bash
-git clone https://github.com/hubibala/HAM.git
-cd HAM
+git clone https://github.com/hubibala/finslerax.git
+cd finslerax
 pip install -e ".[dev]"          # core + dev tooling (pytest, ruff, matplotlib, …)
-pip install -e ".[viz]"          # core + plotting (matplotlib, plotly) for ham.vis
+pip install -e ".[viz]"          # core + plotting (matplotlib, plotly) for finslerax.vis
 ```
 
-The distribution is named **`hamtools`**; you import it as **`ham`**.
+The distribution is named **`finslerax`**; you import it as **`finslerax`**.
 
 | Extra | Installs | For |
 | :--- | :--- | :--- |
 | `dev` | pytest, ruff, mypy, matplotlib, jupyter, plotly | development and examples |
-| `viz` | matplotlib, plotly | the `ham.vis` plotting helpers |
+| `viz` | matplotlib, plotly | the `finslerax.vis` plotting helpers |
 | `gpu` | `jax[cuda12]` | NVIDIA GPU acceleration |
 
 The core install carries only the geometry and solver stack: JAX, Equinox,
@@ -92,7 +92,7 @@ of which the `gpu` extra covers the common CUDA 12 case.
 
 ## Numerical precision
 
-Precision is governed by JAX's own `jax_enable_x64` flag, which HAM reads. The
+Precision is governed by JAX's own `jax_enable_x64` flag, which finslerax reads. The
 default is **float32**. To run in float64, set the standard environment variable
 before Python starts:
 
@@ -105,16 +105,16 @@ Equivalently, in-process before the first array is created:
 ```python
 import jax
 jax.config.update("jax_enable_x64", True)
-import ham   # now float64
+import finslerax   # now float64
 ```
 
 That switch flips the whole stack, because precision is decided at the
 data-construction boundary and the solvers follow the dtype they are given.
 Stability floors (`GRAD_EPS`, `PSD_EPS`, `TAYLOR_EPS`, …) scale with it. Query
-the active setting through `ham.utils.config`:
+the active setting through `finslerax.utils.config`:
 
 ```python
-from ham.utils.config import x64_enabled, default_dtype, default_np_dtype
+from finslerax.utils.config import x64_enabled, default_dtype, default_np_dtype
 ```
 
 Reach for float64 on stiff or ill-conditioned solves: long AVBD geodesics, fine
@@ -134,8 +134,8 @@ lands on the pole:
 
 ```python
 import jax.numpy as jnp
-from ham.geometry import Sphere, Euclidean
-from ham.solvers import ExponentialMap
+from finslerax.geometry import Sphere, Euclidean
+from finslerax.solvers import ExponentialMap
 
 sphere = Sphere(intrinsic_dim=2, radius=1.0)
 metric = Euclidean(sphere)                  # round metric induced from the ambient norm
@@ -158,8 +158,8 @@ cheaper downwind, so forward and backward arc length differ:
 
 ```python
 import jax.numpy as jnp
-from ham.geometry import EuclideanSpace, Randers
-from ham.solvers import AVBDSolver
+from finslerax.geometry import EuclideanSpace, Randers
+from finslerax.solvers import AVBDSolver
 
 manifold = EuclideanSpace(dim=2)
 metric = Randers(manifold,
@@ -184,8 +184,8 @@ underlying drift:
 
 ```python
 import jax, jax.numpy as jnp, optax, equinox as eqx
-from ham.geometry import EuclideanSpace
-from ham.models.learned import NeuralRanders
+from finslerax.geometry import EuclideanSpace
+from finslerax.models.learned import NeuralRanders
 
 key = jax.random.PRNGKey(42)
 metric = NeuralRanders(EuclideanSpace(dim=8), key, hidden_dim=64, depth=3)
@@ -207,7 +207,7 @@ runnable version that recovers a Rossby–Haurwitz wind on the sphere with
 smoothness regularization.
 
 For generative latent-geometry models — a VAE whose latent space carries a
-learned Randers metric — `ham.training.HAMPipeline` orchestrates multi-phase
+learned Randers metric — `finslerax.training.TrainingPipeline` orchestrates multi-phase
 training with per-phase freezing and geometry-aware losses such as
 `ZermeloAlignmentLoss` and `EulerLagrangeResidualLoss`. Those losses expect a
 model exposing `encode`, `decode` and `metric` rather than a bare metric; see
@@ -217,7 +217,7 @@ model exposing `encode`, `decode` and `metric` rather than a bare metric; see
 
 ## Core concepts
 
-HAM separates where you are (topology) from how costly motion is (geometry),
+finslerax separates where you are (topology) from how costly motion is (geometry),
 then layers solvers on top.
 
 | Layer | Abstraction | Concrete types |
@@ -248,7 +248,7 @@ design is in [`spec/ARCH_SPEC.md`](spec/ARCH_SPEC.md).
 ## Repository structure
 
 ```text
-src/ham/
+src/finslerax/
 ├── geometry/     # Manifold and FinslerMetric ABCs, manifolds/, mesh, zoo/,
 │                 # transport (Berwald connection), curvature (flag/sectional/Riemann)
 ├── models/       # learned.py: neural, pullback, energy-based, kernel metrics
@@ -257,7 +257,7 @@ src/ham/
 ├── solvers/      # geodesic (IVP), avbd + gauss_newton + geodesic_learning (BVP),
 │                 # eikonal / mesh_eikonal / volumetric_eikonal (arrival times),
 │                 # continuation, graph_init, coloring (warm-starts)
-├── training/     # HAMPipeline, TrainingPhase, geometry-aware losses
+├── training/     # TrainingPipeline, TrainingPhase, geometry-aware losses
 └── sim/ utils/ vis/   # analytic fields, numerics, terrain, plotting
 
 examples/        # runnable demo scripts + Jupyter notebooks
@@ -289,13 +289,13 @@ plots live in [`examples/notebooks/`](examples/notebooks/).
 End-to-end applications live on their own branches, so installing the library
 never pulls in domain data loaders or their dependencies.
 
-[**Wildfire spread**](https://github.com/hubibala/HAM/tree/app/wildfire) models a
+[**Wildfire spread**](https://github.com/hubibala/finslerax/tree/app/wildfire) models a
 fire front as the unit-time level sets of an anisotropic Randers metric, with
 terrain and fuel setting the symmetric part and wind the drift. It builds on
 `CovariateConditionedRanders`, the differentiable `EikonalSolver`, and the
 covariate-encoder training loop.
 
-[**Robot-arm geodesics**](https://github.com/hubibala/HAM/tree/app/robot-arm)
+[**Robot-arm geodesics**](https://github.com/hubibala/finslerax/tree/app/robot-arm)
 plans energy-optimal motion in configuration space. The arm's mass matrix is the
 Riemannian metric, gravity enters as a Randers drift, obstacles fold into the
 metric, and task constraints are enforced with augmented Lagrangian terms. It
@@ -332,7 +332,7 @@ on CPU. If you hit accelerator initialization in a CPU-only environment, set
 
 ## Development and AI disclosure
 
-HAM was developed with substantial assistance from AI coding tools (Anthropic's
+finslerax was developed with substantial assistance from AI coding tools (Anthropic's
 Claude), used for implementation, tests and documentation throughout. The
 mathematics is validated against the published literature and a numerical test
 suite that runs in both float32 and float64, and every component has been
@@ -347,9 +347,9 @@ policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 ```bibtex
 @software{ham2026,
   author = {Hubicska, Bal\'azs Attila},
-  title  = {HAM: Differentiable Finsler Geometry in JAX},
+  title  = {finslerax: Differentiable Finsler Geometry in JAX},
   year   = {2026},
-  url    = {https://github.com/hubibala/HAM}
+  url    = {https://github.com/hubibala/finslerax}
 }
 ```
 
