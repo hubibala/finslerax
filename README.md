@@ -4,7 +4,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![JAX](https://img.shields.io/badge/backend-JAX-green.svg)](https://github.com/google/jax)
 
-**finslerax** (*Holonomic Association Model*) is a JAX-native library for learnable
+**finslerax** is a JAX-native library for learnable
 Finsler geometry. You supply a cost function $F(x, v)$ — the price of moving
 through point $x$ in direction $v$ — and the library derives what follows:
 geodesics, the geodesic spray, curvature, and parallel transport. Metrics are
@@ -33,6 +33,29 @@ print(metric.arc_length(traj.xs),          # downwind cost  ≈ 1.19
       metric.arc_length(traj.xs[::-1]))     # upwind cost    ≈ 1.83
 ```
 
+**Documentation:** <https://finslerax-docs.vercel.app/>
+
+---
+
+## Author
+
+finslerax is written by **Balázs Hubicska**, whose research is in Finsler
+holonomy:
+
+- B. Hubicska, V. S. Matveev & Z. Muzsnay, *Almost all Finsler metrics have
+  infinite dimensional holonomy group*, **Journal of Geometric Analysis** (2020).
+  [doi:10.1007/s12220-020-00517-9](https://doi.org/10.1007/s12220-020-00517-9)
+- B. Hubicska & Z. Muzsnay, *Holonomy in the quantum navigation problem*,
+  **Quantum Information Processing** 18:325 (2019).
+  [doi:10.1007/s11128-019-2438-8](https://doi.org/10.1007/s11128-019-2438-8)
+- B. Hubicska & Z. Muzsnay, *The holonomy group of projectively flat Randers
+  spaces*.
+
+The transport and holonomy machinery in this library implements that line of
+work rather than reproducing a textbook.
+
+[issue](https://github.com/hubibala/finslerax/issues).
+
 ---
 
 ## Features
@@ -55,14 +78,46 @@ print(metric.arc_length(traj.xs),          # downwind cost  ≈ 1.19
 - Multi-phase training schedules with per-phase parameter freezing compose from
   a library of geometry-aware losses.
 
-### Why "Holonomic Association Model"
+### The HAM research programme
 
-The name records the research program the library grew out of: representing
-context as geometry. Parallel transport moves a representation between contexts
-along a path, and holonomy — the path dependence of that transport — is what the
-geometry remembers. Associations between states become geodesics of a learned,
-possibly asymmetric, metric. The library is useful well beyond that program, but
-the transport and holonomy machinery it needed is why every piece here exists.
+The library grew out of a programme called HAM (*Holonomic Association Model*):
+representing context as geometry. Parallel transport moves a representation
+between contexts along a path, and holonomy — the path dependence of that
+transport — is what the geometry remembers. Associations between states become
+geodesics of a learned, possibly asymmetric, metric. HAM remains the name of that
+research line; **finslerax** is the name of the software. The library is useful
+well beyond the programme, but the transport and holonomy machinery it needed is
+why every piece here exists.
+
+---
+
+## Prior art
+
+The eikonal stack here follows **Gahtan, Shpund & Bronstein**, *Differentiable
+Eikonal Wildfire Modelling* ([arXiv:2603.00035](https://arxiv.org/abs/2603.00035),
+[code](https://github.com/BarakGahtan/differentiable-eikonal-wildfire), MIT).
+Their algorithm and their reference implementation are what this was built from:
+fast sweeping forward, adjoint fixed-point backward, with the metric produced by
+a convolutional encoder over rasterized covariates. The JAX implementation and
+the Finsler generalization are new here; the design is theirs.
+
+Three parts of this repository are directly downstream of that paper and say so
+in their docstrings:
+
+- [`solvers/eikonal.py`](src/finslerax/solvers/eikonal.py) — the fast-sweeping
+  anisotropic Godunov solver with `jax.custom_vjp` implicit gradients.
+- [`models/covariate.py`](src/finslerax/models/covariate.py) — `LocalTerrainCNN`
+  follows their §6 encoder architecture; `CovariateConditionedRanders` uses their
+  $\lambda = 1$ Zermelo parametrization.
+- [`training/losses.py`](src/finslerax/training/losses.py) — the arrival-time
+  metric-recovery loss follows their §5.
+
+The [wildfire application branch](https://github.com/hubibala/finslerax/tree/app/wildfire)
+is a companion study to that paper and carries the full comparison.
+
+Foundational Finsler material follows Bao, Chern & Shen, *An Introduction to
+Riemann–Finsler Geometry* (Springer GTM 200, 2000); the anisotropic
+fast-marching literature of Jean-Marie Mirebeau informs the eikonal design.
 
 ---
 
@@ -345,8 +400,8 @@ policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Citation
 
 ```bibtex
-@software{ham2026,
-  author = {Hubicska, Bal\'azs Attila},
+@software{finslerax2026,
+  author = {Hubicska, Bal\'azs},
   title  = {finslerax: Differentiable Finsler Geometry in JAX},
   year   = {2026},
   url    = {https://github.com/hubibala/finslerax}

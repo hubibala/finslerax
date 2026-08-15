@@ -5,7 +5,7 @@ abstract: "A JAX-native library for learnable Finsler geometry: metrics are neur
 type: software
 authors:
   - family-names: "Hubicska"
-    given-names: "Balázs Attila"
+    given-names: "Balázs"
 repository-code: "https://github.com/hubibala/finslerax"
 license: MIT
 keywords:
