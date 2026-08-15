@@ -13,11 +13,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ham.geometry import EuclideanSpace
-from ham.geometry.manifold import Manifold
-from ham.geometry.metric import FinslerMetric
-from ham.geometry.zoo import Randers
-from ham.utils.math import safe_norm
+from finslerax.geometry import EuclideanSpace
+from finslerax.geometry.manifold import Manifold
+from finslerax.geometry.metric import FinslerMetric
+from finslerax.geometry.zoo import Randers
+from finslerax.utils.math import safe_norm
 
 # ---------- Module-Level Tolerance ----------
 ATOL = 1e-5

@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 
 # Use 64-bit precision for geometric checks
-from ham.geometry.manifolds import Hyperboloid
+from finslerax.geometry.manifolds import Hyperboloid
 
 
 class TestHyperboloid(unittest.TestCase):

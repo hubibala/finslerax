@@ -2,10 +2,10 @@ import equinox as eqx
 import jax.numpy as jnp
 from _precision import tol
 
-from ham.geometry.manifolds import EuclideanSpace
-from ham.geometry.metric import AsymmetricMetric
-from ham.geometry.zoo import Randers
-from ham.solvers.eikonal import EikonalSolver, _fast_sweeping_solve
+from finslerax.geometry.manifolds import EuclideanSpace
+from finslerax.geometry.metric import AsymmetricMetric
+from finslerax.geometry.zoo import Randers
+from finslerax.solvers.eikonal import EikonalSolver, _fast_sweeping_solve
 
 
 class DummyRandersMetric(AsymmetricMetric):

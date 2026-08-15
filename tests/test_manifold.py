@@ -5,8 +5,8 @@ import jax.numpy as jnp
 import numpy as np
 from jax.test_util import check_grads
 
-from ham.geometry import Torus
-from ham.geometry.manifold import Manifold, _safe_norm_ratio
+from finslerax.geometry import Torus
+from finslerax.geometry.manifold import Manifold, _safe_norm_ratio
 
 
 class MockManifold(Manifold):

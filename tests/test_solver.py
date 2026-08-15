@@ -10,13 +10,13 @@ import unittest
 import equinox as eqx
 import jax.numpy as jnp
 
-from ham.geometry import Paraboloid, Sphere, Torus
-from ham.geometry.manifolds.euclidean_space import EuclideanSpace
-from ham.geometry.zoo import Euclidean, Randers
+from finslerax.geometry import Paraboloid, Sphere, Torus
+from finslerax.geometry.manifolds.euclidean_space import EuclideanSpace
+from finslerax.geometry.zoo import Euclidean, Randers
 
 # Enforce High Precision
-from ham.solvers.avbd import AVBDSolver
-from ham.utils.math import safe_norm
+from finslerax.solvers.avbd import AVBDSolver
+from finslerax.utils.math import safe_norm
 
 
 class SolverTestBase(unittest.TestCase):

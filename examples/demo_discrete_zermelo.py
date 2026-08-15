@@ -3,9 +3,9 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ham.geometry import DiscreteRanders, Randers, Sphere, TriangularMesh
-from ham.solvers import AVBDSolver
-from ham.vis import (
+from finslerax.geometry import DiscreteRanders, Randers, Sphere, TriangularMesh
+from finslerax.solvers import AVBDSolver
+from finslerax.vis import (
     generate_icosphere,
     plot_indicatrices,
     plot_sphere,

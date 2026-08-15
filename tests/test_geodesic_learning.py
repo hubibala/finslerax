@@ -5,7 +5,7 @@ Geodesic Learning Integration Tests
 Verifies that the NeuralRanders metric can recover known synthetic vector
 fields from trajectory pair data, using the modular training pipeline.
 
-Strategy: Two-phase training via HAMPipeline.
+Strategy: Two-phase training via TrainingPipeline.
   Phase 1 (Alignment):  Train W(x) to align with log_map(start, end).
   Phase 2 (Refinement): Optionally refine with geodesic action via AVBD.
 
@@ -24,11 +24,11 @@ import jax
 import jax.numpy as jnp
 import optax
 
-from ham.geometry import EuclideanSpace, Hyperboloid, Sphere
-from ham.models.learned import NeuralRanders
-from ham.training.losses import LossComponent
-from ham.training.pipeline import HAMPipeline, TrainingPhase
-from ham.utils.math import safe_norm
+from finslerax.geometry import EuclideanSpace, Hyperboloid, Sphere
+from finslerax.models.learned import NeuralRanders
+from finslerax.training.losses import LossComponent
+from finslerax.training.pipeline import TrainingPhase, TrainingPipeline
+from finslerax.utils.math import safe_norm
 
 # ──────────────────────────────────────────────────────────
 # Synthetic data helpers
@@ -204,7 +204,7 @@ class MetricModel(eqx.Module):
 
 
 class PairDataset:
-    """Minimal dataset wrapper compatible with HAMPipeline."""
+    """Minimal dataset wrapper compatible with TrainingPipeline."""
 
     def __init__(self, starts, ends):
         self.X = starts
@@ -266,7 +266,7 @@ def train_wind_field(
         requires_pairs=False,  # We use X=starts, V=ends directly
     )
 
-    pipeline = HAMPipeline(model)
+    pipeline = TrainingPipeline(model)
     trained = pipeline.fit(ds, [phase], batch_size=batch_size, seed=seed)
     return trained
 

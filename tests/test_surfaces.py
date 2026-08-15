@@ -5,7 +5,7 @@ import jax.numpy as jnp
 import numpy as np
 
 # Use 64-bit precision for geometric checks
-from ham.geometry import EuclideanSpace, Hyperboloid, Paraboloid, Sphere, Torus
+from finslerax.geometry import EuclideanSpace, Hyperboloid, Paraboloid, Sphere, Torus
 
 
 class SurfaceTestMixin:

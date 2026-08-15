@@ -4,11 +4,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ham.geometry import Sphere
-from ham.geometry.zoo import Euclidean, Randers
+from finslerax.geometry import Sphere
+from finslerax.geometry.zoo import Euclidean, Randers
 
 # Use Double Precision
-from ham.solvers.avbd import AVBDSolver
+from finslerax.solvers.avbd import AVBDSolver
 
 
 class TestAVBDSolver(unittest.TestCase):
@@ -80,7 +80,7 @@ class TestAVBDSolver(unittest.TestCase):
 
         # We'll use Euclidean metric on R^3 (not on the Paraboloid manifold)
         # to see if the constraint alone can pull the path to the surface.
-        from ham.geometry.manifolds.euclidean_space import EuclideanSpace
+        from finslerax.geometry.manifolds.euclidean_space import EuclideanSpace
 
         metric = Euclidean(EuclideanSpace(dim=3))
 

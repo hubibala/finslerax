@@ -4,11 +4,11 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
-from ham.geometry.manifolds import EuclideanSpace
-from ham.geometry.zoo import Riemannian
-from ham.models.learned import NeuralRanders
-from ham.solvers.avbd import AVBDSolver
-from ham.training.losses import ArrivalTimeLoss
+from finslerax.geometry.manifolds import EuclideanSpace
+from finslerax.geometry.zoo import Riemannian
+from finslerax.models.learned import NeuralRanders
+from finslerax.solvers.avbd import AVBDSolver
+from finslerax.training.losses import ArrivalTimeLoss
 
 
 def _identity_metric():

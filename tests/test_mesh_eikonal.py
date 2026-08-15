@@ -1,10 +1,10 @@
 import equinox as eqx
 import jax.numpy as jnp
 
-from ham.geometry.manifolds import EuclideanSpace
-from ham.geometry.mesh_adjacency import MeshAdjacency
-from ham.geometry.metric import AsymmetricMetric
-from ham.solvers.mesh_eikonal import MeshEikonalSolver, _fast_mesh_solve
+from finslerax.geometry.manifolds import EuclideanSpace
+from finslerax.geometry.mesh_adjacency import MeshAdjacency
+from finslerax.geometry.metric import AsymmetricMetric
+from finslerax.solvers.mesh_eikonal import MeshEikonalSolver, _fast_mesh_solve
 
 
 class DummyRandersMetric(AsymmetricMetric):
