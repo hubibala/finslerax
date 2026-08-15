@@ -16,8 +16,8 @@ import jax
 import jax.numpy as jnp
 import optax
 
-from ham.training.losses import LossComponent
-from ham.training.pipeline import HAMPipeline, TrainingPhase
+from finslerax.training.losses import LossComponent
+from finslerax.training.pipeline import TrainingPhase, TrainingPipeline
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -125,7 +125,7 @@ class TestParameterFreezing(unittest.TestCase):
             filter_spec=_filter_layer1,
         )
 
-        trained = HAMPipeline(model).fit(DummyDataset(), [phase], batch_size=5)
+        trained = TrainingPipeline(model).fit(DummyDataset(), [phase], batch_size=5)
 
         self.assertFalse(
             jnp.allclose(trained.layer1.weight, w1_init), "layer1 should update"
@@ -149,7 +149,7 @@ class TestParameterFreezing(unittest.TestCase):
             filter_spec=_filter_layer2,
         )
 
-        trained = HAMPipeline(model).fit(DummyDataset(), [phase], batch_size=5)
+        trained = TrainingPipeline(model).fit(DummyDataset(), [phase], batch_size=5)
 
         self.assertTrue(
             jnp.allclose(trained.layer1.weight, w1_init), "layer1 should stay frozen"
@@ -173,7 +173,7 @@ class TestParameterFreezing(unittest.TestCase):
             filter_spec=_filter_all,
         )
 
-        trained = HAMPipeline(model).fit(DummyDataset(), [phase], batch_size=5)
+        trained = TrainingPipeline(model).fit(DummyDataset(), [phase], batch_size=5)
 
         self.assertFalse(jnp.allclose(trained.layer1.weight, w1_init))
         self.assertFalse(jnp.allclose(trained.layer2.weight, w2_init))
@@ -238,7 +238,9 @@ class TestMultiPhaseExecution(unittest.TestCase):
             filter_spec=_filter_layer2,
         )
 
-        trained = HAMPipeline(model).fit(DummyDataset(), [phase1, phase2], batch_size=5)
+        trained = TrainingPipeline(model).fit(
+            DummyDataset(), [phase1, phase2], batch_size=5
+        )
 
         # Both layers should have changed — each in its own phase
         self.assertFalse(jnp.allclose(trained.layer1.weight, w1_init))
@@ -259,7 +261,7 @@ class TestMultiPhaseExecution(unittest.TestCase):
             requires_pairs=True,
         )
 
-        trained = HAMPipeline(model).fit(
+        trained = TrainingPipeline(model).fit(
             DummyDataset(pair_indices=None), [phase], batch_size=5
         )
 
@@ -284,7 +286,7 @@ class TestMultiPhaseExecution(unittest.TestCase):
         # Create a tiny dataset where targets are zeros
         ds = DummyDataset(n=10)
 
-        pipeline = HAMPipeline(model)
+        pipeline = TrainingPipeline(model)
         trained = pipeline.fit(ds, [phase], batch_size=10)
 
         # Evaluate initial vs final loss
@@ -317,7 +319,7 @@ class TestMultiPhaseExecution(unittest.TestCase):
             requires_pairs=True,
         )
 
-        trained = HAMPipeline(model).fit(ds, [phase], batch_size=5)
+        trained = TrainingPipeline(model).fit(ds, [phase], batch_size=5)
         self.assertFalse(
             jnp.allclose(trained.layer2.weight, w_init),
             "Weights should update when pairs are provided",
@@ -340,7 +342,7 @@ class TestMultiPhaseExecution(unittest.TestCase):
         )
 
         ds = DummyDataset(n=10)
-        trained = HAMPipeline(model).fit(ds, [phase], batch_size=5)
+        trained = TrainingPipeline(model).fit(ds, [phase], batch_size=5)
         # Should complete without error and weights should update
         self.assertFalse(
             jnp.allclose(trained.layer1.weight, model.layer1.weight),

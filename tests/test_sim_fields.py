@@ -1,4 +1,4 @@
-"""Tests for ham.sim.fields (analytic vector fields) and ham.utils.device."""
+"""Tests for finslerax.sim.fields (analytic vector fields) and finslerax.utils.device."""
 
 import unittest
 
@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ham.sim.fields import (
+from finslerax.sim.fields import (
     get_stream_function_flow,
     harmonic_vortices,
     lamb_oseen_vortex,
@@ -14,7 +14,7 @@ from ham.sim.fields import (
     rossby_haurwitz,
     tilted_rotation,
 )
-from ham.utils.device import configure_device, get_device
+from finslerax.utils.device import configure_device, get_device
 
 
 def sphere_points(n=32, seed=0):

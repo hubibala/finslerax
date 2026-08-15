@@ -4,7 +4,7 @@ Run: ``JAX_PLATFORMS=cpu pytest tests/test_flat_torus.py`` (and again with
 ``JAX_ENABLE_X64=1`` for the tight float64 guarantee).
 
 The Clifford torus is intrinsically flat, so every operation is closed-form and
-*exact* — a far stronger gate than the donut :class:`~ham.geometry.manifolds.torus.Torus`
+*exact* — a far stronger gate than the donut :class:`~finslerax.geometry.manifolds.torus.Torus`
 (whose ``log_map`` is only approximate). These tests are the geometry contract the
 robot-arm experiment's metric/solver stack stands on: a wrong torus silently bends
 every geodesic.
@@ -22,7 +22,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from _precision import tol
 
-from ham.geometry.manifolds import EuclideanSpace, FlatTorus
+from finslerax.geometry.manifolds import EuclideanSpace, FlatTorus
 
 jax.config.update("jax_platform_name", "cpu")
 

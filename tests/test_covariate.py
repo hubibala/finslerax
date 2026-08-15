@@ -14,8 +14,8 @@ import numpy as np
 import pytest
 from _precision import assert_default_dtype
 
-from ham.geometry.manifolds import EuclideanSpace
-from ham.models.covariate import (
+from finslerax.geometry.manifolds import EuclideanSpace
+from finslerax.models.covariate import (
     CovariateConditionedRanders,
     LocalTerrainCNN,
     project_b_norm,

@@ -3,9 +3,9 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 
-from ham.geometry import Randers, Sphere
-from ham.solvers import AVBDSolver
-from ham.vis import (
+from finslerax.geometry import Randers, Sphere
+from finslerax.solvers import AVBDSolver
+from finslerax.vis import (
     generate_icosphere,
     plot_sphere,
     plot_trajectory,
@@ -28,7 +28,7 @@ def vortex_field(center, strength=1.0, decay=2.0):
 
 
 def main():
-    print("--- HAM Vortex Demo: solver behavior in a stiff metric ---")
+    print("--- finslerax Vortex Demo: solver behavior in a stiff metric ---")
 
     # 1. Setup Strong Vortex
     sphere = Sphere(radius=1.0)

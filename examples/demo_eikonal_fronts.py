@@ -27,11 +27,11 @@ import numpy as np
 from matplotlib import cm
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
-from ham.geometry import Randers, Sphere
-from ham.geometry.manifolds import EuclideanSpace
-from ham.geometry.mesh_adjacency import MeshAdjacency
-from ham.solvers import MeshEikonalSolver, VolumetricEikonalSolver
-from ham.vis import differentiable_marching_cubes, generate_icosphere
+from finslerax.geometry import Randers, Sphere
+from finslerax.geometry.manifolds import EuclideanSpace
+from finslerax.geometry.mesh_adjacency import MeshAdjacency
+from finslerax.solvers import MeshEikonalSolver, VolumetricEikonalSolver
+from finslerax.vis import differentiable_marching_cubes, generate_icosphere
 
 OUT_DIR = Path(__file__).parent / "visualizations"
 OUT_DIR.mkdir(exist_ok=True)

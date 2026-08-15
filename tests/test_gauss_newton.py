@@ -6,8 +6,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ham.geometry import EuclideanSpace, Riemannian
-from ham.solvers import (
+from finslerax.geometry import EuclideanSpace, Riemannian
+from finslerax.solvers import (
     AVBDSolver,
     GaussNewtonGeodesic,
     resample_path,
@@ -98,7 +98,7 @@ class TestGaussNewtonGeodesic(unittest.TestCase):
     def test_block_thomas_matches_dense_solve(self):
         """_block_thomas is exact for non-commuting blocks (regression: the forward
         elimination must use A_k @ inv(Bprev), not inv(Bprev) @ A_k)."""
-        from ham.solvers.gauss_newton import _block_thomas
+        from finslerax.solvers.gauss_newton import _block_thomas
 
         rng = np.random.RandomState(0)
         n, D = 6, 3

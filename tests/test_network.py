@@ -11,8 +11,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ham.nn.networks import PSDMatrixField, RandomFourierFeatures, VectorField
-from ham.utils.math import PSD_EPS
+from finslerax.nn.networks import PSDMatrixField, RandomFourierFeatures, VectorField
+from finslerax.utils.math import PSD_EPS
 
 
 class TestRandomFourierFeatures(unittest.TestCase):

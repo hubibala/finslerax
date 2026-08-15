@@ -5,7 +5,7 @@ import unittest
 import jax.numpy as jnp
 import numpy as np
 
-from ham.solvers import (
+from finslerax.solvers import (
     build_knn_graph,
     geodesic_graph_init,
     reparametrize_arclength,

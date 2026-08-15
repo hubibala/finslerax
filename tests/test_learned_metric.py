@@ -1,4 +1,4 @@
-"""Tests for learned metric classes in ham.models.learned.
+"""Tests for learned metric classes in finslerax.models.learned.
 
 Covers NeuralRanders (convexity, gradients, jit/vmap), NeuralRiemannian,
 PullbackRiemannian, PullbackGNet, and KernelWindField.
@@ -11,8 +11,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ham.geometry.manifold import Manifold
-from ham.models.learned import (
+from finslerax.geometry.manifold import Manifold
+from finslerax.models.learned import (
     KernelWindField,
     NeuralRanders,
     NeuralRiemannian,

@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from ham.utils.math import GRAD_EPS, safe_norm, safe_norm_additive
+from finslerax.utils.math import GRAD_EPS, safe_norm, safe_norm_additive
 
 
 def test_safe_norm_forward_zero():

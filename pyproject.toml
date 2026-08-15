@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hamtools"
+name = "finslerax"
 version = "1.0.0"
 description = "A differentiable library for learnable Finsler Geometry and Holonomic Association Models."
 readme = "README.md"
@@ -40,7 +40,7 @@ dev = [
     "ruff",
 ]
 viz = [
-    # ham.vis: matplotlib/plotly are imported at module level.
+    # finslerax.vis: matplotlib/plotly are imported at module level.
     "matplotlib>=3.5",
     "plotly>=5.0",
 ]
@@ -52,8 +52,8 @@ gpu = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/hubibala/HAM"
-Bug_Tracker = "https://github.com/hubibala/HAM/issues"
+Homepage = "https://github.com/hubibala/finslerax"
+Bug_Tracker = "https://github.com/hubibala/finslerax/issues"
 
 [tool.pytest.ini_options]
 minversion = "6.0"
@@ -80,10 +80,10 @@ exclude = [
 # [misc] errors elsewhere are still reported.
 [[tool.mypy.overrides]]
 module = [
-    "ham.geometry.zoo.*",
-    "ham.models.*",
-    "ham.solvers.mesh_eikonal",
-    "ham.utils.terrain",
+    "finslerax.geometry.zoo.*",
+    "finslerax.models.*",
+    "finslerax.solvers.mesh_eikonal",
+    "finslerax.utils.terrain",
 ]
 disable_error_code = ["misc"]
 
@@ -130,4 +130,4 @@ indent-style = "space"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["ham*"]
+include = ["finslerax*"]

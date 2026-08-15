@@ -1,12 +1,12 @@
-# MATH_SPEC.md: Mathematical Foundations of the HAM Library
+# MATH_SPEC.md: Mathematical Foundations of the finslerax Library
 
 **Version:** 1.3.0
 **Date:** August 2026
-**Project:** Holonomic Association Model (HAM)
+**Project:** Holonomic Association Model (finslerax)
 
 ## Abstract
 
-This document defines the mathematical specification of HAM, a differentiable geometry library for Finslerian representation learning. It sets out a hierarchy of geometric spaces — Euclidean, Riemannian, Randers — unified under the energy-based formalism, and derives the *geodesic spray* coefficients from the Euler-Lagrange equations. Parallel translation is the horizontal one carried by the **Berwald connection**, the connection the spray induces; it is homogeneous rather than linear, preserves the Finsler norm, and is the translation whose loops generate the Finslerian holonomy group.
+This document defines the mathematical specification of finslerax, a differentiable geometry library for Finslerian representation learning. It sets out a hierarchy of geometric spaces — Euclidean, Riemannian, Randers — unified under the energy-based formalism, and derives the *geodesic spray* coefficients from the Euler-Lagrange equations. Parallel translation is the horizontal one carried by the **Berwald connection**, the connection the spray induces; it is homogeneous rather than linear, preserves the Finsler norm, and is the translation whose loops generate the Finslerian holonomy group.
 
 ---
 
@@ -157,7 +157,7 @@ We verify that our implementation generalizes standard geometries.
 
 ### 4.1. Surface Formulations and Instabilities
 
-HAM provides exact analytical sub-manifolds (`Sphere`, `Hyperboloid`, `Torus`, `Paraboloid`). The Hyperboloid models the upper sheet in Minkowski space, with exact $\cosh/\sinh$ exponential and logarithmic maps.
+finslerax provides exact analytical sub-manifolds (`Sphere`, `Hyperboloid`, `Torus`, `Paraboloid`). The Hyperboloid models the upper sheet in Minkowski space, with exact $\cosh/\sinh$ exponential and logarithmic maps.
 
 *Limitation:* combining these exact maps with a deep learning loop inside a generative model is numerically fragile; the strongly curved cases (Sphere, Hyperboloid) can drive the solver to collapse. A flat `EuclideanSpace` latent is the recommended default.
 
@@ -203,7 +203,7 @@ $s = \varphi(r)/r$, where $\varphi$ is the temperature-controlled smooth minimum
 $\varphi$ is the identity to within $\sim e^{-\kappa(c-r)}/\kappa$ for $r < c$, so a
 requested wind of, say, $r=0.5$ is returned as $0.5$ (to $\sim 10^{-6}$), and bending
 is confined to a shell of width $\sim 1/\kappa$ around the causal boundary, where it
-is unavoidable. The stiffness $\kappa$ defaults to `ham.utils.WIND_STIFFNESS`.
+is unavoidable. The stiffness $\kappa$ defaults to `finslerax.utils.WIND_STIFFNESS`.
 
 > **Why not $\tanh$.** The obvious alternative $s = (1-\varepsilon)\tanh(r)/r$ also
 > enforces the bound smoothly, but $\tanh$ has slope $<1$ at the origin, so it bends
@@ -266,7 +266,7 @@ This preserves the direction but scales the magnitude correctly to avoid optimiz
 
 ## 7. The Eikonal Dual: Arrival Times
 
-Sections 2–4 describe the **primal** picture: a path $\gamma$ and its cost $\int F(\gamma, \dot\gamma) dt$. For *one-source-to-everywhere* problems it is far cheaper to solve the **dual** problem directly — the field of minimal arrival times $T(x)$ from a source set — without ever enumerating paths. This is the Finsler **eikonal equation**, and HAM's eikonal solvers implement it.
+Sections 2–4 describe the **primal** picture: a path $\gamma$ and its cost $\int F(\gamma, \dot\gamma) dt$. For *one-source-to-everywhere* problems it is far cheaper to solve the **dual** problem directly — the field of minimal arrival times $T(x)$ from a source set — without ever enumerating paths. This is the Finsler **eikonal equation**, and finslerax's eikonal solvers implement it.
 
 ### 7.1. Hamilton–Jacobi Form
 
