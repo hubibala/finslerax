@@ -49,7 +49,9 @@ holonomy:
   **Quantum Information Processing** 18:325 (2019).
   [doi:10.1007/s11128-019-2438-8](https://doi.org/10.1007/s11128-019-2438-8)
 - B. Hubicska & Z. Muzsnay, *The holonomy group of projectively flat Randers
-  spaces*.
+  two-manifolds of constant curvature* (2018).
+  [arXiv:1805.05216](https://arxiv.org/abs/1805.05216),
+  [doi:10.48550/arXiv.1805.05216](https://doi.org/10.48550/arXiv.1805.05216)
 
 The transport and holonomy machinery in this library implements that line of
 work rather than reproducing a textbook.
