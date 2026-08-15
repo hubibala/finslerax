@@ -45,6 +45,9 @@ holonomy:
 - B. Hubicska, V. S. Matveev & Z. Muzsnay, *Almost all Finsler metrics have
   infinite dimensional holonomy group*, **Journal of Geometric Analysis** (2020).
   [doi:10.1007/s12220-020-00517-9](https://doi.org/10.1007/s12220-020-00517-9)
+- B. Hubicska & Z. Muzsnay, *Tangent Lie algebra of a diffeomorphism group and
+  application to holonomy theory*, **Journal of Geometric Analysis** (2019).
+  [doi:10.1007/s12220-018-00138-3](https://doi.org/10.1007/s12220-018-00138-3)
 - B. Hubicska & Z. Muzsnay, *Holonomy in the quantum navigation problem*,
   **Quantum Information Processing** 18:325 (2019).
   [doi:10.1007/s11128-019-2438-8](https://doi.org/10.1007/s11128-019-2438-8)
