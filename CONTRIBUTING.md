@@ -8,16 +8,9 @@ new metrics/manifolds/solvers, and documentation improvements are all welcome.
 `main` is the framework: geometry, solvers, training, and the examples. It has
 no domain-specific code and no application data dependencies.
 
-Worked applications live on their own branches, each of which is `main` plus one
-application subtree:
-
-| Branch | Contains |
-| :--- | :--- |
-| `app/wildfire` | `experiments/wildfire/`, the `finslerax.data` raster loaders, the `wildfire` extra |
-| `app/robot-arm` | `experiments/arm/` and its Stage-D theory note |
-
-Send library changes to `main`, and application changes to the relevant `app/*`
-branch. When `main` moves, the application branches rebase onto it.
+Use short-lived branches for changes and open pull requests against `main`.
+Domain-specific research projects are maintained separately until their claims,
+data protocol, and dependency surface are ready for an independent release.
 
 ## Getting started
 
@@ -75,14 +68,17 @@ pip install pre-commit && pre-commit install
 
 ## AI-assisted contributions
 
-AI coding tools are welcome here, under the same terms as in the wider
-scientific Python ecosystem (NumPy, SciPy, scikit-learn):
+AI-assisted contributions are welcome when they meet the same quality bar as
+any other contribution:
 
 - **Disclose** the use of AI assistance in your PR description.
 - **Understand what you submit.** You must be able to explain and defend every
   line; "the model wrote it" is not an answer in review.
 - **Your effort must exceed the review effort.** Do not open PRs that outsource
   thinking to the maintainers — run the tests, check the math, trim the output.
+
+The human contributor remains responsible for the correctness, provenance, and
+licensing of everything submitted.
 
 Low-effort or unverified AI-generated PRs and issues will be closed without
 detailed review.

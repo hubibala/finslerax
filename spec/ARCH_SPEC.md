@@ -360,12 +360,10 @@ skipped, with a printed notice, when the dataset supplies neither
    geodesics, and non-trivial Randers holonomy.
 5. **Training pipeline** — `TrainingPipeline` with per-phase freezing, paired and
    tripled batching, and the modular loss library above.
-6. **Applications.** Worked end-to-end applications are developed on their own
-   branches so that the framework itself stays dependency-light:
-   - *Wildfire spread* (`app/wildfire`) — front propagation with
-     covariate-conditioned Randers metrics and the differentiable eikonal solver.
-   - *Robot-arm geodesics* (`app/robot-arm`) — configuration-space geodesic
-     motion planning with asymmetric (gravity-Randers) C-space cost.
+6. **Examples.** Runnable scripts and narrated notebooks exercise the public
+   framework without domain datasets or application-specific dependencies.
+   Research applications remain separate projects until they are ready for an
+   independent, reproducible release.
 
 ### Known limitations
 
