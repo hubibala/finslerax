@@ -38,32 +38,6 @@ print(metric.arc_length(traj.xs),          # downwind cost  ≈ 1.19
 
 ---
 
-## Author
-
-finslerax is written by **Balázs Hubicska**, whose research is in Finsler
-holonomy:
-
-- B. Hubicska, V. S. Matveev & Z. Muzsnay, *Almost all Finsler metrics have
-  infinite dimensional holonomy group*, **Journal of Geometric Analysis** (2020).
-  [doi:10.1007/s12220-020-00517-9](https://doi.org/10.1007/s12220-020-00517-9)
-- B. Hubicska & Z. Muzsnay, *Tangent Lie algebra of a diffeomorphism group and
-  application to holonomy theory*, **Journal of Geometric Analysis** (2019).
-  [doi:10.1007/s12220-018-00138-3](https://doi.org/10.1007/s12220-018-00138-3)
-- B. Hubicska & Z. Muzsnay, *Holonomy in the quantum navigation problem*,
-  **Quantum Information Processing** 18:325 (2019).
-  [doi:10.1007/s11128-019-2438-8](https://doi.org/10.1007/s11128-019-2438-8)
-- B. Hubicska & Z. Muzsnay, *The holonomy group of projectively flat Randers
-  two-manifolds of constant curvature* (2018).
-  [arXiv:1805.05216](https://arxiv.org/abs/1805.05216),
-  [doi:10.48550/arXiv.1805.05216](https://doi.org/10.48550/arXiv.1805.05216)
-
-The transport and holonomy machinery in this library implements that line of
-work rather than reproducing a textbook.
-
-**Contact:** open an [issue](https://github.com/hubibala/finslerax/issues).
-
----
-
 ## Features
 
 - Define $F(x, v)$ and the geodesic spray, fundamental tensor $g_{ij}$, Berwald
@@ -376,17 +350,10 @@ on CPU. If you hit accelerator initialization in a CPU-only environment, set
 
 ---
 
-## Development and AI disclosure
+## Contributing
 
-finslerax was developed with substantial assistance from AI coding tools (Anthropic's
-Claude), used for implementation, tests and documentation throughout. The
-mathematics is validated against the published literature and a numerical test
-suite that runs in both float32 and float64, and every component has been
-human-reviewed. Responsibility for correctness rests with the author, not the
-tools. If you find an error, please open an issue.
-
-Contributions are welcome, including AI-assisted ones, under the disclosure
-policy in [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the
+development workflow and contribution policy.
 
 ## Citation
 
