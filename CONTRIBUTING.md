@@ -8,16 +8,9 @@ new metrics/manifolds/solvers, and documentation improvements are all welcome.
 `main` is the framework: geometry, solvers, training, and the examples. It has
 no domain-specific code and no application data dependencies.
 
-Worked applications live on their own branches, each of which is `main` plus one
-application subtree:
-
-| Branch | Contains |
-| :--- | :--- |
-| `app/wildfire` | `experiments/wildfire/`, the `finslerax.data` raster loaders, the `wildfire` extra |
-| `app/robot-arm` | `experiments/arm/` and its Stage-D theory note |
-
-Send library changes to `main`, and application changes to the relevant `app/*`
-branch. When `main` moves, the application branches rebase onto it.
+Use short-lived branches for changes and open pull requests against `main`.
+Domain-specific research projects are maintained separately until their claims,
+data protocol, and dependency surface are ready for an independent release.
 
 ## Getting started
 

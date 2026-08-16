@@ -3,6 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![JAX](https://img.shields.io/badge/backend-JAX-green.svg)](https://github.com/google/jax)
+[![Tests](https://github.com/hubibala/finslerax/actions/workflows/test.yml/badge.svg)](https://github.com/hubibala/finslerax/actions/workflows/test.yml)
 
 **finslerax** is a JAX-native library for learnable
 Finsler geometry. You supply a cost function $F(x, v)$ — the price of moving
@@ -13,7 +14,7 @@ neural network and the whole pipeline stays differentiable end to end.
 
 Finsler geometry drops the Riemannian requirement that cost be symmetric.
 Travelling east can be cheaper than travelling west, which is what makes wind,
-ocean currents, gravity in a robot's joint space, and spreading fronts
+ocean currents, directed representation dynamics, and anisotropic propagation
 expressible as geometry.
 
 ```python
@@ -30,7 +31,7 @@ traj = AVBDSolver(iterations=50).solve(
     metric, jnp.array([0., 0.]), jnp.array([1., 1.]), n_steps=20)
 
 print(metric.arc_length(traj.xs),          # downwind cost  ≈ 1.19
-      metric.arc_length(traj.xs[::-1]))     # upwind cost    ≈ 1.83
+      metric.arc_length(traj.xs[::-1]))     # upwind cost    ≈ 1.85
 ```
 
 **Documentation:** <https://finslerax-docs.vercel.app/>
@@ -117,9 +118,6 @@ in their docstrings:
 - [`training/losses.py`](src/finslerax/training/losses.py) — the arrival-time
   metric-recovery loss follows their §5.
 
-The [wildfire application branch](https://github.com/hubibala/finslerax/tree/app/wildfire)
-is a companion study to that paper and carries the full comparison.
-
 Foundational Finsler material follows Bao, Chern & Shen, *An Introduction to
 Riemann–Finsler Geometry* (Springer GTM 200, 2000); the anisotropic
 fast-marching literature of Jean-Marie Mirebeau informs the eikonal design.
@@ -127,6 +125,12 @@ fast-marching literature of Jean-Marie Mirebeau informs the eikonal design.
 ---
 
 ## Installation
+
+```bash
+pip install finslerax
+```
+
+For development and the runnable examples:
 
 ```bash
 git clone https://github.com/hubibala/finslerax.git
@@ -232,7 +236,7 @@ traj = solver.solve(metric, jnp.array([0., 0.]), jnp.array([1., 1.]), n_steps=20
 L_fwd = float(metric.arc_length(traj.xs))
 L_bwd = float(metric.arc_length(traj.xs[::-1]))
 print(f"downwind: {L_fwd:.4f}, upwind: {L_bwd:.4f}")
-# downwind: 1.1939, upwind: 1.8305  — wind helps eastward travel
+# downwind: 1.1890, upwind: 1.8484  — wind helps eastward travel
 ```
 
 ### 3. Learn a metric from data
@@ -343,24 +347,6 @@ plots live in [`examples/notebooks/`](examples/notebooks/).
 | Parallel transport and holonomy | — | `demo_parallel_transport.ipynb` |
 | High-dimensional latent geodesics | — | `demo_high_dim_latent_geodesics.ipynb` |
 | Generic neural Finsler metric | — | `demo_generic_finsler.ipynb` |
-
-### Applications
-
-End-to-end applications live on their own branches, so installing the library
-never pulls in domain data loaders or their dependencies.
-
-[**Wildfire spread**](https://github.com/hubibala/finslerax/tree/app/wildfire) models a
-fire front as the unit-time level sets of an anisotropic Randers metric, with
-terrain and fuel setting the symmetric part and wind the drift. It builds on
-`CovariateConditionedRanders`, the differentiable `EikonalSolver`, and the
-covariate-encoder training loop.
-
-[**Robot-arm geodesics**](https://github.com/hubibala/finslerax/tree/app/robot-arm)
-plans energy-optimal motion in configuration space. The arm's mass matrix is the
-Riemannian metric, gravity enters as a Randers drift, obstacles fold into the
-metric, and task constraints are enforced with augmented Lagrangian terms. It
-builds on `AVBDSolver`, `GaussNewtonGeodesic`, continuation, and the eikonal
-planners.
 
 ---
 

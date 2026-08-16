@@ -15,7 +15,7 @@ nn       : Neural network building blocks (VectorField, PSDMatrixField, EBM, KDE
 sim, utils, vis : Analytical fields, numerics, visualization
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 # Core geometry
 from finslerax.geometry import (

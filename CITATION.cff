@@ -3,6 +3,7 @@ message: "If you use finslerax in your research, please cite it as below."
 title: "finslerax: Differentiable Finsler Geometry in JAX"
 abstract: "A JAX-native library for learnable Finsler geometry: metrics are neural-network-friendly Equinox modules, and geodesics, curvature and parallel transport follow by automatic differentiation."
 type: software
+version: "1.1.0"
 authors:
   - family-names: "Hubicska"
     given-names: "Balázs"
