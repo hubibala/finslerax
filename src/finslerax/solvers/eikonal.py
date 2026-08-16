@@ -13,6 +13,11 @@ Finsler distance from the source set to ``x`` under the primal Randers cost
 The solver alternates four directional Gauss-Seidel sweeps until steady state
 and provides O(1)-memory implicit gradients with respect to ``(G, B)`` via
 ``jax.custom_vjp`` (adjoint fixed-point iteration at the converged solution).
+
+The algorithm and its forward/adjoint structure follow Gahtan, Shpund & Bronstein
+(2026), arXiv:2603.00035, and their reference implementation
+(https://github.com/BarakGahtan/differentiable-eikonal-wildfire, MIT). The JAX
+implementation and the Finsler/Randers generalization are this library's.
 """
 
 import equinox as eqx
