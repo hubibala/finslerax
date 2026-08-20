@@ -29,6 +29,11 @@ class Riemannian(FinslerMetric):
         super().__init__(manifold=manifold)
         self.g_net = g_net
 
+    @property
+    def is_riemannian(self) -> bool:
+        """True by construction: F^2 = v^T G(x) v carries no v-dependence in g."""
+        return True
+
     def __repr__(self) -> str:
         return f"Riemannian(manifold={self.manifold})"
 

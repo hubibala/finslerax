@@ -261,11 +261,11 @@ then layers solvers on top.
 | Layer | Abstraction | Concrete types |
 | :--- | :--- | :--- |
 | Topology | `Manifold` | `EuclideanSpace`, `Sphere`, `Torus`, `Hyperboloid`, `Paraboloid`, `TriangularMesh` |
-| Geometry | `FinslerMetric` → `AsymmetricMetric` | `Euclidean`, `Riemannian`, `Randers`, `DiscreteRanders`, `SegmentQuadratureMetric` |
+| Geometry | `FinslerMetric` → `AsymmetricMetric` | `Euclidean`, `Riemannian`, `Randers`, `DiscreteRanders`, `SegmentQuadratureMetric`, `ProjectivelyFlatRanders` |
 | Learnable geometry | subclasses of the above | `NeuralRanders`, `NeuralRiemannian`, `PullbackRanders`, `PullbackRiemannian`, `KernelWindField`, … |
 | Geodesics | initial- and boundary-value solvers | `ExponentialMap`, `AVBDSolver`, `GaussNewtonGeodesic`, `GeodesicLearningSolver` |
 | Arrival times | anisotropic eikonal PDE | `EikonalSolver` (grid), `MeshEikonalSolver`, `VolumetricEikonalSolver` (3D) |
-| Transport and curvature | derived geometry | `BerwaldConnection`, `sectional_curvature`, `flag_curvature_sample`, `riemann_curvature_tensor` |
+| Transport and curvature | derived geometry | `BerwaldConnection`, `curvature_tensor`, `riemannian_curvature`, `ricci_curvature`, `flag_curvature`, `sectional_curvature` |
 
 Every `FinslerMetric` is an `eqx.Module`, hence a JAX PyTree, so any metric —
 including a neural one — passes straight through `jax.jit`, `jax.grad` and
@@ -288,7 +288,7 @@ design is in [`spec/ARCH_SPEC.md`](spec/ARCH_SPEC.md).
 ```text
 src/finslerax/
 ├── geometry/     # Manifold and FinslerMetric ABCs, manifolds/, mesh, zoo/,
-│                 # transport (Berwald connection), curvature (flag/sectional/Riemann)
+│                 # transport (Berwald connection), curvature (tensor/Ricci/flag/sectional)
 ├── models/       # learned.py: neural, pullback, energy-based, kernel metrics
 │                 # covariate.py: CovariateConditionedRanders, terrain CNN
 ├── nn/           # VectorField, PSDMatrixField, RandomFourierFeatures, EBM, KDE
@@ -319,6 +319,7 @@ plots live in [`examples/notebooks/`](examples/notebooks/).
 | Discrete (mesh) Zermelo metric | `demo_discrete_zermelo.py` | `demo_discrete_zermelo.ipynb` |
 | Anisotropic eikonal fronts | `demo_eikonal_fronts.py` | `demo_eikonal_fronts.ipynb` |
 | Parallel transport and holonomy | — | `demo_parallel_transport.ipynb` |
+| Curvature: flag, Ricci, sectional | — | `demo_curvature.ipynb` |
 | High-dimensional latent geodesics | — | `demo_high_dim_latent_geodesics.ipynb` |
 | Generic neural Finsler metric | — | `demo_generic_finsler.ipynb` |
 

@@ -1,6 +1,10 @@
 from .curvature import (
+    curvature_tensor,
+    flag_curvature,
     flag_curvature_sample,
+    ricci_curvature,
     riemann_curvature_tensor,
+    riemannian_curvature,
     sectional_curvature,
 )
 from .manifold import Manifold
@@ -18,6 +22,7 @@ from .transport import BerwaldConnection
 from .zoo import (
     DiscreteRanders,
     Euclidean,
+    ProjectivelyFlatRanders,
     Randers,
     Riemannian,
     SegmentQuadratureMetric,
@@ -33,13 +38,18 @@ __all__ = [
     "Hyperboloid",
     "Manifold",
     "Paraboloid",
+    "ProjectivelyFlatRanders",
     "Randers",
     "Riemannian",
     "SegmentQuadratureMetric",
     "Sphere",
     "Torus",
     "TriangularMesh",
+    "curvature_tensor",
+    "flag_curvature",
     "flag_curvature_sample",
+    "ricci_curvature",
     "riemann_curvature_tensor",
+    "riemannian_curvature",
     "sectional_curvature",
 ]

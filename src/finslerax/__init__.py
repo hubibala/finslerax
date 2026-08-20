@@ -15,7 +15,7 @@ nn       : Neural network building blocks (VectorField, PSDMatrixField, EBM, KDE
 sim, utils, vis : Analytical fields, numerics, visualization
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 # Core geometry
 from finslerax.geometry import (
@@ -24,10 +24,16 @@ from finslerax.geometry import (
     EuclideanSpace,
     Hyperboloid,
     Paraboloid,
+    ProjectivelyFlatRanders,
     Randers,
     Riemannian,
     Sphere,
     Torus,
+    curvature_tensor,
+    flag_curvature,
+    ricci_curvature,
+    riemannian_curvature,
+    sectional_curvature,
 )
 from finslerax.geometry.manifold import Manifold
 from finslerax.geometry.metric import FinslerMetric
@@ -50,10 +56,17 @@ __all__ = [
     # Geometry
     "Manifold",
     "Paraboloid",
+    "ProjectivelyFlatRanders",
     "Randers",
     "Riemannian",
     "Sphere",
     "Torus",
     "Trajectory",
     "__version__",
+    # Curvature
+    "curvature_tensor",
+    "flag_curvature",
+    "ricci_curvature",
+    "riemannian_curvature",
+    "sectional_curvature",
 ]

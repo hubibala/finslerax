@@ -141,6 +141,81 @@ By the Gauss-Bonnet theorem, the vector's bearing relative to the curve turns by
 
 For metrics defined in intrinsic coordinates where $g(x)$ is position-dependent (e.g. the Poincaré half-plane $ds^2 = (dx^2+dy^2)/y^2$), the coefficients are non-trivially non-zero and the ODE integration genuinely drives the translation.
 
+
+### 3.4. Curvature
+
+The horizontal distribution of § 3 is in general **non-integrable**, and the obstruction
+is the curvature. It is the Nijenhuis torsion of the horizontal projector,
+
+```math
+R_{(x,y)}(X, Y) = v\,[hX, hY],
+```
+
+so the distribution is integrable exactly when $R$ vanishes identically. In coordinates
+$R_{(x,y)} = R^i_{jk}(x,y)\, dx^j \otimes dx^k \otimes \frac{\partial}{\partial y^i}$ with
+
+```math
+R^i_{jk} = \frac{\partial G^i_j}{\partial x^k} - \frac{\partial G^i_k}{\partial x^j}
+         + G^m_j\, G^i_{km} - G^m_k\, G^i_{jm},
+```
+
+built from the connection coefficients $G^i_j$ of § 3 and the second-level coefficients
+$G^i_{jk}$ of § 3.2. `finslerax.geometry.curvature_tensor` returns it, by differentiating
+the spray rather than by implementing this formula. $R^i_{jk}$ is antisymmetric in $j$
+and $k$, to machine precision, for Finslerian metrics as well as Riemannian ones.
+
+#### The derived quantities
+
+Contracting the direction into the **first** lower index gives the **Jacobi
+endomorphism**, which the Finsler literature also calls the Riemannian curvature tensor
+of the manifold:
+
+```math
+R_y := R(y, \cdot), \qquad R^i_k = R^i_{jk}\, y^j .
+```
+
+Its trace is the **Ricci curvature** $\mathrm{Ric}(y) := \mathrm{tr}\, R_y$, and its
+quadratic form, normalized by the area of the flag, is the **flag curvature**. For a
+flag $P = \mathrm{span}\lbrace y, u \rbrace$ with flagpole $y$,
+
+```math
+\mathbf{K}(P, y) = \frac{g_y\big(R_y(u),\, u\big)}
+                       {g_y(y,y)\, g_y(u,u) - g_y(y,u)^2} .
+```
+
+**The flag curvature is a function of two arguments, not one.** A Riemannian sectional
+curvature depends only on the plane. Here the fundamental tensor $g_y$ is itself
+direction-dependent, so raising the flag from a different edge of the same plane
+genuinely changes the number — for a Randers metric it can change it several-fold. This
+is why the library exposes `flag_curvature(metric, x, y, u)` with the flagpole explicit,
+and why a single-argument "sectional curvature" of a Finsler metric is not well defined.
+
+#### Sign and index convention
+
+Sources disagree about which lower index carries the flagpole, and since $R^i_{jk}$ is
+antisymmetric in $j, k$ the other choice flips the sign of both $\mathbf{K}$ and
+$\mathrm{Ric}$. The convention above is pinned by two facts the tests assert:
+
+* $\mathbf{K} = +1$ on the round sphere, and $-1$ on the Poincaré half-plane;
+* $\mathrm{Ric}(y) = (n-1)\lambda F^2(x, y)$ at constant flag curvature $\lambda$, with
+  coefficients $R^i_{jk} = \lambda\big(\delta^i_k\, g_{jm}y^m - \delta^i_j\, g_{km}y^m\big)$.
+
+The second is checked against a genuinely **non-Riemannian** metric, because a Riemannian
+one cannot distinguish the two conventions in the presence of a compensating sign
+elsewhere. `finslerax.geometry.ProjectivelyFlatRanders` is Shen's standard model of
+projectively flat Randers metrics on the unit ball, whose flag curvature is the constant
+$-1/4$; with zero drift it is the Funk metric.
+
+#### Riemannian degeneration
+
+When the metric is Riemannian the flagpole drops out of $g_y$ and $\mathbf{K}(P, y)$
+becomes independent of it — the classical sectional curvature of the Levi-Civita
+connection, and the Gaussian curvature in two dimensions.
+`finslerax.geometry.sectional_curvature` performs that degeneration automatically. A
+metric declaring `is_riemannian` takes the direct path; any other is *verified* rather
+than assumed, by evaluating the same plane from both edges and requiring agreement, so
+the name cannot silently return one of several possible numbers.
+
 ---
 
 ## 4. The Geometric Hierarchy

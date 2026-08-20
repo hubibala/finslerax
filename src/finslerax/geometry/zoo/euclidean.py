@@ -20,6 +20,11 @@ class Euclidean(FinslerMetric):
         See `examples/demo_vortex.py`, `examples/demo_zermelo.py`.
     """
 
+    @property
+    def is_riemannian(self) -> bool:
+        """True: F = ||v|| is quadratic in v, so g_ij = delta_ij is direction-free."""
+        return True
+
     def __repr__(self) -> str:
         return f"Euclidean(manifold={self.manifold})"
 

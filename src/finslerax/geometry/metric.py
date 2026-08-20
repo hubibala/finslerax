@@ -40,6 +40,20 @@ class FinslerMetric(eqx.Module):
     manifold: Manifold
     spray_reg: float = eqx.field(static=True, default=PSD_EPS)
 
+    @property
+    def is_riemannian(self) -> bool:
+        """Whether the fundamental tensor g(x, v) is independent of v.
+
+        False by default, since a general Finsler metric is not Riemannian.
+        Subclasses that are quadratic in v by construction override it to True,
+        which lets direction-independent quantities such as
+        :func:`~finslerax.geometry.curvature.sectional_curvature` skip a
+        verification they would otherwise have to run. Declaring it True wrongly
+        leaves those quantities silently ill-defined, so override it only where
+        the class guarantees the property.
+        """
+        return False
+
     @abstractmethod
     def metric_fn(self, x: jax.Array, v: jax.Array) -> jax.Array:
         r"""
