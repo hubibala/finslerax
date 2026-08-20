@@ -79,6 +79,11 @@ class Randers(AsymmetricMetric):
                 f"wind_mode must be 'soft' or 'raw', got {self.wind_mode!r}"
             )
 
+    @property
+    def is_riemannian(self) -> bool:
+        """True only with the wind switched off, where F reduces to the sea sqrt(v^T H v)."""
+        return not self.use_wind
+
     def __repr__(self) -> str:
         return (
             f"Randers(manifold={self.manifold}, epsilon={self.epsilon}, "

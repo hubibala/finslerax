@@ -1,382 +1,442 @@
 """
-Tests for Finsler curvature quantities.
+Tests for Finsler curvature.
 
-Note on conventions:
-- `jax.numpy` (jnp) is used for all arrays that are JAX-traced.
-- `numpy` (np) is used strictly for non-traced assertions.
-- float64 is enabled for precision in 3rd/4th-order autodiff chains.
+The suite is built around metrics whose curvature is known in closed form, so
+that a wrong sign or a swapped index fails rather than merely looking plausible:
 
-Test structure:
-    1. Zero curvature (Euclidean flat space)
-    2. Known curvature (unit sphere, K = +1)
-    3. Mathematical properties (antisymmetry, Euler identity)
-    4. Numerical stability (safe division, near-degenerate planes)
-    5. JAX transform compatibility (jit, vmap, grad)
-    6. flag_curvature_sample (metric Gram-Schmidt, PRNG key API)
+    - Euclidean space and a constant Riemannian metric, K = 0.
+    - The stereographic round sphere, K = +1.
+    - The Poincare half-plane, K = -1.
+    - A surface of revolution, K = -1/(1+x^2)^2.
+    - ``ProjectivelyFlatRanders``, K = -1/4 — genuinely non-Riemannian, and the
+      only case here that can distinguish the two contraction conventions.
+
+Conventions:
+    ``jax.numpy`` for traced arrays, ``numpy`` for assertions. Tolerances come
+    from ``tests/_precision.tol`` so the file passes in float32 and verifies the
+    stronger float64 guarantee under x64.
 """
 
 import unittest
+import warnings
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
+from _precision import tol
 
-from finslerax.geometry import Euclidean, EuclideanSpace, Randers, Riemannian, Sphere
-from finslerax.geometry.curvature import (
+from finslerax.geometry import (
+    Euclidean,
+    EuclideanSpace,
+    ProjectivelyFlatRanders,
+    Randers,
+    Riemannian,
+    curvature_tensor,
+    flag_curvature,
     flag_curvature_sample,
+    ricci_curvature,
     riemann_curvature_tensor,
+    riemannian_curvature,
     sectional_curvature,
 )
 
-# ---------------------------------------------------------------------------
-# Shared metric-based Gram-Schmidt helper for test setup
-# ---------------------------------------------------------------------------
+# Curvature is a 4th-order autodiff chain, so it carries more float32 noise than
+# most of the suite; the float64 bound is what pins the mathematics.
+CURV_TOL = {"atol32": 3e-3, "rtol32": 3e-3, "atol64": 1e-6, "rtol64": 1e-6}
 
 
-def make_orthonormal_pair(metric, x, v1_raw, v2_raw):
-    """Return a metric-orthonormal pair (v1, v2) from raw ambient vectors."""
-    t1 = metric.manifold.to_tangent(x, v1_raw)
-    g11 = metric.inner_product(x, t1, t1, t1)
-    t1 = t1 / jnp.sqrt(jnp.maximum(g11, 1e-10))
-
-    t2 = metric.manifold.to_tangent(x, v2_raw)
-    g12 = metric.inner_product(x, t1, t1, t2)
-    g11n = metric.inner_product(x, t1, t1, t1)
-    t2 = t2 - (g12 / jnp.maximum(g11n, 1e-10)) * t1
-    g22 = metric.inner_product(x, t1, t2, t2)
-    t2 = t2 / jnp.sqrt(jnp.maximum(g22, 1e-10))
-    return t1, t2
+def sphere_g(x):
+    """Unit 2-sphere in stereographic coordinates. K = +1."""
+    return (4.0 / (1.0 + jnp.sum(x**2)) ** 2) * jnp.eye(2)
 
 
-class TestRiemannCurvatureTensor(unittest.TestCase):
+def half_plane_g(x):
+    """Poincare half-plane, g = I / y^2. K = -1."""
+    return jnp.eye(2) / x[1] ** 2
+
+
+def revolution_g(x):
+    """ds^2 = dx^2 + (1+x^2) dy^2. K = -1/(1+x^2)^2."""
+    return jnp.diag(jnp.array([1.0, 1.0 + x[0] ** 2]))
+
+
+def anisotropic_g(x):
+    """A curved, non-diagonal Riemannian metric with no closed-form K."""
+    return jnp.array([[1.0 + 0.3 * x[1] ** 2, 0.1 * x[0]], [0.1 * x[0], 1.0]])
+
+
+def swirl_wind(x):
+    """A position-dependent wind, so the Randers metric is genuinely Finslerian."""
+    return jnp.array([0.35 * jnp.sin(x[1]), 0.25 * jnp.cos(x[0])])
+
+
+def fundamental_tensor(metric, x, y):
+    """g_ij(x, y) = d^2 E / dy^i dy^j."""
+    return jax.hessian(metric.energy, argnums=1)(x, y)
+
+
+class TestCurvatureTensor(unittest.TestCase):
+    """R^i_jk itself: vanishing, antisymmetry, and the Euler identity."""
+
     def setUp(self):
         self.plane = EuclideanSpace(dim=2)
-        self.sphere = Sphere(intrinsic_dim=2, radius=1.0)
 
-    # -----------------------------------------------------------------------
-    # 1. Zero curvature — Euclidean flat space
-    # -----------------------------------------------------------------------
+    def test_euclidean_tensor_vanishes(self):
+        """Flat space has an integrable horizontal distribution, so R = 0."""
+        R = curvature_tensor(
+            Euclidean(self.plane), jnp.array([1.0, 2.0]), jnp.array([1.0, 0.0])
+        )
+        atol, _ = tol(**CURV_TOL)
+        np.testing.assert_allclose(R, jnp.zeros((2, 2, 2)), atol=atol)
 
-    def test_riemann_tensor_euclidean_is_zero(self):
-        """
-        For flat Euclidean space, the Riemann tensor must vanish identically.
-        This validates the entire autodiff pipeline for the zero-curvature baseline.
-        """
-        metric = Euclidean(self.plane)
-        x = jnp.array([1.0, 2.0])
-        v = jnp.array([1.0, 0.0])
+    def test_flat_riemannian_tensor_vanishes(self):
+        """A constant (but anisotropic) metric is still flat."""
+        metric = Riemannian(self.plane, lambda x: jnp.diag(jnp.array([2.0, 3.0])))
+        R = curvature_tensor(metric, jnp.array([1.0, 1.0]), jnp.array([1.0, 0.5]))
+        atol, _ = tol(**CURV_TOL)
+        np.testing.assert_allclose(R, jnp.zeros((2, 2, 2)), atol=atol)
 
-        R = riemann_curvature_tensor(metric, x, v)
-        np.testing.assert_allclose(R, jnp.zeros((2, 2, 2)), atol=1e-5)
+    def test_antisymmetry_in_lower_indices(self):
+        """R^i_jk = -R^i_kj, for Finslerian metrics as well as Riemannian ones."""
+        cases = [
+            Riemannian(self.plane, anisotropic_g),
+            Randers(self.plane, anisotropic_g, swirl_wind, wind_mode="raw"),
+        ]
+        for metric in cases:
+            with self.subTest(metric=type(metric).__name__):
+                x, y = jnp.array([0.2, -0.4]), jnp.array([1.0, 0.3])
+                R = curvature_tensor(metric, x, y)
+                scale = float(jnp.max(jnp.abs(R)))
+                self.assertGreater(scale, 1e-3, "test metric is too flat to be a test")
+                residual = float(jnp.max(jnp.abs(R + jnp.transpose(R, (0, 2, 1)))))
+                self.assertLess(residual / scale, 1e-5)
 
-    def test_riemann_tensor_antisymmetry(self):
-        """
-        R^i_jk must be antisymmetric in j and k: R^i_jk = -R^i_kj.
-        This is a fundamental algebraic identity of curvature tensors.
-        """
+    def test_jacobi_endomorphism_annihilates_the_flagpole(self):
+        """R_y(y) = R^i_jk y^j y^k = 0, straight from antisymmetry in j, k."""
+        metric = Randers(self.plane, anisotropic_g, swirl_wind, wind_mode="raw")
+        x, y = jnp.array([0.2, -0.4]), jnp.array([1.0, 0.3])
+        R_y = riemannian_curvature(metric, x, y)
+        scale = float(jnp.max(jnp.abs(R_y)))
+        self.assertGreater(scale, 1e-3)
+        self.assertLess(float(jnp.max(jnp.abs(R_y @ y))) / scale, 1e-5)
 
-        # Use a curved Riemannian metric so the tensor is non-trivially non-zero
-        def curved_g(x):
-            return jnp.diag(jnp.array([1.0, 1.0 + x[0] ** 2]))
+    def test_jacobi_endomorphism_is_two_homogeneous(self):
+        """R_{cy} = c^2 R_y, since R^i_jk is 1-homogeneous and y appears once."""
+        metric = Riemannian(self.plane, anisotropic_g)
+        x, y = jnp.array([0.2, -0.4]), jnp.array([1.0, 0.3])
+        atol, rtol = tol(**CURV_TOL)
+        np.testing.assert_allclose(
+            riemannian_curvature(metric, x, 2.0 * y),
+            4.0 * riemannian_curvature(metric, x, y),
+            atol=atol,
+            rtol=rtol,
+        )
 
-        metric = Riemannian(self.plane, curved_g)
-        x = jnp.array([1.0, 0.5])
-        v = jnp.array([0.7, 0.3])
-
-        R = riemann_curvature_tensor(metric, x, v)
-        # R[i, j, k] == -R[i, k, j]
-        np.testing.assert_allclose(R, -jnp.transpose(R, (0, 2, 1)), atol=1e-5)
-
-    def test_nonlinear_connection_euler_identity(self):
-        """
-        Euler homogeneity identity: N^i_j v^j = 2 G^i.
-        This must hold for any 2-homogeneous spray.
-        (Bao-Chern-Shen, Lemma 2.3.1)
-        """
-        from finslerax.geometry.curvature import _nonlinear_connection
-
-        def curved_g(x):
-            return jnp.diag(jnp.array([1.0 + x[0] ** 2, 1.0 + x[1] ** 2]))
-
-        metric = Riemannian(self.plane, curved_g)
-        x = jnp.array([1.0, 0.5])
-        v = jnp.array([0.7, 0.3])
-
-        N = _nonlinear_connection(metric, x, v)  # (D, D)
-        G = metric.spray(x, v)  # (D,)
-
-        # N^i_j v^j should equal 2 G^i
-        N_v = jnp.einsum("ij,j->i", N, v)
-        np.testing.assert_allclose(N_v, 2.0 * G, atol=1e-5)
+    def test_berwald_coefficients_satisfy_euler_identity(self):
+        """G^i_j y^j = 2 G^i, since the spray is 2-homogeneous in y."""
+        metric = Riemannian(self.plane, anisotropic_g)
+        x, y = jnp.array([0.3, 0.2]), jnp.array([1.0, -0.7])
+        coeffs = jax.jacfwd(metric.spray, argnums=1)(x, y)
+        atol, rtol = tol(**CURV_TOL)
+        np.testing.assert_allclose(
+            coeffs @ y, 2.0 * metric.spray(x, y), atol=atol, rtol=rtol
+        )
 
 
-class TestSectionalCurvature(unittest.TestCase):
+class TestKnownRiemannianCurvature(unittest.TestCase):
+    """Closed-form Riemannian surfaces, magnitude and sign."""
+
     def setUp(self):
         self.plane = EuclideanSpace(dim=2)
-        self.sphere = Sphere(intrinsic_dim=2, radius=1.0)
+        self.u = jnp.array([1.0, 0.0])
+        self.v = jnp.array([0.0, 1.0])
 
-    # -----------------------------------------------------------------------
-    # 2. Euclidean: K = 0
-    # -----------------------------------------------------------------------
+    def test_euclidean_is_flat(self):
+        K = sectional_curvature(
+            Euclidean(self.plane), jnp.array([0.0, 0.0]), self.u, self.v
+        )
+        atol, _ = tol(**CURV_TOL)
+        np.testing.assert_allclose(K, 0.0, atol=atol)
 
-    def test_sectional_curvature_euclidean_is_zero(self):
-        """Euclidean space has zero sectional curvature everywhere."""
-        metric = Euclidean(self.plane)
-        x = jnp.array([0.0, 0.0])
-        v1 = jnp.array([1.0, 0.0])
-        v2 = jnp.array([0.0, 1.0])
-
-        K = sectional_curvature(metric, x, v1, v2)
-        np.testing.assert_allclose(K, 0.0, atol=1e-5)
-
-    # -----------------------------------------------------------------------
-    # 3. Curved space test
-    # -----------------------------------------------------------------------
-
-    def test_sectional_curvature_stereographic_sphere_is_plus_one(self):
-        """Round sphere in stereographic coords has constant K = +1.
-
-        ``g = 4/(1+|x|^2)^2 I`` is the unit 2-sphere pulled back through
-        stereographic projection; its Gaussian curvature is +1 everywhere.
-        Asserts magnitude AND sign (the old test only checked ``abs(K)>1e-4``).
-        """
-
-        def sphere_g(x):
-            return (4.0 / (1.0 + jnp.sum(x**2)) ** 2) * jnp.eye(2)
-
+    def test_stereographic_sphere_is_plus_one(self):
+        """The sign here is what pins the contraction convention."""
         metric = Riemannian(self.plane, sphere_g)
-        v1 = jnp.array([1.0, 0.0])
-        v2 = jnp.array([0.0, 1.0])
+        atol, rtol = tol(**CURV_TOL)
         for xv in (0.0, 0.3, 0.7):
-            x = jnp.array([xv, 0.0])
-            K = float(sectional_curvature(metric, x, v1, v2))
-            self.assertAlmostEqual(K, 1.0, places=2, msg=f"K={K} at x={xv}")
+            with self.subTest(x=xv):
+                K = sectional_curvature(metric, jnp.array([xv, 0.0]), self.u, self.v)
+                np.testing.assert_allclose(K, 1.0, atol=atol, rtol=rtol)
 
-    def test_sectional_curvature_surface_of_revolution(self):
-        """``g = diag(1, 1+x^2)`` has analytic K = -1/(1+x^2)^2 (negative).
+    def test_poincare_half_plane_is_minus_one(self):
+        metric = Riemannian(self.plane, half_plane_g)
+        atol, rtol = tol(**CURV_TOL)
+        for xv, yv in ((0.0, 1.0), (0.5, 2.0), (-0.3, 0.7)):
+            with self.subTest(x=(xv, yv)):
+                K = sectional_curvature(metric, jnp.array([xv, yv]), self.u, self.v)
+                np.testing.assert_allclose(K, -1.0, atol=atol, rtol=rtol)
 
-        Surface of revolution ``ds^2 = dx^2 + f(x)^2 dy^2`` with
-        ``f = sqrt(1+x^2)`` gives ``K = -f''/f = -1/(1+x^2)^2``. Pins both
-        magnitude and (negative) sign against the closed form.
-        """
-
-        def curved_g(x):
-            return jnp.diag(jnp.array([1.0, 1.0 + x[0] ** 2]))
-
-        metric = Riemannian(self.plane, curved_g)
-        v1 = jnp.array([1.0, 0.0])
-        v2 = jnp.array([0.0, 1.0])
+    def test_surface_of_revolution_matches_closed_form(self):
+        metric = Riemannian(self.plane, revolution_g)
+        atol, rtol = tol(**CURV_TOL)
         for xv in (0.0, 0.5, 1.0):
-            x = jnp.array([xv, 0.0])
-            K = float(sectional_curvature(metric, x, v1, v2))
-            analytic = -1.0 / (1.0 + xv**2) ** 2
-            self.assertAlmostEqual(K, analytic, places=3, msg=f"K={K} at x={xv}")
+            with self.subTest(x=xv):
+                K = sectional_curvature(metric, jnp.array([xv, 0.0]), self.u, self.v)
+                expected = -1.0 / (1.0 + xv**2) ** 2
+                np.testing.assert_allclose(K, expected, atol=atol, rtol=rtol)
 
-    def test_sectional_curvature_flat_riemannian_is_zero(self):
-        """A flat Riemannian metric (constant g) gives K = 0 everywhere."""
 
-        def flat_g(x):
-            return jnp.diag(jnp.array([2.0, 3.0]))  # anisotropic but flat
+class TestProjectivelyFlatRanders(unittest.TestCase):
+    """The non-Riemannian oracle: constant flag curvature -1/4.
 
-        metric = Riemannian(self.plane, flat_g)
-        x = jnp.array([1.0, 1.0])
-        v1 = jnp.array([1.0, 0.0])
-        v2 = jnp.array([0.0, 1.0])
+    Every other non-zero curvature assertion in this file is Riemannian, and a
+    Riemannian metric cannot distinguish the two contraction conventions from
+    each other in the presence of a compensating sign elsewhere. This one can.
+    """
 
-        K = sectional_curvature(metric, x, v1, v2)
-        np.testing.assert_allclose(K, 0.0, atol=1e-5)
+    def _metrics(self, dim):
+        M = EuclideanSpace(dim=dim)
+        zero = jnp.zeros((dim,))
+        drift = jnp.array([0.3, *[0.0] * (dim - 1)])
+        return [
+            ("funk", ProjectivelyFlatRanders(M, a=zero)),
+            ("drift", ProjectivelyFlatRanders(M, a=drift)),
+            ("drift_neg", ProjectivelyFlatRanders(M, a=drift, epsilon=-1.0)),
+        ]
 
-    # -----------------------------------------------------------------------
-    # 4. Degenerate-plane guard
-    # -----------------------------------------------------------------------
+    def test_flag_curvature_is_minus_one_quarter(self):
+        """Constant at every point, in every flag, from every flagpole."""
+        atol, rtol = tol(**CURV_TOL)
+        for dim in (2, 3):
+            pad = [0.15] * (dim - 2)
+            points = [[0.0] * dim, [0.25, 0.1, *pad], [-0.3, 0.4, *pad]]
+            flags = [
+                ([1.0, 0.3, *pad], [0.2, 1.0, *pad]),
+                ([-0.6, 0.9, *pad], [1.0, 0.1, *pad]),
+            ]
+            for name, metric in self._metrics(dim):
+                for x in points:
+                    for y, u in flags:
+                        with self.subTest(dim=dim, metric=name, x=x, y=y):
+                            K = flag_curvature(
+                                metric, jnp.array(x), jnp.array(y), jnp.array(u)
+                            )
+                            np.testing.assert_allclose(K, -0.25, atol=atol, rtol=rtol)
 
-    def test_degenerate_plane_returns_zero(self):
+    def test_ricci_matches_constant_curvature_identity(self):
+        """Ric(y) = (n-1) * lambda * F^2(x, y)."""
+        atol, rtol = tol(**CURV_TOL)
+        for dim in (2, 3):
+            pad = [0.15] * (dim - 2)
+            for name, metric in self._metrics(dim):
+                for x, y in (
+                    ([0.0] * dim, [1.0, 0.3, *pad]),
+                    ([0.25, 0.1, *pad], [-0.6, 0.9, *pad]),
+                ):
+                    with self.subTest(dim=dim, metric=name, x=x):
+                        x_a, y_a = jnp.array(x), jnp.array(y)
+                        ric = ricci_curvature(metric, x_a, y_a)
+                        expected = (dim - 1) * (-0.25) * 2.0 * metric.energy(x_a, y_a)
+                        np.testing.assert_allclose(ric, expected, atol=atol, rtol=rtol)
+
+    def test_tensor_matches_constant_curvature_coefficients(self):
+        """R^i_jk = lambda (delta^i_k l_j - delta^i_j l_k) with l_j = g_jm y^m.
+
+        This is the sharpest statement of the index convention available: it
+        fixes which lower slot carries the flagpole, not merely the overall sign.
         """
-        Passing two parallel vectors (v2 = v1) yields a degenerate plane.
-        The guard must return 0.0 without NaN.
-        """
-        metric = Euclidean(self.plane)
-        x = jnp.array([1.0, 0.0])
+        atol, rtol = tol(atol32=1e-2, rtol32=1e-2, atol64=1e-6, rtol64=1e-6)
+        dim = 2
+        metric = ProjectivelyFlatRanders(
+            EuclideanSpace(dim=dim), a=jnp.array([0.3, 0.0])
+        )
+        for x, y in (([0.0, 0.0], [1.0, 0.3]), ([0.25, 0.1], [-0.6, 0.9])):
+            with self.subTest(x=x):
+                x_a, y_a = jnp.array(x), jnp.array(y)
+                R = curvature_tensor(metric, x_a, y_a)
+                ell = fundamental_tensor(metric, x_a, y_a) @ y_a
+                eye = jnp.eye(dim)
+                expected = -0.25 * (
+                    jnp.einsum("ik,j->ijk", eye, ell)
+                    - jnp.einsum("ij,k->ijk", eye, ell)
+                )
+                np.testing.assert_allclose(R, expected, atol=atol, rtol=rtol)
+
+    def test_metric_is_not_riemannian(self):
+        metric = ProjectivelyFlatRanders(EuclideanSpace(dim=2))
+        self.assertFalse(metric.is_riemannian)
+        self.assertEqual(metric.flag_curvature_constant, -0.25)
+
+    def test_rejects_invalid_epsilon(self):
+        with self.assertRaises(ValueError):
+            ProjectivelyFlatRanders(EuclideanSpace(dim=2), epsilon=0.5)
+
+
+class TestFlagCurvature(unittest.TestCase):
+    """Homogeneity, flagpole dependence, and the degenerate-flag guard."""
+
+    def setUp(self):
+        self.plane = EuclideanSpace(dim=2)
+        self.randers = Randers(self.plane, anisotropic_g, swirl_wind, wind_mode="raw")
+        self.x = jnp.array([0.2, -0.4])
+
+    def test_zero_homogeneous_in_both_arguments(self):
+        """Scaling the flagpole or the transverse edge must not move K."""
+        y, u = jnp.array([1.0, 0.3]), jnp.array([0.2, 1.0])
+        base = flag_curvature(self.randers, self.x, y, u)
+        atol, rtol = tol(**CURV_TOL)
+        for sy, su in ((2.0, 1.0), (1.0, 3.5), (0.5, 0.25)):
+            with self.subTest(scale=(sy, su)):
+                scaled = flag_curvature(self.randers, self.x, sy * y, su * u)
+                np.testing.assert_allclose(scaled, base, atol=atol, rtol=rtol)
+
+    def test_depends_on_the_flagpole_for_a_finsler_metric(self):
+        """The reason K takes two arguments: one plane, several values."""
+        u = jnp.array([0.0, 1.0])
+        values = [
+            float(flag_curvature(self.randers, self.x, jnp.array(y), u))
+            for y in ([1.0, 0.0], [1.0, 0.5], [1.0, -0.5])
+        ]
+        spread = max(values) - min(values)
+        self.assertGreater(spread, 1e-2, f"expected flagpole dependence, got {values}")
+
+    def test_independent_of_the_flagpole_for_a_riemannian_metric(self):
+        """And the reason sectional curvature is well defined when it is."""
+        metric = Riemannian(self.plane, anisotropic_g)
+        u = jnp.array([0.0, 1.0])
+        values = [
+            float(flag_curvature(metric, self.x, jnp.array(y), u))
+            for y in ([1.0, 0.0], [1.0, 0.5], [1.0, -0.5], [2.0, 0.0])
+        ]
+        atol, rtol = tol(**CURV_TOL)
+        np.testing.assert_allclose(values, values[0], atol=atol, rtol=rtol)
+
+    def test_degenerate_flag_returns_zero(self):
+        """Metrically parallel edges span no plane; guard, do not NaN."""
         v = jnp.array([1.0, 0.0])
-
-        K = sectional_curvature(metric, x, v, v)
-        self.assertFalse(jnp.isnan(K))
+        K = flag_curvature(Euclidean(self.plane), jnp.array([1.0, 0.0]), v, v)
+        self.assertFalse(bool(jnp.isnan(K)))
         np.testing.assert_allclose(K, 0.0)
 
-    # -----------------------------------------------------------------------
-    # 5. JAX transform compatibility
-    # -----------------------------------------------------------------------
 
-    def test_jit_compatibility(self):
-        """jit-compiled sectional_curvature must match eager evaluation."""
+class TestSectionalCurvatureDegeneration(unittest.TestCase):
+    """sectional_curvature must refuse the cases where it is not defined."""
 
-        def curved_g(x):
-            return jnp.diag(jnp.array([1.0, 1.0 + x[0] ** 2]))
+    def setUp(self):
+        self.plane = EuclideanSpace(dim=2)
+        self.x = jnp.array([1.0, 1.0])
+        self.u = jnp.array([1.0, 0.0])
+        self.v = jnp.array([0.0, 1.0])
 
-        metric = Riemannian(self.plane, curved_g)
-        x = jnp.array([0.5, 0.0])
-        v1 = jnp.array([1.0, 0.0])
-        v2 = jnp.array([0.0, 1.0])
+    def test_declared_riemannian_metrics_take_the_direct_path(self):
+        for metric in (
+            Euclidean(self.plane),
+            Riemannian(self.plane, sphere_g),
+            Randers(self.plane, anisotropic_g, swirl_wind, use_wind=False),
+        ):
+            with self.subTest(metric=type(metric).__name__):
+                self.assertTrue(metric.is_riemannian)
+                K = sectional_curvature(metric, self.x, self.u, self.v)
+                self.assertTrue(bool(jnp.isfinite(K)))
 
-        K_eager = sectional_curvature(metric, x, v1, v2)
-        K_jit = jax.jit(sectional_curvature, static_argnums=0)(metric, x, v1, v2)
-        np.testing.assert_allclose(K_eager, K_jit, atol=1e-5)
+    def test_raises_on_a_genuinely_finslerian_metric(self):
+        metric = Randers(self.plane, anisotropic_g, swirl_wind, wind_mode="raw")
+        self.assertFalse(metric.is_riemannian)
+        with self.assertRaises(eqx.EquinoxRuntimeError):
+            sectional_curvature(metric, self.x, self.u, self.v)
 
-    def test_grad_through_sectional_curvature(self):
-        """
-        Gradient of K w.r.t. position x must be finite (no NaN).
-        Validates the entire 4th-order autodiff chain is differentiable.
-        """
-        metric = Euclidean(self.plane)
-        x = jnp.array([1.0, 2.0])
-        v1 = jnp.array([1.0, 0.0])
-        v2 = jnp.array([0.0, 1.0])
+    def test_check_false_bypasses_the_verification(self):
+        """An escape hatch, and it must return the flag curvature at u."""
+        metric = Randers(self.plane, anisotropic_g, swirl_wind, wind_mode="raw")
+        K = sectional_curvature(metric, self.x, self.u, self.v, check=False)
+        expected = flag_curvature(metric, self.x, self.u, self.v)
+        np.testing.assert_allclose(K, expected)
 
-        def K_fn(x):
-            return sectional_curvature(metric, x, v1, v2)
+    def test_undeclared_riemannian_metric_passes_the_check(self):
+        """A metric that is Riemannian in fact but does not say so still works."""
 
-        g = jax.grad(K_fn)(x)
-        self.assertFalse(jnp.any(jnp.isnan(g)))
+        class QuietRiemannian(Riemannian):
+            @property
+            def is_riemannian(self) -> bool:
+                return False
 
-    def test_riemann_tensor_jit(self):
-        """riemann_curvature_tensor must compile and run under jit."""
-        metric = Euclidean(self.plane)
-        x = jnp.array([0.0, 0.0])
-        v = jnp.array([1.0, 0.0])
+        metric = QuietRiemannian(self.plane, sphere_g)
+        K = sectional_curvature(metric, jnp.array([0.3, 0.0]), self.u, self.v)
+        atol, rtol = tol(**CURV_TOL)
+        np.testing.assert_allclose(K, 1.0, atol=atol, rtol=rtol)
 
-        R = jax.jit(riemann_curvature_tensor, static_argnums=0)(metric, x, v)
+
+class TestJaxTransforms(unittest.TestCase):
+    """jit, vmap and grad through the whole 4th-order chain."""
+
+    def setUp(self):
+        self.plane = EuclideanSpace(dim=2)
+        self.metric = Riemannian(self.plane, revolution_g)
+        self.x = jnp.array([0.5, 0.0])
+        self.u = jnp.array([1.0, 0.0])
+        self.v = jnp.array([0.0, 1.0])
+
+    def test_jit_matches_eager(self):
+        for fn in (flag_curvature, sectional_curvature):
+            with self.subTest(fn=fn.__name__):
+                eager = fn(self.metric, self.x, self.u, self.v)
+                compiled = jax.jit(fn, static_argnums=0)(
+                    self.metric, self.x, self.u, self.v
+                )
+                atol, rtol = tol(**CURV_TOL)
+                np.testing.assert_allclose(eager, compiled, atol=atol, rtol=rtol)
+
+    def test_curvature_tensor_jit(self):
+        R = jax.jit(curvature_tensor, static_argnums=0)(self.metric, self.x, self.u)
         self.assertEqual(R.shape, (2, 2, 2))
-        self.assertFalse(jnp.any(jnp.isnan(R)))
+        self.assertFalse(bool(jnp.any(jnp.isnan(R))))
+
+    def test_vmap_over_positions(self):
+        xs = jnp.stack([jnp.array([xv, 0.0]) for xv in (0.0, 0.5, 1.0)])
+        Ks = jax.vmap(lambda x: flag_curvature(self.metric, x, self.u, self.v))(xs)
+        expected = [-1.0 / (1.0 + xv**2) ** 2 for xv in (0.0, 0.5, 1.0)]
+        atol, rtol = tol(**CURV_TOL)
+        np.testing.assert_allclose(Ks, expected, atol=atol, rtol=rtol)
+
+    def test_grad_is_finite(self):
+        """The chain stays differentiable, which is the point of building it so."""
+
+        def flag_at(x):
+            return flag_curvature(self.metric, x, self.u, self.v)
+
+        def ricci_at(x):
+            return ricci_curvature(self.metric, x, self.u)
+
+        for name, fn in (("flag", flag_at), ("ricci", ricci_at)):
+            with self.subTest(fn=name):
+                g = jax.grad(fn)(self.x)
+                self.assertFalse(bool(jnp.any(jnp.isnan(g))))
 
 
-class TestFlagCurvatureSample(unittest.TestCase):
-    def setUp(self):
-        self.plane = EuclideanSpace(dim=2)
-        self.key = jax.random.PRNGKey(0)
-
-    def test_euclidean_flag_curvature_is_zero(self):
-        """flag_curvature_sample returns ~0 for Euclidean metric."""
-        metric = Euclidean(self.plane)
-        x = jnp.array([1.0, 2.0])
-
-        K = flag_curvature_sample(metric, x, self.key)
-        self.assertFalse(jnp.isnan(K))
-        np.testing.assert_allclose(K, 0.0, atol=1e-5)
-
-    def test_flag_curvature_sample_is_non_zero(self):
-        """
-        flag_curvature_sample returns a finite non-NaN value for a curved metric.
-        """
-
-        def curved_g(x):
-            return jnp.diag(jnp.array([1.0, 1.0 + x[0] ** 2]))
-
-        metric = Riemannian(self.plane, curved_g)
-        x = jnp.array([0.5, 0.0])
-
-        K = flag_curvature_sample(metric, x, self.key)
-        self.assertFalse(jnp.isnan(K))
-        self.assertTrue(jnp.isfinite(K))
-        self.assertGreater(abs(float(K)), 1e-4)
-
-    def test_different_keys_give_same_curvature_on_constant_metric(self):
-        """
-        For a space of constant curvature (flat space K=0), all tangent planes
-        give the same flag curvature regardless of the sampled key.
-        """
-        metric = Euclidean(self.plane)
-        x = jnp.array([1.0, 0.0])
-
-        key1 = jax.random.PRNGKey(1)
-        key2 = jax.random.PRNGKey(99)
-        K1 = flag_curvature_sample(metric, x, key1)
-        K2 = flag_curvature_sample(metric, x, key2)
-
-        np.testing.assert_allclose(K1, K2, atol=1e-5)
-
-    def test_key_parameter_is_explicit(self):
-        """
-        Two calls with the same key must return the same value (determinism).
-        This tests the JAX PRNG convention.
-        """
-        metric = Euclidean(self.plane)
-        x = jnp.array([0.5, 0.5])
-
-        K1 = flag_curvature_sample(metric, x, self.key)
-        K2 = flag_curvature_sample(metric, x, self.key)
-        np.testing.assert_allclose(K1, K2)
-
-    def test_metric_gram_schmidt_orthogonality(self):
-        """
-        The internally generated (t1, t2) pair must be metric-orthogonal.
-        We test indirectly: for an anisotropic metric, Euclidean Gram-Schmidt
-        would yield t2 that is NOT metric-orthogonal to t1, causing the
-        denominator g_11*g_22 - g_12^2 to be significantly < 1.
-        With correct metric Gram-Schmidt, the denominator should be close to 1.
-        """
-
-        def anisotropic_metric(x):
-            return jnp.diag(jnp.array([1.0, 100.0]))
-
-        metric = Riemannian(self.plane, anisotropic_metric)
-        x = jnp.array([1.0, 1.0])
-
-        # flag_curvature_sample must not NaN even for anisotropic metrics
-        K = flag_curvature_sample(metric, x, self.key)
-        self.assertFalse(jnp.isnan(K))
-        self.assertTrue(jnp.isfinite(K))
-
-
-class TestRandersNonZeroCurvature(unittest.TestCase):
-    """
-    Test that curvature is well-defined and finite for Randers metrics.
-    Randers metrics have velocity-dependent Christoffel symbols and thus
-    non-trivial flag curvature.
-    """
+class TestDeprecatedNames(unittest.TestCase):
+    """The 1.0 surface keeps working, loudly, until 2.0."""
 
     def setUp(self):
         self.plane = EuclideanSpace(dim=2)
 
-    def test_randers_curvature_finite(self):
-        """Flag curvature must be finite for a well-conditioned Randers metric."""
-        h_net = lambda x: jnp.eye(2)
-        w_net = lambda x: jnp.array([0.3, 0.0])
-        metric = Randers(self.plane, h_net, w_net)
+    def test_riemann_curvature_tensor_warns_and_delegates(self):
+        metric = Riemannian(self.plane, revolution_g)
+        x, y = jnp.array([0.5, 0.0]), jnp.array([1.0, 0.0])
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            legacy = riemann_curvature_tensor(metric, x, y)
+        self.assertTrue(any(w.category is DeprecationWarning for w in caught))
+        np.testing.assert_allclose(legacy, curvature_tensor(metric, x, y))
 
-        x = jnp.array([0.0, 0.0])
-        v1 = jnp.array([1.0, 0.0])
-        v2 = jnp.array([0.0, 1.0])
-
-        K = sectional_curvature(metric, x, v1, v2)
-        self.assertFalse(jnp.isnan(K))
-        self.assertTrue(jnp.isfinite(K))
-
-    def test_randers_curvature_differs_from_riemannian(self):
-        """
-        Randers flag curvature with non-constant wind must differ from
-        the background Riemannian curvature, confirming that the
-        velocity-dependent Gamma terms contribute.
-        """
-        h_net = lambda x: jnp.eye(2)
-        # Position-dependent wind creates non-trivial curvature
-        w_net = lambda x: jnp.array([0.3 * x[1], 0.0])
-
-        randers_metric = Randers(self.plane, h_net, w_net)
-        riemannian_metric = Riemannian(self.plane, h_net)
-
-        x = jnp.array([1.0, 1.0])
-        v1 = jnp.array([1.0, 0.0])
-        v2 = jnp.array([0.0, 1.0])
-
-        K_randers = sectional_curvature(randers_metric, x, v1, v2)
-        K_riemannian = sectional_curvature(riemannian_metric, x, v1, v2)
-
-        # They should differ because Randers adds velocity-dependent curvature
-        # (for a flat background the Riemannian sectional curvature vanishes).
-        self.assertLess(abs(float(K_riemannian)), 1e-4)
-        self.assertFalse(jnp.isnan(K_randers))
-        # K_randers != 0 for position-dependent wind
-        self.assertGreater(abs(float(K_randers)), 1e-6)
+    def test_flag_curvature_sample_warns_and_is_finite(self):
+        metric = Riemannian(self.plane, revolution_g)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            K = flag_curvature_sample(
+                metric, jnp.array([0.5, 0.0]), jax.random.PRNGKey(0)
+            )
+        self.assertTrue(any(w.category is DeprecationWarning for w in caught))
+        self.assertTrue(bool(jnp.isfinite(K)))
 
 
 if __name__ == "__main__":
