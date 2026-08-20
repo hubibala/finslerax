@@ -16,6 +16,7 @@ from .style import (
     plotly_surface,
     style_axes3d,
     tangent_arrows,
+    use_finslerax_style,
     use_ham_style,
 )
 from .vis import (
@@ -52,5 +53,6 @@ __all__ = [
     "setup_3d_plot",
     "style_axes3d",
     "tangent_arrows",
+    "use_finslerax_style",
     "use_ham_style",
 ]

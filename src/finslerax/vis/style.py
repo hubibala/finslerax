@@ -3,8 +3,8 @@
 The goal is a clean, modern, publication-grade look with a restrained palette.
 Two backends share that palette so figures stay cohesive:
 
-* **Matplotlib** (``use_ham_style``, ``axes3d``, ``tangent_arrows`` …) for the
-  static 2-D analytical plots (convergence curves, indicatrices, image strips).
+* **Matplotlib** (``use_finslerax_style``, ``axes3d``, ``tangent_arrows`` …) for
+  the static 2-D analytical plots (convergence curves, indicatrices, image strips).
 * **Plotly** (``plotly_layout``, ``plotly_sphere``, ``plotly_cones`` …) for the
   interactive 3-D scenes, which the reader can rotate to inspect a geodesic or a
   field from any angle. Vector fields use magnitude-scaled 3-D cones, so a field
@@ -13,6 +13,8 @@ Two backends share that palette so figures stay cohesive:
 """
 
 from __future__ import annotations
+
+import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,6 +35,7 @@ __all__ = [
     "plotly_surface",
     "style_axes3d",
     "tangent_arrows",
+    "use_finslerax_style",
     "use_ham_style",
 ]
 
@@ -53,7 +56,7 @@ PALETTE = {
 CYCLE = [PALETTE[k] for k in ("primary", "accent", "teal", "violet", "rose", "green")]
 
 
-def use_ham_style() -> None:
+def use_finslerax_style() -> None:
     """Apply the finslerax Matplotlib theme (idempotent)."""
     plt.rcParams.update(
         {
@@ -86,6 +89,17 @@ def use_ham_style() -> None:
             "image.cmap": "magma",
         }
     )
+
+
+def use_ham_style() -> None:
+    """Deprecated alias for :func:`use_finslerax_style`."""
+    warnings.warn(
+        "use_ham_style() is deprecated and will be removed in a future release; "
+        "use use_finslerax_style() instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    use_finslerax_style()
 
 
 def axes3d(figsize=(7, 6), elev=22, azim=-58, frame=False):
